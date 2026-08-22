@@ -1,0 +1,61 @@
+---
+description: Mandatory rules for AI coding agents working in this repository
+globs: []
+alwaysApply: true
+---
+
+# AI Coding Agent Rules
+
+**These rules are mandatory for all AI agents working in this repository.**
+
+## Before Making Changes
+
+1. **Read existing code first.** Understand the current patterns before modifying anything.
+2. **Search the repository** before creating a new utility, component, or helper. It may already exist.
+3. **Check `docs/`** for architectural guidance relevant to your task.
+
+## While Making Changes
+
+4. **Follow established patterns.** Do not invent new architectural patterns.
+5. **Do not introduce new libraries** without explicit justification and approval.
+6. **Do not create generic abstractions prematurely.** Solve the specific problem first.
+7. **Do not create files over ~200 lines.** Split into focused modules.
+8. **Do not create React components over ~150 lines.** Extract sub-components.
+9. **Preserve type safety.** Never introduce `any`, `as any`, or `@ts-ignore`.
+10. **Keep server/client boundaries intentional.** Do not accidentally make a Server Component into a Client Component.
+11. **Prefer small, coherent changes.** One logical change per commit.
+12. **Reuse existing components and utilities.** Check `src/components/` and `src/lib/` first.
+
+## After Making Changes
+
+13. **Run type checking:** `npx tsc --noEmit`
+14. **Run linting:** `npm run lint`
+15. **Run relevant tests:** `npm test` or specific test files.
+16. **Update tests** when business behavior changes.
+
+## Forbidden Actions
+
+- ❌ Silently changing the architecture or directory structure.
+- ❌ Replacing existing libraries without documented justification.
+- ❌ Deleting working behavior to simplify a task.
+- ❌ Adding business logic to React components.
+- ❌ Adding `'use client'` to layouts or high-level components.
+- ❌ Importing Drizzle/ORM in React components.
+- ❌ Creating duplicate shadcn/ui components.
+- ❌ Modifying `src/components/ui/` with feature-specific logic.
+
+## If Architecture Change Is Needed
+
+- **Stop. Explain why.** Describe the problem, the proposed change, and the impact.
+- Do NOT proceed with a broad refactor without explicit approval.
+- Prefer incremental changes over big-bang rewrites.
+
+## Key Architectural Boundaries
+
+- `src/domain/` — Pure TypeScript. No framework imports.
+- `src/application/` — Imports domain only. Defines ports.
+- `src/infrastructure/` — Implements ports. No React/Next.js.
+- `src/features/` — Presentation layer. Consumes use cases.
+- Business logic lives in `src/domain/services/` or `src/application/use-cases/`. NEVER in components.
+
+See `AGENTS.md` for the complete canonical rules.

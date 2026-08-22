@@ -1,0 +1,67 @@
+---
+description: React conventions - components, state, effects, forms, composition
+globs:
+  - "src/**/*.tsx"
+  - "src/features/**/hooks/**"
+alwaysApply: false
+---
+
+# React Rules
+
+## Components
+
+- Function declarations only: `function ComponentName()`. No arrow functions.
+- Named exports. No `default export` for components.
+- No `React.FC`.
+- Props interface: `ComponentNameProps`.
+- Max ~150 lines per component. Extract sub-components when growing.
+
+## State
+
+- Avoid `useState` for derived values. Calculate them.
+- Avoid `useEffect` for state sync. Derive instead.
+- Local state only for UI concerns (open/closed, selected tab, form input).
+
+```typescript
+// ❌ Bad
+const [filtered, setFiltered] = useState([]);
+useEffect(() => { setFiltered(items.filter(...)) }, [items]);
+
+// ✅ Good
+const filtered = items.filter(...);
+```
+
+## Effects
+
+`useEffect` is for external system synchronization ONLY:
+- Browser API subscriptions (resize, media queries)
+- Third-party widget sync
+- DOM cleanup
+
+NOT for: derived state, data fetching, state synchronization.
+
+## Memoization
+
+- Do NOT use `useMemo`/`useCallback` by default.
+- Only when there is a measured performance problem.
+
+## Forms
+
+- React Hook Form + `@hookform/resolvers/zod`.
+- Zod schema defines validation.
+- Submit calls Server Action.
+- Reset on success. Preserve on validation error.
+
+## Hooks
+
+- Custom hooks: `use` prefix, camelCase.
+- Location: `src/features/[feature]/hooks/` or `src/lib/hooks/`.
+- No business logic in hooks.
+
+## Composition
+
+- Pages compose feature components.
+- Feature components compose shared/UI components.
+- Avoid prop drilling. Use composition or context sparingly.
+
+See `docs/coding-conventions.md` for full details.

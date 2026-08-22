@@ -1,0 +1,63 @@
+---
+description: Next.js App Router rules - Server/Client Components, Server Actions, data fetching, caching
+globs:
+  - "src/app/**"
+  - "src/features/**"
+alwaysApply: false
+---
+
+# Next.js Rules
+
+## Server Components (Default)
+
+- All components are Server Components unless they need interactivity.
+- Fetch data directly in Server Components via application services.
+- Pass serializable props to Client Components.
+- No `useState`, `useEffect`, event handlers, or browser APIs in Server Components.
+
+## Client Components
+
+- Add `'use client'` ONLY when the component uses: `useState`, `useEffect`, `useRef`, event handlers, browser APIs, or shadcn/ui interactive primitives.
+- Keep Client Components **small and leaf-level**.
+- NEVER add `'use client'` to layouts or high-level page components.
+- Do NOT make a parent Client Component just because a child needs interactivity — push the boundary down.
+
+## Server Actions
+
+- Use for all mutations (create, update, delete).
+- Define in `src/features/[feature]/actions/`.
+- Mark with `'use server'`.
+- Validate input with Zod at the action boundary.
+- Delegate to Application use cases. Do NOT put business logic in actions.
+- Return `Result<T, E>`.
+- Call `revalidatePath()` or `revalidateTag()` after success.
+
+## Route Handlers
+
+- Use ONLY for: webhooks, external API callbacks, file uploads, SSE.
+- Do NOT use for standard CRUD — use Server Actions.
+
+## Data Fetching
+
+- Server Components fetch data with `async/await`. No `useEffect` fetching.
+- Use React `cache()` for request-level deduplication.
+- Use `revalidateTag()` for cache invalidation after mutations.
+
+## File Conventions
+
+- `layout.tsx` — Shared UI. Keep thin. Never `'use client'`.
+- `page.tsx` — Route entry. Compose features. Fetch data.
+- `loading.tsx` — Suspense fallback (skeleton/spinner).
+- `error.tsx` — Error boundary. Must be Client Component. Log errors.
+- `not-found.tsx` — 404 page. Trigger with `notFound()`.
+
+## Caching
+
+| Strategy | Use |
+|----------|-----|
+| `cache()` (React) | Deduplicate within a request |
+| `revalidatePath()` | Invalidate specific route |
+| `revalidateTag()` | Invalidate by tag |
+| `export const revalidate = N` | Time-based revalidation |
+
+See `docs/coding-conventions.md` for full details.

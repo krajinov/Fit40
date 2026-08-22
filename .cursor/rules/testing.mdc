@@ -1,0 +1,63 @@
+---
+description: Testing rules - unit, integration, e2e, Vitest, Playwright
+globs:
+  - "tests/**"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+alwaysApply: false
+---
+
+# Testing Rules
+
+## Priority
+
+1. **Unit tests** for domain services, value objects, and use cases (highest priority).
+2. **Integration tests** for repositories against a test database.
+3. **E2E tests** only for critical user flows (minimal).
+
+## Framework
+
+- Unit/Integration: **Vitest**
+- E2E: **Playwright**
+
+## Unit Tests
+
+- Domain services: pure functions, no mocks needed.
+- Value objects: test invariant enforcement (valid/invalid construction).
+- Use cases: mock repository ports, test orchestration logic.
+- Test behavior, not implementation.
+- Deterministic: fixed dates, no randomness.
+
+## Integration Tests
+
+- Use a real test database (not mocked Drizzle).
+- Test repository round-trip: save → load → verify domain object.
+- Test database constraints.
+- Isolate tests: clean state per test file.
+
+## E2E Tests
+
+- Only critical flows: registration, login, start/complete workout, program enrollment.
+- Use `data-testid` selectors.
+- Test user journeys, not implementation details.
+
+## What NOT to Test
+
+- React rendering details.
+- Third-party library behavior.
+- Trivial getters/setters.
+- Framework internals.
+
+## Naming
+
+- Test files: `*.test.ts` (unit/integration), `*.spec.ts` (e2e).
+- Test names: `[verb] [expected outcome] when [condition]`.
+
+## Rules
+
+- Every domain service must have unit tests.
+- Every use case must have unit tests.
+- Update tests when business behavior changes.
+- No skipping tests without a tracked issue.
+
+See `docs/testing.md` for full details.

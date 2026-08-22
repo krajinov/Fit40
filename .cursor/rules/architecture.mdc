@@ -1,0 +1,54 @@
+---
+description: Fit40 architecture rules - layered architecture, dependency direction, project structure
+globs:
+  - "src/**"
+alwaysApply: true
+---
+
+# Architecture Rules
+
+## Layered Architecture
+
+```
+Presentation (src/app/, src/features/) → Application (src/application/) → Domain (src/domain/)
+Infrastructure (src/infrastructure/) implements Application ports
+```
+
+**Dependencies point inward only.** Domain depends on nothing.
+
+## Critical Boundaries
+
+- `src/domain/` — Pure TypeScript. NO imports from React, Next.js, Drizzle, HTTP, or any framework.
+- `src/application/` — May import `src/domain/` only. Defines port interfaces.
+- `src/infrastructure/` — Implements ports. May import domain + application types. NO React/Next.js.
+- `src/features/` and `src/app/` — Presentation layer. Consume application use cases.
+
+## Business Logic Location
+
+- Domain services: `src/domain/services/` (pure logic: progression, volume, exercise selection)
+- Use cases: `src/application/use-cases/` (orchestration: complete workout, enroll in program)
+- NEVER in React components, Server Actions, Route Handlers, or DB queries.
+
+## Project Structure
+
+```
+src/
+├── app/              # Next.js routes, layouts, pages
+├── domain/           # Pure domain (entities, value-objects, services, types)
+├── application/      # Use cases, ports, DTOs
+├── infrastructure/   # Database, auth, AI integrations
+├── features/         # Feature UI (components, actions, hooks, schemas)
+├── components/       # Shared UI (ui/ = shadcn, shared/ = composites)
+├── lib/              # Utilities, Result type, errors
+└── types/            # Shared types
+```
+
+## Key Rules
+
+1. Server Components by default. Client Components only for interactivity, kept small and leaf-level.
+2. Server Actions validate with Zod, delegate to use cases, return Result.
+3. Repositories map DB rows ↔ Domain objects. Components never see DB types.
+4. No ORM imports outside `src/infrastructure/database/`.
+5. Feature components in `src/features/[name]/components/`. Shared in `src/components/`.
+
+See `AGENTS.md` and `docs/architecture.md` for full details.

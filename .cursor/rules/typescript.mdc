@@ -1,0 +1,52 @@
+---
+description: TypeScript strict mode rules - no any, exhaustive handling, branded types, type safety
+globs:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+alwaysApply: true
+---
+
+# TypeScript Rules
+
+## Strict Mode
+
+- `strict: true` in `tsconfig.json`. No exceptions.
+- No `any`. Use `unknown` when type is genuinely unknown.
+- No `as any`. No `@ts-ignore` without documented justification.
+
+## Type Safety
+
+- Exhaustive switch/if for discriminated unions. Use `never` check in default.
+- No `as` casts unless absolutely necessary with a comment.
+- No `!` non-null assertions. Use proper null checks or optional chaining.
+- Explicit return types on all public functions in `src/domain/` and `src/application/`.
+
+## Type Patterns
+
+- Use `import type` for type-only imports.
+- Branded types for IDs: `type UserId = string & { readonly __brand: 'UserId' }`.
+- Discriminated unions over optional fields for variant types.
+- Make invalid states unrepresentable via factory functions.
+- Const objects + union types instead of `enum` keyword.
+
+## Enums
+
+```typescript
+// ✅ Correct
+const EquipmentType = {
+  Barbell: 'barbell',
+  Dumbbell: 'dumbbell',
+} as const;
+type EquipmentType = (typeof EquipmentType)[keyof typeof EquipmentType];
+
+// ❌ Wrong
+enum EquipmentType { Barbell = 'barbell' }
+```
+
+## Imports
+
+- Absolute imports via `@/` alias.
+- Group: external → internal → relative.
+- `import type` for types.
+
+See `docs/coding-conventions.md` for full details.

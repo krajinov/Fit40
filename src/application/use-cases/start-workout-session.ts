@@ -80,6 +80,7 @@ export class StartWorkoutSessionUseCase {
         exerciseId: exercise.exerciseId,
         order: exercise.order,
         prescription: exercise.prescription,
+        restSeconds: exercise.restSeconds,
       }),
     );
 

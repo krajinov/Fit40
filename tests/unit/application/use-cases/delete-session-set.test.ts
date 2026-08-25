@@ -12,7 +12,7 @@ function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error()
 
 async function sessionWithSet() {
   const repo = new InMemoryWorkoutSessionRepository();
-  const sr = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep() }] });
+  const sr = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
   await repo.save(sr.data);
   const loaded = await repo.findById(sr.data.id);

@@ -48,6 +48,7 @@ export interface ExerciseLog {
   readonly exerciseId: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
+  readonly restSeconds: number;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -70,6 +71,7 @@ export interface CreateExerciseLogInput {
   readonly exerciseId: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
+  readonly restSeconds: number;
 }
 
 export interface CreateWorkoutSessionInput {
@@ -242,10 +244,21 @@ export function createWorkoutSession(
     });
   }
 
+  for (const log of input.exerciseLogs) {
+    if (log.restSeconds < 0) {
+      return err({
+        code: 'INVALID_WORKOUT_SESSION',
+        message: 'restSeconds cannot be negative',
+        field: 'exerciseLogs',
+      });
+    }
+  }
+
   const exerciseLogs: ReadonlyArray<ExerciseLog> = input.exerciseLogs.map((log) => ({
     exerciseId: log.exerciseId,
     order: log.order,
     prescription: log.prescription,
+    restSeconds: log.restSeconds,
     sets: [],
   }));
 

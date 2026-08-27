@@ -226,54 +226,83 @@ describe('CompleteWorkoutUseCase', () => {
 
 ### Test Database
 
-- Use a **separate PostgreSQL database** for tests (not production, not development).
-- Configure via `DATABASE_URL_TEST` environment variable.
-- **Reset the database** between test files (or use transactions with rollback).
-- Run migrations before integration tests.
+Integration tests run against a dedicated PostgreSQL database, driven from
+`tests/integration/database/setup.ts`. The suite is deliberately destructive — every test
+drops and recreates the `public` schema — so it must never touch a real database:
+
+- The connection string comes **only** from `TEST_DATABASE_URL`. There is **no fallback** to
+  `DATABASE_URL`, a localhost default, or an in-memory store.
+- `assertSafeTestDatabaseUrl` (in `tests/integration/database/test-database-url.ts`) runs
+  before any client is created and rejects the run if the database name is not suffixed with
+  `_test`, if the URL is malformed, or if it equals `DATABASE_URL`. The guard is pure, so it
+  is covered by unit tests without a database.
+- Test files run sequentially (`fileParallelism: false`) against one shared database; each
+  test resets the data it relies on.
+
+Set it up once per machine:
+
+```bash
+createdb fit40_kimi_test          # or: CREATE DATABASE fit40_kimi_test;
+export TEST_DATABASE_URL=postgres://user:password@localhost:5432/fit40_kimi_test
+```
 
 ### Repository Tests
 
+Use the shared harness (`tests/integration/database/setup.ts`) plus the seeded catalog
+fixtures (`tests/integration/database/fixtures.ts`). Each test reseeds the database so it
+starts from a known state:
+
 ```typescript
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/workout-session-repository';
-import { db } from '@/infrastructure/database/client';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
+import { seedCatalog } from '@/infrastructure/database/seed/seed-catalog';
+import { loadOccurrence, startSession } from '../fixtures';
+import { resetDatabase, setupTestDb, testDb } from '../setup';
 
 describe('DrizzleWorkoutSessionRepository', () => {
-  const repo = new DrizzleWorkoutSessionRepository();
-
-  beforeAll(async () => {
-    // Run migrations or seed test data
+  beforeEach(async () => {
+    await setupTestDb();
+    await resetDatabase();
+    await seedCatalog(testDb);
   });
 
-  afterAll(async () => {
-    // Clean up
-  });
+  it('saves and retrieves the full session aggregate', async () => {
+    const occurrence = await loadOccurrence();
+    const session = startSession('session-001', occurrence);
+    const repository = new DrizzleWorkoutSessionRepository(testDb);
 
-  it('saves and retrieves a workout session', async () => {
-    const session = createMockWorkoutSession();
-    await repo.save(session);
+    expect((await repository.save(session)).ok).toBe(true);
 
-    const found = await repo.findById(session.id);
-
-    expect(found).not.toBeNull();
-    expect(found?.userId).toBe(session.userId);
-    expect(found?.exerciseLogs).toHaveLength(session.exerciseLogs.length);
-  });
-
-  it('returns null for non-existent session', async () => {
-    const found = await repo.findById(nonExistentId);
-    expect(found).toBeNull();
+    const loaded = await repository.findById(session.id);
+    expect(loaded?.exerciseLogs).toHaveLength(occurrence.exercises.length);
   });
 });
 ```
 
+Notes on the suite layout:
+
+* **Repository round-trips** live in `tests/integration/database/repositories/` and assert on
+  the domain objects that come back, not on row shapes.
+* **Use cases against the real database** live in `tests/integration/database/use-cases/`.
+  They exist to cover paths the unit suite cannot, such as the repository translating a
+  PostgreSQL unique violation into the port's conflict result.
+* **Constraint and referential-integrity tests** live in `tests/integration/database/schema/`
+  and insert raw rows, because the repositories already refuse those shapes — the goal is to
+  prove the database does too.
+
 ### Rules for Integration Tests
 
 1. **Use a real database.** Do not mock Drizzle.
-2. **Isolate tests.** Each test file gets a clean database state.
+2. **Isolate tests.** Each test reseeds the database rather than assuming prior state.
 3. **Test the mapping.** Verify that domain objects survive the round-trip (save → load).
-4. **Test constraints.** Verify that database constraints catch invalid data.
-5. **Keep integration tests focused.** They verify the DB layer works, not business logic (that's unit tests).
+4. **Test constraints.** Verify that database constraints catch invalid data, using raw
+   inserts that bypass the repositories.
+5. **Assert on typed results, not driver errors.** A conflict must be asserted as
+   `Result.err` / a use-case error code (`SESSION_ALREADY_EXISTS`), never as a `PostgresError`
+   or SQLSTATE — the application layer is not allowed to see those.
+6. **Keep integration tests focused.** They verify the DB layer works, not business logic
+   (that's unit tests).
 
 ---
 
@@ -403,21 +432,19 @@ export function createMockWorkoutSession(overrides?: Partial<WorkoutSession>): W
 ## Running Tests
 
 ```bash
-# Unit tests
-npm run test:unit
+# Unit tests (no database required)
+pnpm test
 
-# Integration tests (requires test database)
-npm run test:integration
+# Integration tests (requires TEST_DATABASE_URL pointing at a *_test database)
+pnpm test:integration
 
-# E2E tests (requires running app)
-npm run test:e2e
-
-# All tests
-npm run test
-
-# Coverage report
-npm run test:coverage
+# Type checking and linting
+pnpm typecheck
+pnpm lint
 ```
+
+`pnpm test:integration` fails fast if `TEST_DATABASE_URL` is missing or does not name a
+database suffixed with `_test`, so it cannot accidentally drop the development database.
 
 ---
 

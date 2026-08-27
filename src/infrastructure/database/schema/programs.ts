@@ -1,5 +1,16 @@
-import { check, integer, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+
+import { exercises } from './exercises';
 
 export const trainingPrograms = pgTable(
   'training_programs',
@@ -38,6 +49,8 @@ export const workouts = pgTable(
   },
   (table) => [
     check('chk_workouts_estimated_duration', sql`${table.estimatedDurationMinutes} > 0`),
+    // FK column + "find workouts by program" lookups.
+    index('workouts_program_id_idx').on(table.programId),
   ],
 );
 
@@ -59,8 +72,22 @@ export const workoutExercises = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.workoutId, table.exerciseOrder], name: 'workout_exercises_pkey' }),
+    // Exercise templates reference catalog rows that must not disappear underneath them.
+    foreignKey({
+      name: 'workout_exercises_exercise_id_fk',
+      columns: [table.exerciseId],
+      foreignColumns: [exercises.id],
+    }).onDelete('restrict'),
+    index('workout_exercises_exercise_id_idx').on(table.exerciseId),
     check('chk_workout_exercises_sets', sql`${table.sets} > 0`),
     check('chk_workout_exercises_exercise_order', sql`${table.exerciseOrder} > 0`),
+    check('chk_workout_exercises_rest_seconds', sql`${table.restSeconds} >= 0`),
+    check('chk_workout_exercises_min_reps', sql`${table.minReps} IS NULL OR ${table.minReps} > 0`),
+    check('chk_workout_exercises_max_reps', sql`${table.maxReps} IS NULL OR ${table.maxReps} > 0`),
+    check(
+      'chk_workout_exercises_duration',
+      sql`${table.durationSeconds} IS NULL OR ${table.durationSeconds} > 0`,
+    ),
     check(
       'chk_workout_exercises_prescription',
       sql`
@@ -79,7 +106,10 @@ export const workoutExercises = pgTable(
         )
       `,
     ),
-    check('chk_workout_exercises_reps_range', sql`${table.maxReps} >= ${table.minReps}`),
+    check(
+      'chk_workout_exercises_reps_range',
+      sql`${table.minReps} IS NULL OR ${table.maxReps} IS NULL OR ${table.maxReps} >= ${table.minReps}`,
+    ),
   ],
 );
 
@@ -113,6 +143,14 @@ export const scheduledWorkouts = pgTable(
   (table) => [
     check('chk_scheduled_workouts_order', sql`${table.orderInWeek} > 0`),
     check('chk_scheduled_workouts_week_number', sql`${table.weekNumber} > 0`),
+    // Schedule entries must point at a week that belongs to the same program.
+    foreignKey({
+      name: 'scheduled_workouts_program_week_fk',
+      columns: [table.programId, table.weekNumber],
+      foreignColumns: [programWeeks.programId, programWeeks.weekNumber],
+    }).onDelete('cascade'),
+    // FK column: deleting a workout must find its scheduled occurrences.
+    index('scheduled_workouts_workout_id_idx').on(table.workoutId),
     uniqueIndex('scheduled_workouts_program_week_order_idx').on(
       table.programId,
       table.weekNumber,

@@ -13,9 +13,13 @@
  * domain or application code.
  */
 
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type {
+  SaveWorkoutSessionResult,
+  WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import { err, ok } from '@/lib/result';
 
 export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepository {
   private readonly sessionsById = new Map<string, WorkoutSession>();
@@ -34,8 +38,24 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return null;
   }
 
-  async save(session: WorkoutSession): Promise<void> {
+  async save(session: WorkoutSession): Promise<SaveWorkoutSessionResult> {
+    // Mirror the unique constraint the Drizzle repository relies on: one session
+    // per scheduled workout occurrence.
+    const owner = [...this.sessionsById.values()].find(
+      (existing) =>
+        existing.scheduledWorkoutId === session.scheduledWorkoutId && existing.id !== session.id,
+    );
+
+    if (owner !== undefined) {
+      return err({
+        reason: 'scheduled-workout-conflict',
+        scheduledWorkoutId: session.scheduledWorkoutId,
+      });
+    }
+
     this.sessionsById.set(session.id, structuredClone(session));
+
+    return ok(undefined);
   }
 
   async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {

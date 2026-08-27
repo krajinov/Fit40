@@ -108,4 +108,45 @@ describe('InMemoryWorkoutSessionRepository', () => {
     expect(await repo.listCompleted()).toHaveLength(0);
     expect(await repo.findByScheduledWorkoutId(sid('x'))).toBeNull();
   });
+
+  it('reports a conflict when a different session claims the same scheduled workout', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(createTestSession({ id: 's-a', swId: 'sw-shared' }));
+
+    const result = await repo.save(createTestSession({ id: 's-b', swId: 'sw-shared' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toEqual({
+      reason: 'scheduled-workout-conflict',
+      scheduledWorkoutId: 'sw-shared',
+    });
+    expect(await repo.findById(sessionId('s-b'))).toBeNull();
+  });
+
+  it('allows re-saving the session that already owns its scheduled workout', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const session = createTestSession({ id: 's-own', swId: 'sw-own' });
+    expect((await repo.save(session)).ok).toBe(true);
+
+    const loaded = await repo.findById(session.id);
+    if (!loaded) throw Error();
+    const logged = logSessionSet(loaded, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    if (!logged.ok) throw Error();
+
+    expect((await repo.save(logged.data)).ok).toBe(true);
+    expect((await repo.findById(session.id))?.exerciseLogs[0]?.sets).toHaveLength(1);
+  });
 });
+
+function sessionId(value: string) {
+  const r = createWorkoutSessionId(value);
+  if (!r.ok) throw Error();
+  return r.data;
+}

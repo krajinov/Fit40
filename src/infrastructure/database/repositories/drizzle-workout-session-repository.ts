@@ -1,6 +1,10 @@
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type {
+  SaveWorkoutSessionResult,
+  WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import { err, ok } from '@/lib/result';
 
 import { eq, inArray, isNotNull } from 'drizzle-orm';
 
@@ -9,15 +13,11 @@ import { exerciseLogs, setLogs, workoutSessions } from '../schema';
 
 import type { DrizzleDatabase } from './types';
 
-export class WorkoutSessionConflictError extends Error {
-  constructor(
-    message: string,
-    public readonly scheduledWorkoutId: string,
-  ) {
-    super(message);
-    this.name = 'WorkoutSessionConflictError';
-  }
-}
+/** Unique constraint backing "at most one session per scheduled workout". */
+const SCHEDULED_WORKOUT_UNIQUE_CONSTRAINT = 'workout_sessions_scheduled_workout_id';
+
+/** PostgreSQL error code for unique_violation. */
+const UNIQUE_VIOLATION = '23505';
 
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: DrizzleDatabase) {}
@@ -44,7 +44,7 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return this.loadSession(row);
   }
 
-  async save(session: WorkoutSession): Promise<void> {
+  async save(session: WorkoutSession): Promise<SaveWorkoutSessionResult> {
     try {
       await this.db.transaction(async (tx) => {
         const sessionValues = {
@@ -82,15 +82,20 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
         }
       });
     } catch (error) {
-      if (isUniqueViolation(error, 'scheduled_workout_id')) {
-        throw new WorkoutSessionConflictError(
-          `A session already exists for scheduled workout "${session.scheduledWorkoutId}"`,
-          session.scheduledWorkoutId,
-        );
+      // Another session claimed this scheduled workout occurrence first. The
+      // transaction has already rolled back, so translate the unique violation
+      // into the port's persistence-neutral conflict instead of leaking Postgres.
+      if (isScheduledWorkoutConflict(error)) {
+        return err({
+          reason: 'scheduled-workout-conflict',
+          scheduledWorkoutId: session.scheduledWorkoutId,
+        });
       }
 
       throw error;
     }
+
+    return ok(undefined);
   }
 
   async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
@@ -151,20 +156,38 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
   }
 }
 
-interface PostgresError {
-  readonly code: string;
-  readonly constraint_name?: string;
+/**
+ * Structural shape of the errors postgres.js surfaces for constraint violations.
+ * The cast in `isScheduledWorkoutConflict` is the minimal way to read those
+ * fields off an `unknown` catch value; the package does not export the error
+ * class as a type-only import.
+ */
+interface PostgresConstraintViolation {
+  readonly code?: unknown;
+  readonly constraint_name?: unknown;
 }
 
-function isUniqueViolation(error: unknown, constraint: string): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-
-  const candidate = error as PostgresError;
+/**
+ * True when PostgreSQL rejected the write because another session already owns
+ * this scheduled workout (SQLSTATE 23505 on the sessions unique constraint).
+ *
+ * Drizzle wraps driver errors in a "Failed query" error and keeps the original
+ * PostgresError in `cause`, so both levels are inspected.
+ */
+function isScheduledWorkoutConflict(error: unknown): boolean {
   return (
-    candidate.code === '23505' &&
-    (candidate.constraint_name === constraint ||
-      (candidate.constraint_name !== undefined && candidate.constraint_name.includes(constraint)))
+    isScheduledWorkoutViolation(error) ||
+    (error instanceof Error && isScheduledWorkoutViolation(error.cause))
+  );
+}
+
+function isScheduledWorkoutViolation(candidate: unknown): boolean {
+  const { code, constraint_name: constraintName } =
+    (candidate ?? {}) as PostgresConstraintViolation;
+
+  return (
+    code === UNIQUE_VIOLATION &&
+    typeof constraintName === 'string' &&
+    constraintName.startsWith(SCHEDULED_WORKOUT_UNIQUE_CONSTRAINT)
   );
 }

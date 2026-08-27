@@ -110,4 +110,34 @@ describe('StartWorkoutSessionUseCase', () => {
     if (second.ok) return;
     expect(second.error.code).toBe('SESSION_ALREADY_EXISTS');
   });
+
+  it('returns SESSION_ALREADY_EXISTS when a concurrent start wins the unique constraint', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo);
+
+    const first = await useCase.execute({
+      programSlug: 'test-program',
+      weekNumber: 1,
+      workoutOrder: 1,
+    });
+    expect(first.ok).toBe(true);
+
+    // Two overlapping requests can both pass the existence pre-check before the
+    // loser's insert is rejected by the one-session-per-occurrence constraint.
+    vi.spyOn(sessionRepo, 'findByScheduledWorkoutId').mockResolvedValue(null);
+
+    const raced = await useCase.execute({
+      programSlug: 'test-program',
+      weekNumber: 1,
+      workoutOrder: 1,
+    });
+    expect(raced.ok).toBe(false);
+    if (raced.ok) return;
+    expect(raced.error).toMatchObject({
+      code: 'SESSION_ALREADY_EXISTS',
+      scheduledWorkoutId: 'sched-w1',
+    });
+  });
 });

@@ -256,15 +256,25 @@ await db.transaction(async (tx) => {
 ### Workflow
 
 ```bash
-# Generate migration after schema change
-npx drizzle-kit generate
+# Generate migration after schema change (script wraps `drizzle-kit generate`)
+pnpm db:generate --name describe_the_change
 
-# Apply migration (development)
-npx drizzle-kit push
+# Apply migrations (development / production)
+pnpm db:migrate
 
-# Apply migration (production)
-npx drizzle-kit migrate
+# Seed the exercise catalog and training programs
+pnpm db:seed
 ```
+
+Generated SQL and its snapshot live in `src/infrastructure/database/migrations/`
+(`drizzle.config.ts` points `out` there). Migrations are replayed on every run of
+`pnpm test:integration`, so a broken migration fails the test suite rather than a deploy.
+
+**Resetting an uncommitted migration.** If the last generated migration has not been
+committed or applied anywhere, delete its `.sql`, its `meta/NNNN_snapshot.json`, and its
+entry in `meta/_journal.json`, then run `pnpm db:generate` again. Never edit a generated
+file by hand, and never rewrite a migration that has already been applied to a shared
+database — add a new one instead.
 
 ---
 
@@ -315,6 +325,28 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_weight CHECK (weight > 0);
 ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 ```
 
+### Constraints Enforced Today
+
+`0002_harden_persistence_constraints.sql` records the current hardening pass. The rules it
+applies, and the reason for each:
+
+| Kind | Where | Rule |
+|------|-------|------|
+| CHECK | `set_logs` | `set_number > 0`, `reps > 0`, `duration_seconds > 0`, `weight_kg >= 0`, `rpe BETWEEN 1 AND 10` (all NULL-tolerant where the column is optional) |
+| CHECK | `set_logs`, `exercise_logs`, `workout_exercises` | Discriminator shape: a `'reps'` row must carry rep bounds and no duration; a `'duration'` row the inverse. This keeps `prescription_type`/`type` from drifting away from the columns that back it |
+| CHECK | `*_reps_range` | `max_reps >= min_reps`, written as `min_reps IS NULL OR max_reps IS NULL OR max_reps >= min_reps` so a nullable bound cannot make the predicate NULL |
+| CHECK | `exercise_logs`, `workout_exercises` | `exercise_order > 0`, `sets > 0`, `rest_seconds >= 0` |
+| CHECK | `workout_sessions` | `completed_at IS NULL OR completed_at >= started_at` |
+| CHECK | `exercises`, `training_programs` | Enum columns are restricted to the values the domain const objects define |
+| FK | `set_logs (session_id, exercise_order)` → `exercise_logs` | Composite key: a set cannot exist without its exercise log, and cannot point at another session's log |
+| FK | `exercise_logs.exercise_id`, `workout_exercises.exercise_id` → `exercises.id` | `RESTRICT`: catalog rows that workouts or sessions depend on cannot be deleted |
+| FK | `scheduled_workouts (program_id, week_number)` → `program_weeks` | Composite key: a schedule entry cannot reference a week belonging to another program |
+| UNIQUE | `workout_sessions.scheduled_workout_id` | At most one session per scheduled workout occurrence — the basis of the conflict handling below |
+
+Domain validation stays primary; these constraints exist so that a bad seed, a hand-run
+statement, or a future writer cannot store data the domain would reject. The behavior is
+pinned by `tests/integration/database/schema/`.
+
 ---
 
 ## Relationships
@@ -359,6 +391,37 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 | Foreign key violation | `ReferenceNotFoundError` |
 | Check constraint violation | `InvalidDataError` |
 | Connection error | `DatabaseUnavailableError` |
+
+### Implemented: One Session Per Scheduled Workout
+
+Starting a workout is a read-then-write, so two overlapping requests can both decide that no
+session exists yet. `workout_sessions.scheduled_workout_id` is unique, which decides the race
+in the database; the repository translates that failure into a persistence-neutral result
+instead of throwing:
+
+```typescript
+// src/application/ports/workout-session-repository.ts
+export interface ScheduledWorkoutConflict {
+  readonly reason: 'scheduled-workout-conflict';
+  readonly scheduledWorkoutId: string;
+}
+
+export type SaveWorkoutSessionResult = Result<void, ScheduledWorkoutConflict>;
+```
+
+* `DrizzleWorkoutSessionRepository.save` catches SQLSTATE `23505` for that constraint and
+  returns `err({ reason: 'scheduled-workout-conflict', … })`. The transaction has already
+  rolled back, so the losing session is never partially stored. Drizzle wraps driver errors,
+  so the check inspects both the error and its `cause`.
+* `InMemoryWorkoutSessionRepository` enforces the same rule, keeping the two
+  implementations behaviorally interchangeable.
+* `StartWorkoutSessionUseCase` maps the conflict to `SESSION_ALREADY_EXISTS`, the same code
+  its existence pre-check produces, so callers cannot tell the two paths apart.
+* The session is created before the insert, so a rejected start leaves no state behind;
+  retrying simply starts a fresh session.
+
+Anything else — a foreign key or check violation, a lost connection — is a bug or an outage,
+not a business outcome, and is thrown so the error boundary can log it.
 
 ---
 

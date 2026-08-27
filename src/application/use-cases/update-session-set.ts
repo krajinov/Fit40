@@ -11,6 +11,7 @@ import {
 } from '@/domain/entities/workout-session';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
+import { assertSessionSaveSucceeded } from '@/application/use-cases/session-save-conflict';
 
 export type UpdateSessionSetError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }
@@ -83,7 +84,8 @@ export class UpdateSessionSetUseCase {
       return result;
     }
 
-    await this.sessionRepository.save(result.data);
+    const saved = await this.sessionRepository.save(result.data);
+    assertSessionSaveSucceeded(saved, result.data.id);
 
     return ok(toWorkoutSessionDto(result.data));
   }

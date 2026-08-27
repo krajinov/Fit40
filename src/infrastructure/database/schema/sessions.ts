@@ -39,6 +39,15 @@ export const workoutSessions = pgTable(
   },
   (table) => ({
     workoutIdIdx: index('workout_sessions_workout_id_idx').on(table.workoutId),
+    // Enforces that a session's (scheduled_workout_id, workout_id) matches the
+    // actual scheduled occurrence and its template, preventing a session from
+    // being attributed to one occurrence while carrying another template's
+    // identity. RESTRICT keeps historical sessions from being silently deleted.
+    occurrenceTemplateFk: foreignKey({
+      columns: [table.scheduledWorkoutId, table.workoutId],
+      foreignColumns: [scheduledWorkouts.id, scheduledWorkouts.workoutId],
+      name: 'workout_sessions_occurrence_template_fk',
+    }).onDelete('restrict'),
   }),
 );
 

@@ -145,6 +145,13 @@ export const scheduledWorkouts = pgTable(
       table.orderInWeek,
     ),
     workoutIdIdx: index('scheduled_workouts_workout_id_idx').on(table.workoutId),
+    // Unique key used as the target of the workout_sessions occurrence/template
+    // ownership FK: a session's (scheduled_workout_id, workout_id) must match a
+    // real scheduled occurrence and its actual template.
+    idWorkoutIdUnique: unique('scheduled_workouts_id_workout_id_unique').on(
+      table.id,
+      table.workoutId,
+    ),
     weekFk: foreignKey({
       columns: [table.programId, table.weekNumber],
       foreignColumns: [programWeeks.programId, programWeeks.weekNumber],

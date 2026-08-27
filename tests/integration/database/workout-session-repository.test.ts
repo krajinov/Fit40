@@ -19,8 +19,9 @@ import {
   SessionAlreadyExistsError,
   SessionStaleVersionError,
 } from '@/application/ports/workout-session-repository';
+import { workoutSessions } from '@/infrastructure/database/schema';
 
-import { closeDatabase, resetAndSeed, workoutSessionRepository } from './setup';
+import { closeDatabase, db, resetAndSeed, workoutSessionRepository } from './setup';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -265,6 +266,22 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     const reloaded = await workoutSessionRepository.findById(session.id);
     expect(reloaded?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('rejects a session whose workout template does not match its scheduled occurrence', async () => {
+    // fit40-beginner-strength-w1-1 is scheduled with wo-beginner-strength-a, so
+    // pairing it with wo-beginner-strength-b must be rejected by the composite
+    // (scheduled_workout_id, workout_id) foreign key.
+    await expect(
+      db.insert(workoutSessions).values({
+        id: 'session-test-mismatch',
+        scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+        workoutId: 'wo-beginner-strength-b',
+        startedAt: new Date('2025-01-01T10:00:00Z'),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({ code: '23503' }), // foreign_key_violation
+    });
   });
 });
 

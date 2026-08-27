@@ -47,5 +47,23 @@ export const exercises = pgTable(
       'exercises_movement_pattern_check',
       sql`${table.movementPattern} IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')`,
     ),
+    // Enforces the domain shape of the considerations JSONB column: an array of
+    // objects that each carry a valid `consideration` and `level`. Non-array
+    // values, non-object elements, missing keys, and unsupported values are
+    // rejected at write time instead of surfacing as read-time corruption in
+    // mapExerciseRow(). Extra keys are tolerated, matching the mapper.
+    considerationsCheck: check(
+      'exercises_considerations_check',
+      sql`(
+        jsonb_typeof(${table.considerations}) = 'array'
+        AND (jsonb_array_length(${table.considerations}) = 0
+          OR (jsonb_path_exists(${table.considerations}, 'strict $[*].consideration')
+              AND jsonb_path_exists(${table.considerations}, 'strict $[*].level')))
+        AND NOT jsonb_path_exists(
+          ${table.considerations},
+          'strict $[*] ? ((@.consideration != "knee-sensitive" && @.consideration != "lower-back-sensitive" && @.consideration != "shoulder-sensitive" && @.consideration != "limited-mobility") || (@.level != "suitable" && @.level != "caution" && @.level != "unsuitable"))'
+        )
+      )`,
+    ),
   }),
 );

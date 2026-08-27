@@ -38,7 +38,17 @@ CREATE TABLE "exercises" (
 	CONSTRAINT "exercises_secondary_muscles_check" CHECK ("exercises"."secondary_muscles" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]),
 	CONSTRAINT "exercises_equipment_check" CHECK ("exercises"."equipment" IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')),
 	CONSTRAINT "exercises_difficulty_check" CHECK ("exercises"."difficulty" IN ('beginner','intermediate','advanced')),
-	CONSTRAINT "exercises_movement_pattern_check" CHECK ("exercises"."movement_pattern" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion'))
+	CONSTRAINT "exercises_movement_pattern_check" CHECK ("exercises"."movement_pattern" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')),
+	CONSTRAINT "exercises_considerations_check" CHECK ((
+        jsonb_typeof("exercises"."considerations") = 'array'
+        AND (jsonb_array_length("exercises"."considerations") = 0
+          OR (jsonb_path_exists("exercises"."considerations", 'strict $[*].consideration')
+              AND jsonb_path_exists("exercises"."considerations", 'strict $[*].level')))
+        AND NOT jsonb_path_exists(
+          "exercises"."considerations",
+          'strict $[*] ? ((@.consideration != "knee-sensitive" && @.consideration != "lower-back-sensitive" && @.consideration != "shoulder-sensitive" && @.consideration != "limited-mobility") || (@.level != "suitable" && @.level != "caution" && @.level != "unsuitable"))'
+        )
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE "program_weeks" (
@@ -54,6 +64,7 @@ CREATE TABLE "scheduled_workouts" (
 	"week_number" integer NOT NULL,
 	"workout_id" text NOT NULL,
 	"order_in_week" integer NOT NULL,
+	CONSTRAINT "scheduled_workouts_id_workout_id_unique" UNIQUE("id","workout_id"),
 	CONSTRAINT "scheduled_workouts_order_in_week_check" CHECK ("scheduled_workouts"."order_in_week" > 0)
 );
 --> statement-breakpoint
@@ -151,6 +162,7 @@ ALTER TABLE "workout_exercises" ADD CONSTRAINT "workout_exercises_workout_id_wor
 ALTER TABLE "workout_exercises" ADD CONSTRAINT "workout_exercises_exercise_id_exercises_id_fk" FOREIGN KEY ("exercise_id") REFERENCES "public"."exercises"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workout_sessions" ADD CONSTRAINT "workout_sessions_scheduled_workout_id_scheduled_workouts_id_fk" FOREIGN KEY ("scheduled_workout_id") REFERENCES "public"."scheduled_workouts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workout_sessions" ADD CONSTRAINT "workout_sessions_workout_id_workouts_id_fk" FOREIGN KEY ("workout_id") REFERENCES "public"."workouts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "workout_sessions" ADD CONSTRAINT "workout_sessions_occurrence_template_fk" FOREIGN KEY ("scheduled_workout_id","workout_id") REFERENCES "public"."scheduled_workouts"("id","workout_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workouts" ADD CONSTRAINT "workouts_program_id_training_programs_id_fk" FOREIGN KEY ("program_id") REFERENCES "public"."training_programs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "exercise_logs_exercise_id_idx" ON "exercise_logs" USING btree ("exercise_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "scheduled_workouts_position_unique" ON "scheduled_workouts" USING btree ("program_id","week_number","order_in_week");--> statement-breakpoint

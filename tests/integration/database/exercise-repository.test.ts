@@ -1,6 +1,23 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { closeDatabase, exerciseRepository, resetAndSeed } from './setup';
+import { exercises } from '@/infrastructure/database/schema';
+
+import { closeDatabase, db, exerciseRepository, resetAndSeed } from './setup';
+
+function exerciseRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ex-test-considerations',
+    slug: 'test-considerations',
+    name: 'Test Exercise',
+    description: 'A test exercise for considerations validation.',
+    primaryMuscle: 'chest',
+    secondaryMuscles: [],
+    equipment: 'bodyweight',
+    difficulty: 'beginner',
+    movementPattern: 'push-horizontal',
+    ...overrides,
+  };
+}
 
 describe('DrizzleExerciseRepository', () => {
   beforeEach(async () => {
@@ -33,6 +50,49 @@ describe('DrizzleExerciseRepository', () => {
     const exercise = await exerciseRepository.findBySlug('does-not-exist');
 
     expect(exercise).toBeNull();
+  });
+
+  it('persists valid considerations and reads them back', async () => {
+    const considerations = [
+      { consideration: 'knee-sensitive', level: 'caution' },
+      { consideration: 'limited-mobility', level: 'unsuitable' },
+    ];
+
+    await db.insert(exercises).values(exerciseRow({ considerations }));
+
+    const exercise = await exerciseRepository.findBySlug('test-considerations');
+    expect(exercise).not.toBeNull();
+    expect(exercise?.considerations).toEqual(considerations);
+  });
+
+  it('rejects a non-array considerations payload', async () => {
+    await expect(
+      db.insert(exercises).values(exerciseRow({ considerations: { consideration: 'knee-sensitive', level: 'caution' } })),
+    ).rejects.toThrow();
+  });
+
+  it('rejects an unsupported consideration value', async () => {
+    await expect(
+      db.insert(exercises).values(
+        exerciseRow({ considerations: [{ consideration: 'banana', level: 'caution' }] }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('rejects an unsupported level value', async () => {
+    await expect(
+      db.insert(exercises).values(
+        exerciseRow({ considerations: [{ consideration: 'knee-sensitive', level: 'awesome' }] }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('rejects an entry missing a required key', async () => {
+    await expect(
+      db.insert(exercises).values(
+        exerciseRow({ considerations: [{ consideration: 'knee-sensitive' }] }),
+      ),
+    ).rejects.toThrow();
   });
 });
 

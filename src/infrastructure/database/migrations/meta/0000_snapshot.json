@@ -1,5 +1,5 @@
 {
-  "id": "c7879cb3-7013-4704-9f98-1c5c95ed24ca",
+  "id": "60d2cdba-6034-426b-a786-4b796f55e42b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -251,6 +251,10 @@
         "exercises_movement_pattern_check": {
           "name": "exercises_movement_pattern_check",
           "value": "\"exercises\".\"movement_pattern\" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')"
+        },
+        "exercises_considerations_check": {
+          "name": "exercises_considerations_check",
+          "value": "(\n        jsonb_typeof(\"exercises\".\"considerations\") = 'array'\n        AND (jsonb_array_length(\"exercises\".\"considerations\") = 0\n          OR (jsonb_path_exists(\"exercises\".\"considerations\", 'strict $[*].consideration')\n              AND jsonb_path_exists(\"exercises\".\"considerations\", 'strict $[*].level')))\n        AND NOT jsonb_path_exists(\n          \"exercises\".\"considerations\",\n          'strict $[*] ? ((@.consideration != \"knee-sensitive\" && @.consideration != \"lower-back-sensitive\" && @.consideration != \"shoulder-sensitive\" && @.consideration != \"limited-mobility\") || (@.level != \"suitable\" && @.level != \"caution\" && @.level != \"unsuitable\"))'\n        )\n      )"
         }
       },
       "isRLSEnabled": false
@@ -432,7 +436,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "scheduled_workouts_id_workout_id_unique": {
+          "name": "scheduled_workouts_id_workout_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workout_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "scheduled_workouts_order_in_week_check": {
@@ -874,6 +887,21 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "workout_sessions_occurrence_template_fk": {
+          "name": "workout_sessions_occurrence_template_fk",
+          "tableFrom": "workout_sessions",
+          "tableTo": "scheduled_workouts",
+          "columnsFrom": [
+            "scheduled_workout_id",
+            "workout_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workout_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"

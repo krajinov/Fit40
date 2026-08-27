@@ -85,6 +85,7 @@ describe('createWorkoutSession', () => {
 
     expect(result.data.completedAt).toBeNull();
     expect(getSessionStatus(result.data)).toBe('in-progress');
+    expect(result.data.version).toBe(0);
   });
 
   it('derives status as in-progress when completedAt is null', () => {

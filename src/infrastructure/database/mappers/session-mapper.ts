@@ -138,6 +138,7 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
   return {
     ...base.data,
     completedAt: rows.session.completedAt,
+    version: rows.session.version,
     exerciseLogs,
   };
 }
@@ -149,6 +150,7 @@ export function mapSessionToRow(session: WorkoutSession): typeof workoutSessions
     workoutId: session.workoutId,
     startedAt: session.startedAt,
     completedAt: session.completedAt,
+    version: session.version,
   };
 }
 

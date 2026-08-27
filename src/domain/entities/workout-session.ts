@@ -63,6 +63,12 @@ export interface WorkoutSession {
   readonly startedAt: Date;
   readonly completedAt: Date | null;
   readonly exerciseLogs: ReadonlyArray<ExerciseLog>;
+  /**
+   * Optimistic-concurrency token: the row revision this aggregate was read at.
+   * The repository bumps it on every successful save and rejects saves whose
+   * version no longer matches the persisted row.
+   */
+  readonly version: number;
 }
 
 // ─── Input Types ─────────────────────────────────────────────────────────────
@@ -269,6 +275,7 @@ export function createWorkoutSession(
     startedAt: input.startedAt,
     completedAt: null,
     exerciseLogs,
+    version: 0,
   });
 }
 

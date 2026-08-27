@@ -17,19 +17,30 @@ import { scheduledWorkouts, workouts } from './programs';
 /**
  * Workout session aggregate tables: sessions, exercise log snapshots, and
  * individual set logs.
+ *
+ * `version` is an optimistic-concurrency token: `save` only applies when the
+ * caller's snapshot matches the current row version, preventing stale aggregate
+ * saves from silently overwriting concurrent changes.
  */
-export const workoutSessions = pgTable('workout_sessions', {
-  id: text('id').primaryKey(),
-  scheduledWorkoutId: text('scheduled_workout_id')
-    .notNull()
-    .unique()
-    .references(() => scheduledWorkouts.id, { onDelete: 'restrict' }),
-  workoutId: text('workout_id')
-    .notNull()
-    .references(() => workouts.id, { onDelete: 'restrict' }),
-  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-});
+export const workoutSessions = pgTable(
+  'workout_sessions',
+  {
+    id: text('id').primaryKey(),
+    scheduledWorkoutId: text('scheduled_workout_id')
+      .notNull()
+      .unique()
+      .references(() => scheduledWorkouts.id, { onDelete: 'restrict' }),
+    workoutId: text('workout_id')
+      .notNull()
+      .references(() => workouts.id, { onDelete: 'restrict' }),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    version: integer('version').notNull().default(0),
+  },
+  (table) => ({
+    workoutIdIdx: index('workout_sessions_workout_id_idx').on(table.workoutId),
+  }),
+);
 
 /**
  * Self-contained historical snapshot of one exercise performed in a session.

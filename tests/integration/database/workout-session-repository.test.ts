@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   completeWorkoutSession,
@@ -15,9 +15,12 @@ import {
 } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 
-import { WorkoutSessionConflictError } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
+import {
+  SessionAlreadyExistsError,
+  SessionStaleVersionError,
+} from '@/application/ports/workout-session-repository';
 
-import { resetAndSeed, workoutSessionRepository } from './setup';
+import { closeDatabase, resetAndSeed, workoutSessionRepository } from './setup';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -143,7 +146,11 @@ describe('DrizzleWorkoutSessionRepository', () => {
     const withSet = withOneRepSet(session);
     await workoutSessionRepository.save(withSet);
 
-    const edited = updateSessionSet(withSet, {
+    // Re-read the persisted aggregate before mutating, as the use cases do.
+    const current = await workoutSessionRepository.findById(session.id);
+    expect(current).not.toBeNull();
+
+    const edited = updateSessionSet(current!, {
       exerciseOrder: 1,
       setNumber: 1,
       type: 'reps',
@@ -214,8 +221,38 @@ describe('DrizzleWorkoutSessionRepository', () => {
     const second = makeSession('session-test-2');
 
     await expect(workoutSessionRepository.save(second)).rejects.toBeInstanceOf(
-      WorkoutSessionConflictError,
+      SessionAlreadyExistsError,
     );
+  });
+
+  it('rejects a stale-version save instead of overwriting concurrent changes', async () => {
+    const session = makeSession(); // version 0
+    await workoutSessionRepository.save(session); // insert -> persisted version 0
+
+    // Simulate a concurrent modification that bumps the persisted version.
+    await workoutSessionRepository.save(withOneRepSet(session)); // update 0 -> 1
+
+    // Saving the original (stale) snapshot must fail, not silently replace it.
+    await expect(workoutSessionRepository.save(session)).rejects.toBeInstanceOf(
+      SessionStaleVersionError,
+    );
+
+    const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(reloaded?.version).toBe(1);
+    expect(reloaded?.exerciseLogs[0]?.sets).toHaveLength(1);
+  });
+
+  it('persists and returns the session version', async () => {
+    const session = makeSession();
+    await workoutSessionRepository.save(session);
+
+    const inserted = await workoutSessionRepository.findById(session.id);
+    expect(inserted?.version).toBe(0);
+
+    await workoutSessionRepository.save(withOneRepSet(session));
+
+    const updated = await workoutSessionRepository.findById(session.id);
+    expect(updated?.version).toBe(1);
   });
 
   it('returns isolated objects (mutating a loaded session does not persist)', async () => {
@@ -229,4 +266,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
     const reloaded = await workoutSessionRepository.findById(session.id);
     expect(reloaded?.exerciseLogs[0]?.sets).toHaveLength(0);
   });
+});
+
+afterAll(async () => {
+  await closeDatabase();
 });

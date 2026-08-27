@@ -1,6 +1,10 @@
 import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
 
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import {
+  SessionAlreadyExistsError,
+  SessionStaleVersionError,
+  type WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
@@ -12,17 +16,6 @@ import {
   mapSetToRow,
 } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, workoutSessions } from '../schema';
-
-/**
- * Infrastructure-level conflict error raised when a second session for the same
- * scheduled workout races against the database unique constraint.
- */
-export class WorkoutSessionConflictError extends Error {
-  constructor(scheduledWorkoutId: string) {
-    super(`A workout session already exists for scheduled workout "${scheduledWorkoutId}"`);
-    this.name = 'WorkoutSessionConflictError';
-  }
-}
 
 function errorCode(error: unknown): unknown {
   if (typeof error !== 'object' || error === null) {
@@ -47,7 +40,10 @@ type SessionRow = typeof workoutSessions.$inferSelect;
  * Drizzle implementation of the WorkoutSessionRepository port.
  *
  * `save` persists the whole aggregate in one transaction using delete-and-
- * reinsert for children, which is the simplest correct strategy at this scale.
+ * reinsert for children. The session row upsert is guarded by an optimistic-
+ * concurrency version check, so a stale snapshot is rejected instead of
+ * silently overwriting concurrent changes. Unique-constraint races on the
+ * one-session-per-occurrence rule surface as `SessionAlreadyExistsError`.
  */
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: Database) {}
@@ -112,7 +108,7 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
   async save(session: WorkoutSession): Promise<void> {
     try {
       await this.db.transaction(async (tx) => {
-        await tx
+        const affected = await tx
           .insert(workoutSessions)
           .values(mapSessionToRow(session))
           .onConflictDoUpdate({
@@ -122,8 +118,15 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
               workoutId: session.workoutId,
               startedAt: session.startedAt,
               completedAt: session.completedAt,
+              version: session.version + 1,
             },
-          });
+            where: eq(workoutSessions.version, session.version),
+          })
+          .returning({ id: workoutSessions.id });
+
+        if (affected.length === 0) {
+          throw new SessionStaleVersionError(session.id);
+        }
 
         await tx.delete(setLogs).where(eq(setLogs.sessionId, session.id));
         await tx.delete(exerciseLogs).where(eq(exerciseLogs.sessionId, session.id));
@@ -137,7 +140,7 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new WorkoutSessionConflictError(session.scheduledWorkoutId);
+        throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
       }
       throw error;
     }

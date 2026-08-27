@@ -118,6 +118,39 @@ describe('logSessionSet', () => {
     if (m.ok) return;
     expect(m.error.code).toBe('SESSION_ALREADY_COMPLETED');
   });
+
+  it('preserves the version token across domain mutations', () => {
+    const s = session();
+    expect(s.version).toBe(0);
+
+    const logged = logSessionSet(s, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    expect(logged.data.version).toBe(0);
+
+    const updated = updateSessionSet(logged.data, {
+      exerciseOrder: 1,
+      setNumber: 1,
+      type: 'reps',
+      reps: 12,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.data.version).toBe(0);
+
+    const completed = completeWorkoutSession(updated.data, new Date());
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.data.version).toBe(0);
+  });
 });
 
 describe('updateSessionSet', () => {

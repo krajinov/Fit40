@@ -16,7 +16,4 @@ export const workoutSessionRepository = new DrizzleWorkoutSessionRepository(db);
 
 export { DrizzleExerciseRepository } from './drizzle-exercise-repository';
 export { DrizzleProgramRepository } from './drizzle-program-repository';
-export {
-  DrizzleWorkoutSessionRepository,
-  WorkoutSessionConflictError,
-} from './drizzle-workout-session-repository';
+export { DrizzleWorkoutSessionRepository } from './drizzle-workout-session-repository';

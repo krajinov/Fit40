@@ -1,9 +1,14 @@
 'use client';
 
 import { useActionState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
 import { logSetAction } from '@/features/sessions/actions/log-set';
+import { SessionActionError } from '@/features/sessions/components/SessionActionError';
+import type { SessionActionState } from '@/features/sessions/types/session-action-state';
+
+const initialState: SessionActionState = { ok: true };
 
 interface SetLoggerFormProps {
   readonly sessionId: string;
@@ -22,20 +27,27 @@ export function SetLoggerForm({
   weekNumber,
   workoutOrder,
 }: SetLoggerFormProps) {
+  const router = useRouter();
   const isReps = prescription.type === 'reps';
 
-  async function submitAction(prev: string | undefined, formData: FormData) {
+  async function submitAction(
+    prev: SessionActionState,
+    formData: FormData,
+  ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
     formData.set('type', isReps ? 'reps' : 'duration');
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
-    await logSetAction(formData);
-    return undefined;
+    const state = await logSetAction(formData);
+    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+      router.refresh();
+    }
+    return state;
   }
 
-  const [, formAction, pending] = useActionState(submitAction, undefined);
+  const [state, formAction, pending] = useActionState(submitAction, initialState);
 
   return (
     <form action={formAction} className="flex flex-wrap items-end gap-2 pl-9 pt-2">
@@ -89,6 +101,7 @@ export function SetLoggerForm({
       >
         {pending ? '...' : 'Add set'}
       </button>
+      {!state.ok && <SessionActionError error={state.error} className="w-full" />}
     </form>
   );
 }

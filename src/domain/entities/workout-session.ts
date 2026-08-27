@@ -48,6 +48,7 @@ export interface ExerciseLog {
   readonly exerciseId: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
+  readonly restSeconds: number;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -70,6 +71,7 @@ export interface CreateExerciseLogInput {
   readonly exerciseId: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
+  readonly restSeconds?: number;
 }
 
 export interface CreateWorkoutSessionInput {
@@ -246,6 +248,7 @@ export function createWorkoutSession(
     exerciseId: log.exerciseId,
     order: log.order,
     prescription: log.prescription,
+    restSeconds: log.restSeconds ?? 0,
     sets: [],
   }));
 

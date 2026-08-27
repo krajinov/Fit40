@@ -1,0 +1,2 @@
+ALTER TABLE "exercises" DROP CONSTRAINT "chk_exercises_movement_pattern";--> statement-breakpoint
+ALTER TABLE "exercises" ADD CONSTRAINT "chk_exercises_movement_pattern" CHECK ("exercises"."movement_pattern" IN ('squat', 'hinge', 'push-horizontal', 'push-vertical', 'pull-horizontal', 'pull-vertical', 'carry', 'core', 'isolation', 'locomotion'));

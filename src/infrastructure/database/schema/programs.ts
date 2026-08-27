@@ -7,6 +7,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
@@ -34,6 +35,14 @@ export const trainingPrograms = pgTable(
       'training_programs_workouts_per_week_check',
       sql`${table.workoutsPerWeek} > 0`,
     ),
+    difficultyCheck: check(
+      'training_programs_difficulty_check',
+      sql`${table.difficulty} IN ('beginner','intermediate','advanced')`,
+    ),
+    goalCheck: check(
+      'training_programs_goal_check',
+      sql`${table.goal} IN ('strength','hypertrophy','endurance','mobility','general-fitness','weight-loss','strength-and-mobility')`,
+    ),
   }),
 );
 
@@ -58,6 +67,8 @@ export const workouts = pgTable(
   },
   (table) => ({
     programIdIdx: index('workouts_program_id_idx').on(table.programId),
+    // Unique key used as the target of the scheduled_workouts ownership FK.
+    programIdIdUnique: unique('workouts_program_id_id_unique').on(table.programId, table.id),
   }),
 );
 
@@ -124,9 +135,7 @@ export const scheduledWorkouts = pgTable(
       .notNull()
       .references(() => trainingPrograms.id, { onDelete: 'cascade' }),
     weekNumber: integer('week_number').notNull(),
-    workoutId: text('workout_id')
-      .notNull()
-      .references(() => workouts.id, { onDelete: 'cascade' }),
+    workoutId: text('workout_id').notNull(),
     orderInWeek: integer('order_in_week').notNull(),
   },
   (table) => ({
@@ -140,6 +149,15 @@ export const scheduledWorkouts = pgTable(
       columns: [table.programId, table.weekNumber],
       foreignColumns: [programWeeks.programId, programWeeks.weekNumber],
       name: 'scheduled_workouts_week_fk',
+    }).onDelete('cascade'),
+    // Enforces that a scheduled workout can only reference a workout template
+    // owned by the same program. Replaces the previous single-column
+    // workout_id FK, which allowed cross-program references that would break
+    // aggregate reconstruction.
+    programWorkoutFk: foreignKey({
+      columns: [table.programId, table.workoutId],
+      foreignColumns: [workouts.programId, workouts.id],
+      name: 'scheduled_workouts_program_workout_fk',
     }).onDelete('cascade'),
     orderInWeekCheck: check('scheduled_workouts_order_in_week_check', sql`${table.orderInWeek} > 0`),
   }),

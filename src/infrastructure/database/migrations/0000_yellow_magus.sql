@@ -33,7 +33,12 @@ CREATE TABLE "exercises" (
 	"difficulty" text NOT NULL,
 	"movement_pattern" text NOT NULL,
 	"considerations" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	CONSTRAINT "exercises_slug_unique" UNIQUE("slug")
+	CONSTRAINT "exercises_slug_unique" UNIQUE("slug"),
+	CONSTRAINT "exercises_primary_muscle_check" CHECK ("exercises"."primary_muscle" IN ('chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body')),
+	CONSTRAINT "exercises_secondary_muscles_check" CHECK ("exercises"."secondary_muscles" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]),
+	CONSTRAINT "exercises_equipment_check" CHECK ("exercises"."equipment" IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')),
+	CONSTRAINT "exercises_difficulty_check" CHECK ("exercises"."difficulty" IN ('beginner','intermediate','advanced')),
+	CONSTRAINT "exercises_movement_pattern_check" CHECK ("exercises"."movement_pattern" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion'))
 );
 --> statement-breakpoint
 CREATE TABLE "program_weeks" (
@@ -85,7 +90,9 @@ CREATE TABLE "training_programs" (
 	"workouts_per_week" integer NOT NULL,
 	CONSTRAINT "training_programs_slug_unique" UNIQUE("slug"),
 	CONSTRAINT "training_programs_duration_weeks_check" CHECK ("training_programs"."duration_weeks" > 0),
-	CONSTRAINT "training_programs_workouts_per_week_check" CHECK ("training_programs"."workouts_per_week" > 0)
+	CONSTRAINT "training_programs_workouts_per_week_check" CHECK ("training_programs"."workouts_per_week" > 0),
+	CONSTRAINT "training_programs_difficulty_check" CHECK ("training_programs"."difficulty" IN ('beginner','intermediate','advanced')),
+	CONSTRAINT "training_programs_goal_check" CHECK ("training_programs"."goal" IN ('strength','hypertrophy','endurance','mobility','general-fitness','weight-loss','strength-and-mobility'))
 );
 --> statement-breakpoint
 CREATE TABLE "workout_exercises" (
@@ -119,6 +126,7 @@ CREATE TABLE "workout_sessions" (
 	"workout_id" text NOT NULL,
 	"started_at" timestamp with time zone NOT NULL,
 	"completed_at" timestamp with time zone,
+	"version" integer DEFAULT 0 NOT NULL,
 	CONSTRAINT "workout_sessions_scheduled_workout_id_unique" UNIQUE("scheduled_workout_id")
 );
 --> statement-breakpoint
@@ -128,15 +136,16 @@ CREATE TABLE "workouts" (
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
 	"description" text NOT NULL,
-	"estimated_duration_minutes" integer NOT NULL
+	"estimated_duration_minutes" integer NOT NULL,
+	CONSTRAINT "workouts_program_id_id_unique" UNIQUE("program_id","id")
 );
 --> statement-breakpoint
 ALTER TABLE "exercise_logs" ADD CONSTRAINT "exercise_logs_session_id_workout_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."workout_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "exercise_logs" ADD CONSTRAINT "exercise_logs_exercise_id_exercises_id_fk" FOREIGN KEY ("exercise_id") REFERENCES "public"."exercises"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "program_weeks" ADD CONSTRAINT "program_weeks_program_id_training_programs_id_fk" FOREIGN KEY ("program_id") REFERENCES "public"."training_programs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scheduled_workouts" ADD CONSTRAINT "scheduled_workouts_program_id_training_programs_id_fk" FOREIGN KEY ("program_id") REFERENCES "public"."training_programs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "scheduled_workouts" ADD CONSTRAINT "scheduled_workouts_workout_id_workouts_id_fk" FOREIGN KEY ("workout_id") REFERENCES "public"."workouts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scheduled_workouts" ADD CONSTRAINT "scheduled_workouts_week_fk" FOREIGN KEY ("program_id","week_number") REFERENCES "public"."program_weeks"("program_id","week_number") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "scheduled_workouts" ADD CONSTRAINT "scheduled_workouts_program_workout_fk" FOREIGN KEY ("program_id","workout_id") REFERENCES "public"."workouts"("program_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "set_logs" ADD CONSTRAINT "set_logs_exercise_log_fk" FOREIGN KEY ("session_id","exercise_order") REFERENCES "public"."exercise_logs"("session_id","exercise_order") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workout_exercises" ADD CONSTRAINT "workout_exercises_workout_id_workouts_id_fk" FOREIGN KEY ("workout_id") REFERENCES "public"."workouts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workout_exercises" ADD CONSTRAINT "workout_exercises_exercise_id_exercises_id_fk" FOREIGN KEY ("exercise_id") REFERENCES "public"."exercises"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -147,4 +156,5 @@ CREATE INDEX "exercise_logs_exercise_id_idx" ON "exercise_logs" USING btree ("ex
 CREATE UNIQUE INDEX "scheduled_workouts_position_unique" ON "scheduled_workouts" USING btree ("program_id","week_number","order_in_week");--> statement-breakpoint
 CREATE INDEX "scheduled_workouts_workout_id_idx" ON "scheduled_workouts" USING btree ("workout_id");--> statement-breakpoint
 CREATE INDEX "workout_exercises_exercise_id_idx" ON "workout_exercises" USING btree ("exercise_id");--> statement-breakpoint
+CREATE INDEX "workout_sessions_workout_id_idx" ON "workout_sessions" USING btree ("workout_id");--> statement-breakpoint
 CREATE INDEX "workouts_program_id_idx" ON "workouts" USING btree ("program_id");

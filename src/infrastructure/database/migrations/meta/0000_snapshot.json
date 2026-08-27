@@ -1,5 +1,5 @@
 {
-  "id": "ff4c141e-d8e0-4fe5-a20e-3212d54d2144",
+  "id": "c7879cb3-7013-4704-9f98-1c5c95ed24ca",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -231,7 +231,28 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "exercises_primary_muscle_check": {
+          "name": "exercises_primary_muscle_check",
+          "value": "\"exercises\".\"primary_muscle\" IN ('chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body')"
+        },
+        "exercises_secondary_muscles_check": {
+          "name": "exercises_secondary_muscles_check",
+          "value": "\"exercises\".\"secondary_muscles\" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]"
+        },
+        "exercises_equipment_check": {
+          "name": "exercises_equipment_check",
+          "value": "\"exercises\".\"equipment\" IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')"
+        },
+        "exercises_difficulty_check": {
+          "name": "exercises_difficulty_check",
+          "value": "\"exercises\".\"difficulty\" IN ('beginner','intermediate','advanced')"
+        },
+        "exercises_movement_pattern_check": {
+          "name": "exercises_movement_pattern_check",
+          "value": "\"exercises\".\"movement_pattern\" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.program_weeks": {
@@ -379,19 +400,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "scheduled_workouts_workout_id_workouts_id_fk": {
-          "name": "scheduled_workouts_workout_id_workouts_id_fk",
-          "tableFrom": "scheduled_workouts",
-          "tableTo": "workouts",
-          "columnsFrom": [
-            "workout_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "scheduled_workouts_week_fk": {
           "name": "scheduled_workouts_week_fk",
           "tableFrom": "scheduled_workouts",
@@ -403,6 +411,21 @@
           "columnsTo": [
             "program_id",
             "week_number"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "scheduled_workouts_program_workout_fk": {
+          "name": "scheduled_workouts_program_workout_fk",
+          "tableFrom": "scheduled_workouts",
+          "tableTo": "workouts",
+          "columnsFrom": [
+            "program_id",
+            "workout_id"
+          ],
+          "columnsTo": [
+            "program_id",
+            "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -604,6 +627,14 @@
         "training_programs_workouts_per_week_check": {
           "name": "training_programs_workouts_per_week_check",
           "value": "\"training_programs\".\"workouts_per_week\" > 0"
+        },
+        "training_programs_difficulty_check": {
+          "name": "training_programs_difficulty_check",
+          "value": "\"training_programs\".\"difficulty\" IN ('beginner','intermediate','advanced')"
+        },
+        "training_programs_goal_check": {
+          "name": "training_programs_goal_check",
+          "value": "\"training_programs\".\"goal\" IN ('strength','hypertrophy','endurance','mobility','general-fitness','weight-loss','strength-and-mobility')"
         }
       },
       "isRLSEnabled": false
@@ -794,9 +825,32 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "workout_sessions_workout_id_idx": {
+          "name": "workout_sessions_workout_id_idx",
+          "columns": [
+            {
+              "expression": "workout_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "workout_sessions_scheduled_workout_id_scheduled_workouts_id_fk": {
           "name": "workout_sessions_scheduled_workout_id_scheduled_workouts_id_fk",
@@ -913,7 +967,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "workouts_program_id_id_unique": {
+          "name": "workouts_program_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "program_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

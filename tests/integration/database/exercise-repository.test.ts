@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { exerciseRepository, resetAndSeed } from './setup';
+import { closeDatabase, exerciseRepository, resetAndSeed } from './setup';
 
 describe('DrizzleExerciseRepository', () => {
   beforeEach(async () => {
@@ -34,4 +34,8 @@ describe('DrizzleExerciseRepository', () => {
 
     expect(exercise).toBeNull();
   });
+});
+
+afterAll(async () => {
+  await closeDatabase();
 });

@@ -3,7 +3,7 @@ import { seedPrograms } from '@/infrastructure/programs/seed-programs';
 
 import type { Database } from './client';
 import { mapExerciseToRow } from './mappers/exercise-mapper';
-import { mapProgramToRows } from './mappers/program-mapper';
+import { mapProgramToRows } from './mappers/program-write-mapper';
 import {
   exercises,
   programWeeks,

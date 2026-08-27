@@ -227,7 +227,7 @@ describe('CompleteWorkoutUseCase', () => {
 ### Test Database
 
 - Use a **separate PostgreSQL database** for tests (not production, not development).
-- Configure via `DATABASE_URL_TEST` environment variable.
+- Configure via `TEST_DATABASE_URL` environment variable (the suite refuses to run against a database whose name does not end in `_test`).
 - **Reset the database** between test files (or use transactions with rollback).
 - Run migrations before integration tests.
 

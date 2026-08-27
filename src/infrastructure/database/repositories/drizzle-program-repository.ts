@@ -4,7 +4,7 @@ import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 
 import type { Database } from '../client';
-import { mapProgramRows } from '../mappers/program-mapper';
+import { mapProgramRows } from '../mappers/program-read-mapper';
 import {
   programWeeks,
   scheduledWorkouts,

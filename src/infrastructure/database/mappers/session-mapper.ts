@@ -74,6 +74,7 @@ export function sessionToDomain(
     startedAt: sessionRow.startedAt,
     completedAt: sessionRow.completedAt ?? null,
     exerciseLogs: mappedLogs,
+    version: sessionRow.version,
   };
 }
 

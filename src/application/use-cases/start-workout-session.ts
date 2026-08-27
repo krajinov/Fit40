@@ -10,13 +10,20 @@
 import crypto from 'crypto';
 
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type {
+  WorkoutSessionRepository,
+  WorkoutSessionSaveConflict,
+} from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { createWorkoutSession, type CreateExerciseLogInput } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId } from '@/domain/types/ids';
 import type { Workout } from '@/domain/entities/workout';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
 import { err, ok, type Result } from '@/lib/result';
+import {
+  toSessionModifiedError,
+  type SessionModifiedError,
+} from '@/application/use-cases/session-save-conflict';
 
 export type StartWorkoutSessionError =
   | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }
@@ -28,6 +35,7 @@ export type StartWorkoutSessionError =
       readonly message: string;
     }
   | { readonly code: 'SESSION_ALREADY_EXISTS'; readonly scheduledWorkoutId: string; readonly message: string }
+  | SessionModifiedError
   | { readonly code: 'INVALID_WORKOUT_SESSION'; readonly message: string; readonly field?: string };
 
 export interface StartWorkoutSessionInput {
@@ -91,16 +99,34 @@ export class StartWorkoutSessionUseCase {
       });
     }
 
-    // Saving enforces "one session per scheduled workout" atomically. A conflict
-    // means another request started the same occurrence between the pre-check and
-    // this write, which the user sees as the ordinary "already started".
+    // Saving enforces both persistence rules atomically: "one session per
+    // scheduled workout" and "the stored revision must still be the one loaded".
+    // Losing the occurrence race is the ordinary outcome of two overlapping
+    // starts; a revision conflict means the id this session was given was already
+    // taken, which the caller is told about as a stale-write conflict.
     const saved = await this.sessionRepository.save(sessionResult.data);
     if (!saved.ok) {
-      return err(sessionAlreadyExistsError(occurrence.scheduled.id));
+      return err(toStartSaveError(saved.error, occurrence.scheduled.id));
     }
 
-    return ok(toWorkoutSessionDto(sessionResult.data));
+    return ok(toWorkoutSessionDto({ ...sessionResult.data, version: saved.data }));
   }
+}
+
+/**
+ * Maps a rejected start onto the code callers already understand: the occurrence
+ * is taken, or this particular session could not be written because a session with
+ * its id is already stored.
+ */
+function toStartSaveError(
+  conflict: WorkoutSessionSaveConflict,
+  scheduledWorkoutId: ScheduledWorkoutId,
+): StartWorkoutSessionError {
+  if (conflict.reason === 'concurrent-modification') {
+    return toSessionModifiedError(conflict, conflict.sessionId);
+  }
+
+  return sessionAlreadyExistsError(scheduledWorkoutId);
 }
 
 /** Exercise log inputs mirroring the workout template, in template order. */

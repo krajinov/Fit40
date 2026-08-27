@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest';
 import {
   completeWorkoutSession,
   createWorkoutSession,
+  deleteSessionSet,
   getSessionStatus,
+  INITIAL_SESSION_VERSION,
   logSessionSet,
+  updateSessionSet,
 } from '@/domain/entities/workout-session';
 import { createExerciseId, createScheduledWorkoutId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
@@ -234,4 +237,51 @@ describe('completeWorkoutSession', () => {
     expect(logs[0]?.sets).toHaveLength(1);
     expect(logs[1]?.sets).toHaveLength(0);
   });
+
+describe('concurrency token', () => {
+  it('starts a new session at the initial revision', () => {
+    expect(validSession().version).toBe(INITIAL_SESSION_VERSION);
+  });
+
+  it('carries the revision through every mutation so a save can be compared', () => {
+    const session = validSession();
+
+    const logged = logSessionSet(session, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 7,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    expect(logged.data.version).toBe(INITIAL_SESSION_VERSION);
+
+    const updated = updateSessionSet(logged.data, {
+      exerciseOrder: 1,
+      setNumber: 1,
+      type: 'reps',
+      reps: 12,
+      weightKg: 22.5,
+      rpe: 8,
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.data.version).toBe(INITIAL_SESSION_VERSION);
+
+    const deleted = deleteSessionSet(updated.data, { exerciseOrder: 1, setNumber: 1 });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.data.version).toBe(INITIAL_SESSION_VERSION);
+
+    const completed = completeWorkoutSession(
+      logged.data,
+      new Date('2025-01-01T11:00:00Z'),
+    );
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.data.version).toBe(INITIAL_SESSION_VERSION);
+  });
+});
+
 });

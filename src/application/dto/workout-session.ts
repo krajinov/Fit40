@@ -44,6 +44,11 @@ export interface WorkoutSessionDto {
   readonly sessionId: string;
   readonly scheduledWorkoutId: string;
   readonly workoutId: string;
+  /**
+   * Revision of the stored session this DTO describes. Send it back with the
+   * next mutation so a stale write can be refused instead of overwriting.
+   */
+  readonly version: number;
   readonly status: WorkoutSessionStatus;
   readonly startedAt: string;
   readonly completedAt: string | null;
@@ -81,6 +86,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     sessionId: session.id as string,
     scheduledWorkoutId: session.scheduledWorkoutId as string,
     workoutId: session.workoutId as string,
+    version: session.version,
     status: getSessionStatus(session),
     startedAt: session.startedAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,

@@ -11,11 +11,15 @@ import {
 } from '@/domain/entities/workout-session';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
-import { assertSessionSaveSucceeded } from '@/application/use-cases/session-save-conflict';
+import {
+  toSessionModifiedError,
+  type SessionModifiedError,
+} from '@/application/use-cases/session-save-conflict';
 
 export type LogSessionSetError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string }
+  | SessionModifiedError
   | SessionMutationError;
 
 export interface LogSessionSetInput {
@@ -80,9 +84,14 @@ export class LogSessionSetUseCase {
       return result;
     }
 
+    // Saving is a compare-and-swap on the revision this session was loaded at:
+    // if another request stored it in the meantime, nothing is written and the
+    // caller is asked to reload instead of having that work silently overwritten.
     const saved = await this.sessionRepository.save(result.data);
-    assertSessionSaveSucceeded(saved, result.data.id);
+    if (!saved.ok) {
+      return err(toSessionModifiedError(saved.error, input.sessionId));
+    }
 
-    return ok(toWorkoutSessionDto(result.data));
+    return ok(toWorkoutSessionDto({ ...result.data, version: saved.data }));
   }
 }

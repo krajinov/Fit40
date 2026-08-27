@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
-import { createWorkoutSession, logSessionSet, completeWorkoutSession } from '@/domain/entities/workout-session';
+import { createWorkoutSession, logSessionSet, completeWorkoutSession, INITIAL_SESSION_VERSION } from '@/domain/entities/workout-session';
 import { createExerciseId, createScheduledWorkoutId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -142,6 +142,77 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     expect((await repo.save(logged.data)).ok).toBe(true);
     expect((await repo.findById(session.id))?.exerciseLogs[0]?.sets).toHaveLength(1);
+  });
+
+  it('returns the revision it stored and advances it on every accepted save', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const created = createTestSession({ id: 's-rev', swId: 'sw-rev' });
+    expect(created.version).toBe(INITIAL_SESSION_VERSION);
+
+    expect(await repo.save(created)).toEqual({ ok: true, data: INITIAL_SESSION_VERSION });
+    expect((await repo.findById(created.id))?.version).toBe(INITIAL_SESSION_VERSION);
+
+    const loaded = await repo.findById(created.id);
+    if (!loaded) throw Error();
+    const logged = logSessionSet(loaded, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    if (!logged.ok) throw Error();
+
+    expect(await repo.save(logged.data)).toEqual({
+      ok: true,
+      data: INITIAL_SESSION_VERSION + 1,
+    });
+    expect((await repo.findById(created.id))?.version).toBe(INITIAL_SESSION_VERSION + 1);
+  });
+
+  it('refuses a save built from a revision that is no longer stored', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const created = createTestSession({ id: 's-cas', swId: 'sw-cas' });
+    await repo.save(created);
+
+    const loaded = await repo.findById(created.id);
+    if (!loaded) throw Error();
+
+    // Two writers start from the same revision; the loser cannot overwrite the
+    // winner's set, it is told the session moved on.
+    const winner = logSessionSet(loaded, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    if (!winner.ok) throw Error();
+    const loser = logSessionSet(loaded, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 1,
+      weightKg: null,
+      rpe: null,
+    });
+    if (!loser.ok) throw Error();
+
+    expect((await repo.save(winner.data)).ok).toBe(true);
+
+    const result = await repo.save(loser.data);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toEqual({
+      reason: 'concurrent-modification',
+      sessionId: 's-cas',
+      expectedVersion: INITIAL_SESSION_VERSION,
+    });
+
+    const stored = await repo.findById(created.id);
+    expect(stored?.version).toBe(INITIAL_SESSION_VERSION + 1);
+    expect(stored?.exerciseLogs[0]?.sets).toEqual([
+      { type: 'reps', setNumber: 1, reps: 10, weightKg: null, rpe: null },
+    ]);
   });
 });
 

@@ -6,6 +6,7 @@
  * hand-writing database rows.
  */
 
+import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import type { WorkoutExercise } from '@/domain/entities/workout';
 import {
   completeWorkoutSession,
@@ -18,7 +19,8 @@ import {
   type UpdateSetCommandInput,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutId } from '@/domain/types/ids';
+import type { ScheduledWorkoutId, WorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import { createWorkoutSessionId } from '@/domain/types/ids';
 import type { Result } from '@/lib/result';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
 
@@ -113,6 +115,47 @@ export function durationExercise(occurrence: OccurrenceFixture): WorkoutExercise
     throw new Error('Expected the seeded occurrence to contain a duration exercise');
   }
   return exercise;
+}
+
+/**
+ * Wraps a repository so every read of `snapshot.id` returns the given snapshot
+ * while writes still go to real storage. This is how a request that loaded a
+ * session before another request saved it is imitated: the stale aggregate it
+ * produces must be refused by the store, not silently applied.
+ */
+export function readingAs(
+  sessions: WorkoutSessionRepository,
+  snapshot: WorkoutSession,
+): WorkoutSessionRepository {
+  return {
+    findById: async (id) => (id === snapshot.id ? snapshot : sessions.findById(id)),
+    findByScheduledWorkoutId: (id) => sessions.findByScheduledWorkoutId(id),
+    save: (session) => sessions.save(session),
+    listCompleted: () => sessions.listCompleted(),
+  };
+}
+
+/** Branded session id for test fixtures that address a session by its string id. */
+export function toSessionId(value: string): WorkoutSessionId {
+  const result = createWorkoutSessionId(value);
+  if (!result.ok) {
+    throw new Error(result.error.message);
+  }
+
+  return result.data;
+}
+
+/** Reads a session the concurrency tests then hand to a second writer. */
+export async function loadSessionOrThrow(
+  sessions: WorkoutSessionRepository,
+  id: string,
+): Promise<WorkoutSession> {
+  const stored = await sessions.findById(toSessionId(id));
+  if (stored === null) {
+    throw new Error(`Expected session "${id}" to be stored`);
+  }
+
+  return stored;
 }
 
 function unwrap<T>(result: Result<T, { readonly message: string }>, action: string): T {

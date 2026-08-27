@@ -4,20 +4,24 @@
  * Stores sessions in a private Map. Read and write operations use
  * structuredClone to prevent accidental state mutation.
  *
+ * Concurrency contract, mirrored from the Drizzle repository so both stay
+ * behaviorally interchangeable:
+ * - a save is a compare-and-swap on `version`; a stale aggregate is refused with
+ *   `concurrent-modification` instead of overwriting newer state,
+ * - an accepted save advances the stored revision and returns it,
+ * - at most one session may own a scheduled workout occurrence.
+ *
  * Persistence limitations:
  * - Sessions reset when the Node process restarts.
  * - During Next.js dev-server recompilation, HMR may reset the module state.
  * - Not suitable for serverless environments without a shared store.
- *
- * A future Drizzle implementation will replace this class without changing
- * domain or application code.
  */
 
 import type {
   SaveWorkoutSessionResult,
   WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
-import type { WorkoutSession } from '@/domain/entities/workout-session';
+import type { SessionVersion, WorkoutSession } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 import { err, ok } from '@/lib/result';
 
@@ -39,11 +43,32 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
   }
 
   async save(session: WorkoutSession): Promise<SaveWorkoutSessionResult> {
-    // Mirror the unique constraint the Drizzle repository relies on: one session
-    // per scheduled workout occurrence.
+    const stored = this.sessionsById.get(session.id);
+
+    if (stored === undefined) {
+      return this.insert(session);
+    }
+
+    return this.compareAndSwap(stored, session);
+  }
+
+  async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
+    return [...this.sessionsById.values()]
+      .filter((session) => session.completedAt !== null)
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+      .map((session) => structuredClone(session));
+  }
+
+  /**
+   * Stores a session that has never been saved, refusing the one insert the
+   * database would refuse: a session cannot claim an occurrence another session
+   * already owns.
+   */
+  private insert(session: WorkoutSession): SaveWorkoutSessionResult {
     const owner = [...this.sessionsById.values()].find(
       (existing) =>
-        existing.scheduledWorkoutId === session.scheduledWorkoutId && existing.id !== session.id,
+        existing.scheduledWorkoutId === session.scheduledWorkoutId &&
+        existing.id !== session.id,
     );
 
     if (owner !== undefined) {
@@ -55,13 +80,25 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
 
     this.sessionsById.set(session.id, structuredClone(session));
 
-    return ok(undefined);
+    return ok(session.version);
   }
 
-  async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
-    return [...this.sessionsById.values()]
-      .filter((session) => session.completedAt !== null)
-      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
-      .map((session) => structuredClone(session));
+  /** Advances the stored revision only while it still matches what was loaded. */
+  private compareAndSwap(
+    stored: WorkoutSession,
+    session: WorkoutSession,
+  ): SaveWorkoutSessionResult {
+    if (stored.version !== session.version) {
+      return err({
+        reason: 'concurrent-modification',
+        sessionId: session.id,
+        expectedVersion: session.version,
+      });
+    }
+
+    const version: SessionVersion = stored.version + 1;
+    this.sessionsById.set(session.id, structuredClone({ ...session, version }));
+
+    return ok(version);
   }
 }

@@ -289,7 +289,36 @@ Notes on the suite layout:
   PostgreSQL unique violation into the port's conflict result.
 * **Constraint and referential-integrity tests** live in `tests/integration/database/schema/`
   and insert raw rows, because the repositories already refuse those shapes — the goal is to
-  prove the database does too.
+  prove the database does too. `scheduled-workout-ownership.test.ts` pins the same-program
+  rule there: a cross-program schedule entry is rejected, a same-program one succeeds, and
+  deleting a workout still cascades to its occurrences.
+
+### Session Concurrency Tests
+
+Session saves are a compare-and-swap on `workout_sessions.version`, so the tests must show
+that a *stale* aggregate is refused rather than applied. Two helpers make that readable:
+
+* `readingAs(sessions, snapshot)` (`tests/integration/database/fixtures.ts`) answers every
+  read with a captured snapshot while writes still go to real storage. That is exactly what an
+  overlapping request looks like, and it lets PostgreSQL decide the loser.
+* The unit equivalent wraps `InMemoryWorkoutSessionRepository`, which mirrors the same
+  contract, so use cases can be tested without a database.
+
+```typescript
+// tests/integration/database/use-cases/session-concurrency.test.ts
+const stale = await loadSessionOrThrow(sessions, sessionId);   // both writers start here
+expect((await new LogSessionSetUseCase(sessions).execute(win)).ok).toBe(true);
+
+const loser = await new LogSessionSetUseCase(readingAs(sessions, stale)).execute(lost);
+
+expect(loser.ok).toBe(false);                                  // refused, not merged
+if (loser.ok) return;
+expect(loser.error).toMatchObject({ code: 'SESSION_MODIFIED' });
+```
+
+Together these pin three things: an accepted save reports the revision it stored, the
+revision advances on every accepted write, and a refused save changes neither the parent row
+nor its child rows.
 
 ### Rules for Integration Tests
 

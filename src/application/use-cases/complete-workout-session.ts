@@ -13,11 +13,15 @@ import {
 } from '@/domain/entities/workout-session';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
-import { assertSessionSaveSucceeded } from '@/application/use-cases/session-save-conflict';
+import {
+  toSessionModifiedError,
+  type SessionModifiedError,
+} from '@/application/use-cases/session-save-conflict';
 
 export type CompleteWorkoutSessionError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string }
+  | SessionModifiedError
   | SessionMutationError;
 
 export interface CompleteWorkoutSessionInput {
@@ -49,9 +53,14 @@ export class CompleteWorkoutSessionUseCase {
       return result;
     }
 
+    // Saving is a compare-and-swap on the revision this session was loaded at: a
+    // concurrent request that already completed it wins, and this write is refused
+    // rather than resurrecting a completed session.
     const saved = await this.sessionRepository.save(result.data);
-    assertSessionSaveSucceeded(saved, result.data.id);
+    if (!saved.ok) {
+      return err(toSessionModifiedError(saved.error, input.sessionId));
+    }
 
-    return ok(toWorkoutSessionDto(result.data));
+    return ok(toWorkoutSessionDto({ ...result.data, version: saved.data }));
   }
 }

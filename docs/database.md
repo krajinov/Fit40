@@ -276,6 +276,13 @@ entry in `meta/_journal.json`, then run `pnpm db:generate` again. Never edit a g
 file by hand, and never rewrite a migration that has already been applied to a shared
 database — add a new one instead.
 
+**Ordering: a key must exist before the foreign key references it.** `drizzle-kit generate`
+emits `ADD CONSTRAINT … FOREIGN KEY` statements before `CREATE [UNIQUE] INDEX` in the same
+file, so a new composite foreign key and the unique key it references must land in separate
+migrations — the key first, the foreign key next (compare `0004_key_workouts_by_program.sql`
+and `0005_enforce_scheduled_workout_ownership.sql`). The integration suite replays every
+migration on every run, so a broken order fails the tests rather than a deploy.
+
 ---
 
 ## Indexes
@@ -327,8 +334,9 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 
 ### Constraints Enforced Today
 
-`0002_harden_persistence_constraints.sql` records the current hardening pass. The rules it
-applies, and the reason for each:
+`0002_harden_persistence_constraints.sql`, `0003_add_session_version_token.sql`,
+`0004_key_workouts_by_program.sql`, and `0005_enforce_scheduled_workout_ownership.sql`
+record the current hardening pass. The rules they apply, and the reason for each:
 
 | Kind | Where | Rule |
 |------|-------|------|
@@ -337,11 +345,15 @@ applies, and the reason for each:
 | CHECK | `*_reps_range` | `max_reps >= min_reps`, written as `min_reps IS NULL OR max_reps IS NULL OR max_reps >= min_reps` so a nullable bound cannot make the predicate NULL |
 | CHECK | `exercise_logs`, `workout_exercises` | `exercise_order > 0`, `sets > 0`, `rest_seconds >= 0` |
 | CHECK | `workout_sessions` | `completed_at IS NULL OR completed_at >= started_at` |
+| CHECK | `workout_sessions` | `version > 0`: the optimistic-concurrency token is a revision counted from 1, never a sentinel |
 | CHECK | `exercises`, `training_programs` | Enum columns are restricted to the values the domain const objects define |
 | FK | `set_logs (session_id, exercise_order)` → `exercise_logs` | Composite key: a set cannot exist without its exercise log, and cannot point at another session's log |
 | FK | `exercise_logs.exercise_id`, `workout_exercises.exercise_id` → `exercises.id` | `RESTRICT`: catalog rows that workouts or sessions depend on cannot be deleted |
 | FK | `scheduled_workouts (program_id, week_number)` → `program_weeks` | Composite key: a schedule entry cannot reference a week belonging to another program |
+| KEY | `workouts (program_id, id)` | Unique index that lets a foreign key require the referenced workout to belong to the same program |
+| FK | `scheduled_workouts (program_id, workout_id)` → `workouts (program_id, id)` | Composite key: a schedule entry cannot point at a workout owned by another program; `CASCADE` as before, so deleting a workout removes its occurrences |
 | UNIQUE | `workout_sessions.scheduled_workout_id` | At most one session per scheduled workout occurrence — the basis of the conflict handling below |
+| UNIQUE | `workout_sessions.id` | The primary key, which the session save's compare-and-swap relies on |
 
 Domain validation stays primary; these constraints exist so that a bad seed, a hand-run
 statement, or a future writer cannot store data the domain would reject. The behavior is
@@ -406,7 +418,14 @@ export interface ScheduledWorkoutConflict {
   readonly scheduledWorkoutId: string;
 }
 
-export type SaveWorkoutSessionResult = Result<void, ScheduledWorkoutConflict>;
+export interface ConcurrentModificationConflict {
+  readonly reason: 'concurrent-modification';
+  readonly sessionId: string;
+  readonly expectedVersion: SessionVersion;
+}
+
+export type SaveWorkoutSessionResult =
+  Result<SessionVersion, WorkoutSessionSaveConflict>;
 ```
 
 * `DrizzleWorkoutSessionRepository.save` catches SQLSTATE `23505` for that constraint and
@@ -422,6 +441,41 @@ export type SaveWorkoutSessionResult = Result<void, ScheduledWorkoutConflict>;
 
 Anything else — a foreign key or check violation, a lost connection — is a bug or an outage,
 not a business outcome, and is thrown so the error boundary can log it.
+
+### Implemented: Optimistic Concurrency on Session Saves
+
+A session mutation is read-then-write, so two overlapping requests can both load the same
+revision. `workout_sessions` carries a `version` revision that the repository treats as a
+compare-and-swap token; the aggregate carries the same token as `WorkoutSession.version`,
+starting at `1` (`INITIAL_SESSION_VERSION`):
+
+* `save` first tries `UPDATE … WHERE id = ? AND version = ?` and stores the next revision.
+  If the row no longer holds the caller's revision, the update touches nothing; `save` then
+  treats the session as new and inserts it, and when the primary key refuses that too, the
+  write is reported as `err({ reason: 'concurrent-modification', … })`. The repository does
+  not leak SQLSTATE, Drizzle, or postgres.js details past the port — the unique-constraint
+  detection lives in `pg-constraint-violation.ts`, which is infrastructure-only.
+* The accepted write returns the revision it stored, which the use cases stamp into the DTO
+  (`version`), so a client can send it back with the next request. Mutations in the domain
+  layer never touch the token; only storage advances it.
+* `InMemoryWorkoutSessionRepository` mirrors the contract exactly: an accepted save advances
+  the stored revision by one, and a save from an older revision is refused the same way, so
+  application tests behave identically against either implementation.
+* The log/update/delete/complete use cases translate `concurrent-modification` into the typed
+  `SESSION_MODIFIED` error and surface it as an expected outcome — the caller reloads and
+  retries. A `scheduled-workout-conflict` on the update path cannot be legitimate (a session
+  never changes its occurrence), so that one is thrown as corrupt stored data.
+* The whole aggregate — parent row, exercise logs, set logs — is one transaction, so a
+  refused save leaves no partial state behind.
+
+### Implemented: Scheduled-Workout Ownership
+
+`scheduled_workouts` records its own `program_id`, which a plain `workout_id` foreign key
+cannot check. `workouts (program_id, id)` is therefore a unique key, and
+`scheduled_workouts (program_id, workout_id)` references it, so an occurrence can only
+schedule a workout owned by the same program. The key had to be created in an earlier
+migration (`0004`) than the composite foreign key (`0005`), because a generated migration
+adds the constraint before it creates the index it would reference.
 
 ---
 

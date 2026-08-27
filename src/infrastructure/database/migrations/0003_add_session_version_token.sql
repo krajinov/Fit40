@@ -1,0 +1,2 @@
+ALTER TABLE "workout_sessions" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "workout_sessions" ADD CONSTRAINT "chk_workout_sessions_version" CHECK ("workout_sessions"."version" > 0);

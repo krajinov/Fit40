@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { INITIAL_SESSION_VERSION } from '@/domain/entities/workout-session';
 import { createWorkoutSessionId, type WorkoutSessionId } from '@/domain/types/ids';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import { seedCatalog } from '@/infrastructure/database/seed/seed-catalog';
@@ -240,5 +241,102 @@ describe('DrizzleWorkoutSessionRepository', () => {
     expect(
       await repository().findByScheduledWorkoutId(occurrence.scheduledWorkoutId),
     ).toMatchObject({ id: 'session-winner' });
+  });
+
+  it('round-trips the concurrency token and advances it on every accepted save', async () => {
+    const occurrence = await loadOccurrence();
+    const first = repsExercise(occurrence);
+    const created = startSession('session-revisions', occurrence);
+    expect(created.version).toBe(INITIAL_SESSION_VERSION);
+
+    const inserted = await repository().save(created);
+    expect(inserted).toEqual({ ok: true, data: INITIAL_SESSION_VERSION });
+    expect((await repository().findById(created.id))?.version).toBe(INITIAL_SESSION_VERSION);
+
+    // Writing from the revision the previous save reported moves the row forward.
+    const stored = await repository().findById(created.id);
+    if (stored === null) throw new Error('Expected the session to be stored');
+    const logged = withLoggedSet(stored, {
+      exerciseOrder: first.order,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+
+    const updated = await repository().save(logged);
+    expect(updated).toEqual({ ok: true, data: INITIAL_SESSION_VERSION + 1 });
+    expect((await repository().findById(created.id))?.version).toBe(INITIAL_SESSION_VERSION + 1);
+  });
+
+  it('refuses a save built from a revision that is no longer stored', async () => {
+    const occurrence = await loadOccurrence();
+    const first = repsExercise(occurrence);
+    const created = startSession('session-stale', occurrence);
+    await repository().save(created);
+
+    // Two requests load the same revision. Whichever reaches storage last would
+    // silently discard the other's set, so it must be refused instead.
+    const winner = withLoggedSet(created, {
+      exerciseOrder: first.order,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 8,
+    });
+    expect((await repository().save(winner)).ok).toBe(true);
+
+    const loser = withLoggedSet(created, {
+      exerciseOrder: first.order,
+      type: 'reps',
+      reps: 1,
+      weightKg: null,
+      rpe: null,
+    });
+    const result = await repository().save(loser);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toEqual({
+      reason: 'concurrent-modification',
+      sessionId: 'session-stale',
+      expectedVersion: INITIAL_SESSION_VERSION,
+    });
+
+    // The rejected save wrote nothing: neither the parent row nor its sets moved.
+    const stored = await repository().findById(created.id);
+    expect(stored?.version).toBe(INITIAL_SESSION_VERSION + 1);
+    expect(stored?.exerciseLogs[0]?.sets).toEqual([
+      { type: 'reps', setNumber: 1, reps: 10, weightKg: 20, rpe: 8 },
+    ]);
+  });
+
+  it('refuses to complete a session another request already completed', async () => {
+    const occurrence = await loadOccurrence();
+    const first = repsExercise(occurrence);
+    const inProgress = withLoggedSet(startSession('session-double-complete', occurrence), {
+      exerciseOrder: first.order,
+      type: 'reps',
+      reps: 8,
+      weightKg: null,
+      rpe: null,
+    });
+    await repository().save(inProgress);
+
+    const stored = await repository().findById(inProgress.id);
+    if (stored === null) throw new Error('Expected the session to be stored');
+
+    const firstCompletion = withCompletion(stored, new Date('2026-08-27T11:00:00.000Z'));
+    expect((await repository().save(firstCompletion)).ok).toBe(true);
+
+    const secondCompletion = withCompletion(stored, new Date('2026-08-27T12:00:00.000Z'));
+    const result = await repository().save(secondCompletion);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.reason).toBe('concurrent-modification');
+
+    const kept = await repository().findById(inProgress.id);
+    expect(kept?.completedAt?.toISOString()).toBe('2026-08-27T11:00:00.000Z');
   });
 });

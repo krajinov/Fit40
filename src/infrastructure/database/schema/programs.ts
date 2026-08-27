@@ -49,6 +49,9 @@ export const workouts = pgTable(
   },
   (table) => [
     check('chk_workouts_estimated_duration', sql`${table.estimatedDurationMinutes} > 0`),
+    // Key that lets other tables prove a workout belongs to *their* program: a
+    // composite foreign key has to reference the owning column together with the id.
+    uniqueIndex('workouts_program_id_id_idx').on(table.programId, table.id),
     // FK column + "find workouts by program" lookups.
     index('workouts_program_id_idx').on(table.programId),
   ],
@@ -135,9 +138,7 @@ export const scheduledWorkouts = pgTable(
       .notNull()
       .references(() => trainingPrograms.id, { onDelete: 'cascade' }),
     weekNumber: integer('week_number').notNull(),
-    workoutId: text('workout_id')
-      .notNull()
-      .references(() => workouts.id, { onDelete: 'cascade' }),
+    workoutId: text('workout_id').notNull(),
     orderInWeek: integer('order_in_week').notNull(),
   },
   (table) => [
@@ -148,6 +149,15 @@ export const scheduledWorkouts = pgTable(
       name: 'scheduled_workouts_program_week_fk',
       columns: [table.programId, table.weekNumber],
       foreignColumns: [programWeeks.programId, programWeeks.weekNumber],
+    }).onDelete('cascade'),
+    // ...and at a workout owned by that same program: referencing the
+    // workouts (program_id, id) key makes "program A schedules program B's
+    // workout" a violation instead of quietly inconsistent data. Deleting a
+    // workout still removes its occurrences, as the single-column key did.
+    foreignKey({
+      name: 'scheduled_workouts_workout_program_fk',
+      columns: [table.programId, table.workoutId],
+      foreignColumns: [workouts.programId, workouts.id],
     }).onDelete('cascade'),
     // FK column: deleting a workout must find its scheduled occurrences.
     index('scheduled_workouts_workout_id_idx').on(table.workoutId),

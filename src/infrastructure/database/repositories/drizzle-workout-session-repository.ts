@@ -2,22 +2,32 @@ import type {
   SaveWorkoutSessionResult,
   WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
-import type { WorkoutSession } from '@/domain/entities/workout-session';
+import type { SessionVersion, WorkoutSession } from '@/domain/entities/workout-session';
 import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 import { err, ok } from '@/lib/result';
 
-import { eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 
-import { exerciseLogToRow, sessionToDomain, setLogToRow } from '../mappers/session-mapper';
+import { exerciseLogToRow, setLogToRow } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, workoutSessions } from '../schema';
+import { loadSessionAggregate, loadSessionAggregates } from './session-aggregate-loader';
+import { isUniqueViolation } from './pg-constraint-violation';
 
-import type { DrizzleDatabase } from './types';
+import type { DrizzleDatabase, DrizzleTransaction } from './types';
 
 /** Unique constraint backing "at most one session per scheduled workout". */
 const SCHEDULED_WORKOUT_UNIQUE_CONSTRAINT = 'workout_sessions_scheduled_workout_id';
 
-/** PostgreSQL error code for unique_violation. */
-const UNIQUE_VIOLATION = '23505';
+/**
+ * Raised from inside the save transaction when the stored session is no longer at
+ * the revision the caller loaded. It unwinds the transaction before anything is
+ * written, and `save` translates it into the port's neutral conflict.
+ */
+class StaleSessionSaveError extends Error {
+  constructor(readonly expectedVersion: SessionVersion) {
+    super(`Workout session revision ${expectedVersion} is no longer current`);
+  }
+}
 
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: DrizzleDatabase) {}
@@ -30,7 +40,7 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       return null;
     }
 
-    return this.loadSession(row);
+    return loadSessionAggregate(this.db, row);
   }
 
   async findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null> {
@@ -41,50 +51,33 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       return null;
     }
 
-    return this.loadSession(row);
+    return loadSessionAggregate(this.db, row);
   }
 
+  /**
+   * Compare-and-swap on `version`: the stored row is advanced only while it is
+   * still at the revision the caller holds. When nothing matches, the session has
+   * never been stored and is inserted — and if that insert loses on the primary
+   * key, somebody else wrote this session first. Child rows are replaced wholesale
+   * inside the same transaction, so a refused save leaves no trace and an accepted
+   * one stores exactly the aggregate it was handed.
+   */
   async save(session: WorkoutSession): Promise<SaveWorkoutSessionResult> {
     try {
-      await this.db.transaction(async (tx) => {
-        const sessionValues = {
-          id: session.id,
-          scheduledWorkoutId: session.scheduledWorkoutId,
-          workoutId: session.workoutId,
-          startedAt: session.startedAt,
-          completedAt: session.completedAt,
-        };
-
-        await tx
-          .insert(workoutSessions)
-          .values(sessionValues)
-          .onConflictDoUpdate({
-            target: workoutSessions.id,
-            set: {
-              scheduledWorkoutId: session.scheduledWorkoutId,
-              workoutId: session.workoutId,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-            },
-          });
-
-        await tx.delete(setLogs).where(eq(setLogs.sessionId, session.id));
-        await tx.delete(exerciseLogs).where(eq(exerciseLogs.sessionId, session.id));
-
-        for (const log of session.exerciseLogs) {
-          await tx
-            .insert(exerciseLogs)
-            .values(exerciseLogToRow(session.id, log.order, log));
-
-          for (const set of log.sets) {
-            await tx.insert(setLogs).values(setLogToRow(session.id, log.order, set));
-          }
-        }
-      });
+      const version = await this.db.transaction((tx) => this.writeAggregate(tx, session));
+      return ok(version);
     } catch (error) {
-      // Another session claimed this scheduled workout occurrence first. The
-      // transaction has already rolled back, so translate the unique violation
-      // into the port's persistence-neutral conflict instead of leaking Postgres.
+      // The transaction has already rolled back. Both conflicts are decided by
+      // storage, so they become the port's persistence-neutral results rather than
+      // PostgreSQL errors traveling up into application code.
+      if (error instanceof StaleSessionSaveError) {
+        return err({
+          reason: 'concurrent-modification',
+          sessionId: session.id,
+          expectedVersion: error.expectedVersion,
+        });
+      }
+
       if (isScheduledWorkoutConflict(error)) {
         return err({
           reason: 'scheduled-workout-conflict',
@@ -94,8 +87,70 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
 
       throw error;
     }
+  }
 
-    return ok(undefined);
+  private async writeAggregate(
+    tx: DrizzleTransaction,
+    session: WorkoutSession,
+  ): Promise<SessionVersion> {
+    const [updated] = await tx
+      .update(workoutSessions)
+      .set({
+        scheduledWorkoutId: session.scheduledWorkoutId,
+        workoutId: session.workoutId,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt,
+        version: session.version + 1,
+      })
+      .where(
+        and(eq(workoutSessions.id, session.id), eq(workoutSessions.version, session.version)),
+      )
+      .returning({ version: workoutSessions.version });
+
+    if (updated !== undefined) {
+      await this.replaceChildRows(tx, session);
+      return updated.version;
+    }
+
+    // Nothing matched the caller's revision. A session that has never been stored
+    // lands here; one that was written in the meantime is refused by its primary
+    // key. Claiming an occurrence another session owns still surfaces as a unique
+    // violation on `scheduled_workout_id`, which that conflict target keeps live.
+    const [inserted] = await tx
+      .insert(workoutSessions)
+      .values({
+        id: session.id,
+        scheduledWorkoutId: session.scheduledWorkoutId,
+        workoutId: session.workoutId,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt,
+        version: session.version,
+      })
+      .onConflictDoNothing({ target: workoutSessions.id })
+      .returning({ version: workoutSessions.version });
+
+    if (inserted === undefined) {
+      throw new StaleSessionSaveError(session.version);
+    }
+
+    await this.replaceChildRows(tx, session);
+    return inserted.version;
+  }
+
+  private async replaceChildRows(
+    tx: DrizzleTransaction,
+    session: WorkoutSession,
+  ): Promise<void> {
+    await tx.delete(setLogs).where(eq(setLogs.sessionId, session.id));
+    await tx.delete(exerciseLogs).where(eq(exerciseLogs.sessionId, session.id));
+
+    for (const log of session.exerciseLogs) {
+      await tx.insert(exerciseLogs).values(exerciseLogToRow(session.id, log.order, log));
+
+      for (const set of log.sets) {
+        await tx.insert(setLogs).values(setLogToRow(session.id, log.order, set));
+      }
+    }
   }
 
   async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
@@ -109,85 +164,14 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       return [];
     }
 
-    return this.loadSessions(rows);
+    return loadSessionAggregates(this.db, rows);
   }
-
-  private async loadSession(row: typeof workoutSessions.$inferSelect): Promise<WorkoutSession> {
-    const [exerciseLogRows, setLogRows] = await this.loadExerciseAndSetLogs([row.id]);
-
-    return sessionToDomain(row, exerciseLogRows, setLogRows);
-  }
-
-  private async loadSessions(sessionRows: ReadonlyArray<typeof workoutSessions.$inferSelect>): Promise<ReadonlyArray<WorkoutSession>> {
-    const ids = sessionRows.map((row) => row.id);
-    const [exerciseLogRows, setLogRows] = await this.loadExerciseAndSetLogs(ids);
-
-    return sessionRows.map((row) =>
-      sessionToDomain(
-        row,
-        exerciseLogRows.filter((log) => log.sessionId === row.id),
-        setLogRows.filter((set) => set.sessionId === row.id),
-      ),
-    );
-  }
-
-  private async loadExerciseAndSetLogs(
-    sessionIds: ReadonlyArray<string>,
-  ): Promise<[ReadonlyArray<typeof exerciseLogs.$inferSelect>, ReadonlyArray<typeof setLogs.$inferSelect>]> {
-    if (sessionIds.length === 0) {
-      return [[], []];
-    }
-
-    const ids = sessionIds.map((id) => id);
-
-    const exerciseLogRows = await this.db
-      .select()
-      .from(exerciseLogs)
-      .where(inArray(exerciseLogs.sessionId, ids))
-      .orderBy(exerciseLogs.sessionId, exerciseLogs.exerciseOrder);
-
-    const setLogRows = await this.db
-      .select()
-      .from(setLogs)
-      .where(inArray(setLogs.sessionId, ids))
-      .orderBy(setLogs.sessionId, setLogs.exerciseOrder, setLogs.setNumber);
-
-    return [exerciseLogRows, setLogRows];
-  }
-}
-
-/**
- * Structural shape of the errors postgres.js surfaces for constraint violations.
- * The cast in `isScheduledWorkoutConflict` is the minimal way to read those
- * fields off an `unknown` catch value; the package does not export the error
- * class as a type-only import.
- */
-interface PostgresConstraintViolation {
-  readonly code?: unknown;
-  readonly constraint_name?: unknown;
 }
 
 /**
  * True when PostgreSQL rejected the write because another session already owns
  * this scheduled workout (SQLSTATE 23505 on the sessions unique constraint).
- *
- * Drizzle wraps driver errors in a "Failed query" error and keeps the original
- * PostgresError in `cause`, so both levels are inspected.
  */
 function isScheduledWorkoutConflict(error: unknown): boolean {
-  return (
-    isScheduledWorkoutViolation(error) ||
-    (error instanceof Error && isScheduledWorkoutViolation(error.cause))
-  );
-}
-
-function isScheduledWorkoutViolation(candidate: unknown): boolean {
-  const { code, constraint_name: constraintName } =
-    (candidate ?? {}) as PostgresConstraintViolation;
-
-  return (
-    code === UNIQUE_VIOLATION &&
-    typeof constraintName === 'string' &&
-    constraintName.startsWith(SCHEDULED_WORKOUT_UNIQUE_CONSTRAINT)
-  );
+  return isUniqueViolation(error, SCHEDULED_WORKOUT_UNIQUE_CONSTRAINT);
 }

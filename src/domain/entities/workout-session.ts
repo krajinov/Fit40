@@ -14,6 +14,11 @@
  * - Session starts in-progress (completedAt === null)
  * - completeWorkoutSession transitions to completed (completedAt !== null)
  * - Completed sessions are immutable
+ *
+ * Concurrency:
+ * - `version` is the persisted revision a session represents. Mutations carry it
+ *   forward unchanged; the repository advances it when a write is accepted, so a
+ *   stale aggregate cannot overwrite newer stored state.
  */
 
 import { err, ok, type Result } from '@/lib/result';
@@ -56,6 +61,20 @@ export interface ExerciseLog {
 
 export type WorkoutSessionStatus = 'in-progress' | 'completed';
 
+/**
+ * Optimistic-concurrency token identifying the persisted revision of a session.
+ *
+ * The value is opaque persistence metadata carried by the aggregate: a session
+ * created in memory carries {@link INITIAL_SESSION_VERSION}, which is also the
+ * revision its first write stores, and every accepted write moves the stored row
+ * to the next revision. Repositories compare the token they read with the token
+ * the caller holds, so a stale aggregate can never overwrite newer state.
+ */
+export type SessionVersion = number;
+
+/** The revision an aggregate that has not been persisted yet will be stored as. */
+export const INITIAL_SESSION_VERSION: SessionVersion = 1;
+
 export interface WorkoutSession {
   readonly id: WorkoutSessionId;
   readonly scheduledWorkoutId: ScheduledWorkoutId;
@@ -63,6 +82,8 @@ export interface WorkoutSession {
   readonly startedAt: Date;
   readonly completedAt: Date | null;
   readonly exerciseLogs: ReadonlyArray<ExerciseLog>;
+  /** Revision this state corresponds to; see {@link SessionVersion}. */
+  readonly version: SessionVersion;
 }
 
 // ─── Input Types ─────────────────────────────────────────────────────────────
@@ -259,6 +280,7 @@ export function createWorkoutSession(
     startedAt: input.startedAt,
     completedAt: null,
     exerciseLogs,
+    version: INITIAL_SESSION_VERSION,
   });
 }
 

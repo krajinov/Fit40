@@ -26,6 +26,11 @@ export const workoutSessions = pgTable(
       .references(() => workouts.id, { onDelete: 'restrict' }),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // Optimistic-concurrency token for the aggregate. A save is conditioned on the
+    // revision the caller loaded, so two writers of the same session cannot both
+    // win; the repository owns advancing it, and 1 is the revision a new session
+    // is stored as.
+    version: integer('version').notNull().default(1),
   },
   (table) => [
     // A session is either in progress or finished; a finished one cannot precede its start.
@@ -33,6 +38,8 @@ export const workoutSessions = pgTable(
       'chk_workout_sessions_completed_at',
       sql`${table.completedAt} IS NULL OR ${table.completedAt} >= ${table.startedAt}`,
     ),
+    // Revisions count from 1, so a stored 0 could never be a legitimately loaded token.
+    check('chk_workout_sessions_version', sql`${table.version} > 0`),
     // FK columns; `scheduled_workout_id` is already UNIQUE (index-backed).
     index('workout_sessions_workout_id_idx').on(table.workoutId),
     // Completed-session listings order by started_at.

@@ -1,5 +1,5 @@
 {
-  "id": "74dd9fa2-258b-4c26-ad5a-48a15dc006e6",
+  "id": "0a6429e5-24db-43a7-bdb8-5ed49438f109",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -246,7 +246,7 @@
         },
         "exercises_secondary_muscles_unique_check": {
           "name": "exercises_secondary_muscles_unique_check",
-          "value": "(\n        cardinality(\"exercises\".\"secondary_muscles\") <= 1\n        OR NOT (\"exercises\".\"secondary_muscles\"[2:cardinality(\"exercises\".\"secondary_muscles\")]\n                <@ \"exercises\".\"secondary_muscles\"[1:cardinality(\"exercises\".\"secondary_muscles\") - 1])\n      )"
+          "value": "NOT fit40_text_array_has_duplicates(\"exercises\".\"secondary_muscles\")"
         },
         "exercises_equipment_check": {
           "name": "exercises_equipment_check",
@@ -263,6 +263,10 @@
         "exercises_considerations_check": {
           "name": "exercises_considerations_check",
           "value": "(\n        jsonb_typeof(\"exercises\".\"considerations\") = 'array'\n        AND (jsonb_array_length(\"exercises\".\"considerations\") = 0\n          OR (jsonb_path_exists(\"exercises\".\"considerations\", 'strict $[*].consideration')\n              AND jsonb_path_exists(\"exercises\".\"considerations\", 'strict $[*].level')))\n        AND NOT jsonb_path_exists(\n          \"exercises\".\"considerations\",\n          'strict $[*] ? ((@.consideration != \"knee-sensitive\" && @.consideration != \"lower-back-sensitive\" && @.consideration != \"shoulder-sensitive\" && @.consideration != \"limited-mobility\") || (@.level != \"suitable\" && @.level != \"caution\" && @.level != \"unsuitable\"))'\n        )\n      )"
+        },
+        "exercises_considerations_unique_check": {
+          "name": "exercises_considerations_unique_check",
+          "value": "fit40_considerations_are_unique(\"exercises\".\"considerations\")"
         }
       },
       "isRLSEnabled": false

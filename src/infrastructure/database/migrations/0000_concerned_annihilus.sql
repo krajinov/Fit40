@@ -1,3 +1,19 @@
+-- Hand-authored: IMMUTABLE helper functions referenced by CHECK constraints
+-- below (exercises_secondary_muscles_unique_check,
+-- exercises_considerations_unique_check). drizzle-kit cannot generate function
+-- definitions, and a plain CHECK cannot contain the required DISTINCT
+-- subquery, so these functions are declared here before the table DDL.
+CREATE FUNCTION "fit40_text_array_has_duplicates"("arr" text[]) RETURNS boolean
+LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $fit40$ SELECT cardinality("arr") <> cardinality(ARRAY(SELECT DISTINCT unnest("arr"))); $fit40$;
+
+CREATE FUNCTION "fit40_considerations_are_unique"("c" jsonb) RETURNS boolean
+LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $fit40$ SELECT CASE
+  WHEN jsonb_typeof("c") <> 'array' THEN true
+  ELSE (SELECT count(*) = count(DISTINCT elem->>'consideration') FROM jsonb_array_elements("c") AS elem)
+END; $fit40$;
+--> statement-breakpoint
 CREATE TABLE "exercise_logs" (
 	"session_id" text NOT NULL,
 	"exercise_order" integer NOT NULL,
@@ -37,11 +53,7 @@ CREATE TABLE "exercises" (
 	CONSTRAINT "exercises_primary_muscle_check" CHECK ("exercises"."primary_muscle" IN ('chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body')),
 	CONSTRAINT "exercises_secondary_muscles_check" CHECK ("exercises"."secondary_muscles" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]),
 	CONSTRAINT "exercises_secondary_muscles_exclusion_check" CHECK (NOT ("exercises"."secondary_muscles" @> ARRAY["exercises"."primary_muscle"]::text[])),
-	CONSTRAINT "exercises_secondary_muscles_unique_check" CHECK ((
-        cardinality("exercises"."secondary_muscles") <= 1
-        OR NOT ("exercises"."secondary_muscles"[2:cardinality("exercises"."secondary_muscles")]
-                <@ "exercises"."secondary_muscles"[1:cardinality("exercises"."secondary_muscles") - 1])
-      )),
+	CONSTRAINT "exercises_secondary_muscles_unique_check" CHECK (NOT fit40_text_array_has_duplicates("exercises"."secondary_muscles")),
 	CONSTRAINT "exercises_equipment_check" CHECK ("exercises"."equipment" IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')),
 	CONSTRAINT "exercises_difficulty_check" CHECK ("exercises"."difficulty" IN ('beginner','intermediate','advanced')),
 	CONSTRAINT "exercises_movement_pattern_check" CHECK ("exercises"."movement_pattern" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')),
@@ -54,7 +66,8 @@ CREATE TABLE "exercises" (
           "exercises"."considerations",
           'strict $[*] ? ((@.consideration != "knee-sensitive" && @.consideration != "lower-back-sensitive" && @.consideration != "shoulder-sensitive" && @.consideration != "limited-mobility") || (@.level != "suitable" && @.level != "caution" && @.level != "unsuitable"))'
         )
-      ))
+      )),
+	CONSTRAINT "exercises_considerations_unique_check" CHECK (fit40_considerations_are_unique("exercises"."considerations"))
 );
 --> statement-breakpoint
 CREATE TABLE "program_weeks" (

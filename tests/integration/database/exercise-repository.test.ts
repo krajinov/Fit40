@@ -95,6 +95,19 @@ describe('DrizzleExerciseRepository', () => {
     ).rejects.toThrow();
   });
 
+  it('rejects a duplicate consideration key within the array', async () => {
+    await expect(
+      db.insert(exercises).values(
+        exerciseRow({
+          considerations: [
+            { consideration: 'knee-sensitive', level: 'caution' },
+            { consideration: 'knee-sensitive', level: 'suitable' },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it('persists distinct secondary muscles and reads them back', async () => {
     await db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['back', 'shoulders'] }));
 
@@ -113,6 +126,13 @@ describe('DrizzleExerciseRepository', () => {
   it('rejects duplicate values in secondary_muscles', async () => {
     await expect(
       db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['back', 'back'] })),
+    ).rejects.toThrow();
+  });
+
+  it('rejects duplicates anywhere in secondary_muscles (regression: non-adjacent tail)', async () => {
+    // A duplicate in the head with a distinct tail element must still be rejected.
+    await expect(
+      db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['back', 'back', 'biceps'] })),
     ).rejects.toThrow();
   });
 

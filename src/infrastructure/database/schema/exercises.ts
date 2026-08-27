@@ -42,15 +42,13 @@ export const exercises = pgTable(
       'exercises_secondary_muscles_exclusion_check',
       sql`NOT (${table.secondaryMuscles} @> ARRAY[${table.primaryMuscle}]::text[])`,
     ),
-    // secondary_muscles must not contain duplicates: no element in the tail
-    // (positions 2..n) may also appear in the head (positions 1..n-1).
+    // secondary_muscles must not contain duplicates anywhere in the array.
+    // The check compares array cardinality with distinct-element cardinality
+    // via the fit40_text_array_has_duplicates() IMMUTABLE function (a plain
+    // CHECK cannot contain the required subquery).
     secondaryMusclesUniqueCheck: check(
       'exercises_secondary_muscles_unique_check',
-      sql`(
-        cardinality(${table.secondaryMuscles}) <= 1
-        OR NOT (${table.secondaryMuscles}[2:cardinality(${table.secondaryMuscles})]
-                <@ ${table.secondaryMuscles}[1:cardinality(${table.secondaryMuscles}) - 1])
-      )`,
+      sql`NOT fit40_text_array_has_duplicates(${table.secondaryMuscles})`,
     ),
     equipmentCheck: check(
       'exercises_equipment_check',
@@ -81,6 +79,13 @@ export const exercises = pgTable(
           'strict $[*] ? ((@.consideration != "knee-sensitive" && @.consideration != "lower-back-sensitive" && @.consideration != "shoulder-sensitive" && @.consideration != "limited-mobility") || (@.level != "suitable" && @.level != "caution" && @.level != "unsuitable"))'
         )
       )`,
+    ),
+    // The same `consideration` must not appear more than once in the array.
+    // The domain factory rejects duplicates, so the DB enforces it at write
+    // time via the fit40_considerations_are_unique() IMMUTABLE function.
+    considerationsUniqueCheck: check(
+      'exercises_considerations_unique_check',
+      sql`fit40_considerations_are_unique(${table.considerations})`,
     ),
   }),
 );

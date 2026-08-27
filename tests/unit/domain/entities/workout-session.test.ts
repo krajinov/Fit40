@@ -50,8 +50,8 @@ function makeValidInput() {
     workoutId: workoutId('wo-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [
-      { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme() },
-      { exerciseId: validExerciseId('ex-002'), order: 2, prescription: validDurationScheme() },
+      { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
+      { exerciseId: validExerciseId('ex-002'), order: 2, prescription: validDurationScheme(), restSeconds: 90 },
     ],
   };
 }
@@ -85,6 +85,7 @@ describe('createWorkoutSession', () => {
 
     expect(result.data.completedAt).toBeNull();
     expect(getSessionStatus(result.data)).toBe('in-progress');
+    expect(result.data.version).toBe(0);
   });
 
   it('derives status as in-progress when completedAt is null', () => {
@@ -117,8 +118,10 @@ describe('createWorkoutSession', () => {
     expect(logs).toHaveLength(2);
     expect(logs[0]?.order).toBe(1);
     expect(logs[0]?.prescription.type).toBe('reps');
+    expect(logs[0]?.restSeconds).toBe(60);
     expect(logs[1]?.order).toBe(2);
     expect(logs[1]?.prescription.type).toBe('duration');
+    expect(logs[1]?.restSeconds).toBe(90);
   });
 
   it('creates a valid branded WorkoutSessionId', () => {
@@ -163,8 +166,8 @@ describe('createWorkoutSession', () => {
     const result = createWorkoutSession({
       ...makeValidInput(),
       exerciseLogs: [
-        { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme() },
-        { exerciseId: validExerciseId('ex-002'), order: 3, prescription: validDurationScheme() },
+        { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
+        { exerciseId: validExerciseId('ex-002'), order: 3, prescription: validDurationScheme(), restSeconds: 90 },
       ],
     });
 

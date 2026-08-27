@@ -10,8 +10,8 @@ import {
   weekNumberSchema,
   workoutOrderSchema,
 } from '@/features/programs/schemas/program-routes-schema';
-import { startSessionAction } from '@/features/sessions/actions/start-session';
-import { completeSessionAction } from '@/features/sessions/actions/complete-session';
+import { StartSessionButton } from '@/features/sessions/components/StartSessionButton';
+import { CompleteSessionButton } from '@/features/sessions/components/CompleteSessionButton';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
 import { formatPrescription } from '@/features/programs/program-labels';
@@ -65,17 +65,7 @@ function StartPanel({
           {workout.workout.exercises.length} exercises
         </p>
       </div>
-      <form action={startSessionAction}>
-        <input type="hidden" name="programSlug" value={programSlug} />
-        <input type="hidden" name="weekNumber" value={weekNumber} />
-        <input type="hidden" name="workoutOrder" value={workoutOrder} />
-        <button
-          type="submit"
-          className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Start workout
-        </button>
-      </form>
+      <StartSessionButton programSlug={programSlug} weekNumber={weekNumber} workoutOrder={workoutOrder} />
       <div>
         <Link
           href={`/programs/${programSlug}/weeks/${weekNumber}/workouts/${workoutOrder}`}
@@ -151,18 +141,12 @@ function InProgressPanel({
       </ol>
 
       <div className="flex flex-wrap items-center gap-4">
-        <form action={completeSessionAction}>
-          <input type="hidden" name="sessionId" value={session.sessionId} />
-          <input type="hidden" name="programSlug" value={programSlug} />
-          <input type="hidden" name="weekNumber" value={weekNumber} />
-          <input type="hidden" name="workoutOrder" value={workoutOrder} />
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center rounded-md bg-green-600 px-6 py-3 text-sm font-medium text-white hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Complete workout
-          </button>
-        </form>
+        <CompleteSessionButton
+          sessionId={session.sessionId}
+          programSlug={programSlug}
+          weekNumber={weekNumber}
+          workoutOrder={workoutOrder}
+        />
       </div>
 
       <p className="text-sm text-muted-foreground">

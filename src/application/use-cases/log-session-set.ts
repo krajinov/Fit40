@@ -2,7 +2,10 @@
  * Use case: log a new set in an in-progress workout session.
  */
 
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import {
+  SessionStaleVersionError,
+  type WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import {
   logSessionSet,
@@ -15,6 +18,7 @@ import { err, ok, type Result } from '@/lib/result';
 export type LogSessionSetError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string }
+  | { readonly code: 'SESSION_MODIFIED'; readonly message: string }
   | SessionMutationError;
 
 export interface LogSessionSetInput {
@@ -79,7 +83,17 @@ export class LogSessionSetUseCase {
       return result;
     }
 
-    await this.sessionRepository.save(result.data);
+    try {
+      await this.sessionRepository.save(result.data);
+    } catch (error) {
+      if (error instanceof SessionStaleVersionError) {
+        return err({
+          code: 'SESSION_MODIFIED',
+          message: `Session "${input.sessionId}" was modified concurrently; reload and retry`,
+        });
+      }
+      throw error;
+    }
 
     return ok(toWorkoutSessionDto(result.data));
   }

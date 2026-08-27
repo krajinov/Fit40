@@ -1,10 +1,15 @@
 'use client';
 
 import { useActionState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { WorkoutSessionSetDto } from '@/application/dto/workout-session';
 
 import { updateSetAction } from '@/features/sessions/actions/update-set';
 import { deleteSetAction } from '@/features/sessions/actions/delete-set';
+import { SessionActionError } from '@/features/sessions/components/SessionActionError';
+import type { SessionActionState } from '@/features/sessions/types/session-action-state';
+
+const initialState: SessionActionState = { ok: true };
 
 interface LoggedSetRowProps {
   readonly sessionId: string;
@@ -25,7 +30,12 @@ export function LoggedSetRow({
   workoutOrder,
   isReps,
 }: LoggedSetRowProps) {
-  async function updateAction(prev: string | undefined, formData: FormData) {
+  const router = useRouter();
+
+  async function updateAction(
+    prev: SessionActionState,
+    formData: FormData,
+  ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
     formData.set('setNumber', String(set.setNumber));
@@ -33,23 +43,32 @@ export function LoggedSetRow({
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
-    await updateSetAction(formData);
-    return undefined;
+    const state = await updateSetAction(formData);
+    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+      router.refresh();
+    }
+    return state;
   }
 
-  async function removeAction(prev: string | undefined, formData: FormData) {
+  async function removeAction(
+    prev: SessionActionState,
+    formData: FormData,
+  ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
     formData.set('setNumber', String(set.setNumber));
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
-    await deleteSetAction(formData);
-    return undefined;
+    const state = await deleteSetAction(formData);
+    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+      router.refresh();
+    }
+    return state;
   }
 
-  const [, updateFormAction, updatePending] = useActionState(updateAction, undefined);
-  const [, deleteFormAction, deletePending] = useActionState(removeAction, undefined);
+  const [updateState, updateFormAction, updatePending] = useActionState(updateAction, initialState);
+  const [deleteState, deleteFormAction, deletePending] = useActionState(removeAction, initialState);
 
   return (
     <li className="flex flex-wrap items-center gap-2 text-sm py-1">
@@ -88,6 +107,9 @@ export function LoggedSetRow({
           Delete
         </button>
       </form>
+
+      {!updateState.ok && <SessionActionError error={updateState.error} className="w-full" />}
+      {!deleteState.ok && <SessionActionError error={deleteState.error} className="w-full" />}
     </li>
   );
 }

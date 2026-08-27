@@ -17,5 +17,9 @@ const client = postgres(connectionString, {
 // Create the Drizzle ORM instance
 export const db = drizzle(client, { schema });
 
+// Type of the shared Drizzle instance; repositories accept this so that tests
+// can inject their own client backed by TEST_DATABASE_URL.
+export type Database = typeof db;
+
 // Export the raw client for transactions or advanced use cases
 export { client };

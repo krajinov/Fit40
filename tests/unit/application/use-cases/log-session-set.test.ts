@@ -11,7 +11,7 @@ function swid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) thr
 function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 
 function makeSession() {
-  const r = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep() }] });
+  const r = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!r.ok) throw Error();
   return r.data;
 }

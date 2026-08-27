@@ -8,7 +8,10 @@
 import crypto from 'crypto';
 
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import {
+  SessionAlreadyExistsError,
+  type WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { createWorkoutSession, type CreateExerciseLogInput } from '@/domain/entities/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
@@ -80,6 +83,7 @@ export class StartWorkoutSessionUseCase {
         exerciseId: exercise.exerciseId,
         order: exercise.order,
         prescription: exercise.prescription,
+        restSeconds: exercise.restSeconds,
       }),
     );
 
@@ -101,7 +105,18 @@ export class StartWorkoutSessionUseCase {
       });
     }
 
-    await this.sessionRepository.save(sessionResult.data);
+    try {
+      await this.sessionRepository.save(sessionResult.data);
+    } catch (error) {
+      if (error instanceof SessionAlreadyExistsError) {
+        return err({
+          code: 'SESSION_ALREADY_EXISTS',
+          scheduledWorkoutId: occurrence.scheduled.id,
+          message: `A session already exists for scheduled workout "${occurrence.scheduled.id}"`,
+        });
+      }
+      throw error;
+    }
 
     return ok(toWorkoutSessionDto(sessionResult.data));
   }

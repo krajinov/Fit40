@@ -13,7 +13,7 @@ function createTestSession(override?: Partial<{ id: string; swId: string }>) {
   const r = createWorkoutSession({
     id: override?.id ?? 's-1', scheduledWorkoutId: sid(override?.swId ?? 'sw-1'), workoutId: wid('w-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
-    exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep() }],
+    exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!r.ok) throw Error();
   return r.data;

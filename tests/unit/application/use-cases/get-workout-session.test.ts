@@ -42,7 +42,7 @@ describe('GetWorkoutSessionUseCase', () => {
     const { program, swId } = seedProgram();
     const repo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program) };
     const sr = new InMemoryWorkoutSessionRepository();
-    const sr2 = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swId, workoutId: program.workouts[0]!.id, startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep() }] });
+    const sr2 = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swId, workoutId: program.workouts[0]!.id, startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
     if (!sr2.ok) throw Error();
     await sr.save(sr2.data);
     const uc = new GetWorkoutSessionUseCase(repo, sr);

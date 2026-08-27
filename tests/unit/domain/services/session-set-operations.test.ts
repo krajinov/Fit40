@@ -21,8 +21,8 @@ function session() {
     id: 't', scheduledWorkoutId: sid('s-1'), workoutId: wid('w-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [
-      { exerciseId: eid('ex-001'), order: 1, prescription: rep() },
-      { exerciseId: eid('ex-002'), order: 2, prescription: dur() },
+      { exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 },
+      { exerciseId: eid('ex-002'), order: 2, prescription: dur(), restSeconds: 60 },
     ],
   });
   if (!r.ok) throw Error();
@@ -117,6 +117,39 @@ describe('logSessionSet', () => {
     expect(m.ok).toBe(false);
     if (m.ok) return;
     expect(m.error.code).toBe('SESSION_ALREADY_COMPLETED');
+  });
+
+  it('preserves the version token across domain mutations', () => {
+    const s = session();
+    expect(s.version).toBe(0);
+
+    const logged = logSessionSet(s, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    expect(logged.data.version).toBe(0);
+
+    const updated = updateSessionSet(logged.data, {
+      exerciseOrder: 1,
+      setNumber: 1,
+      type: 'reps',
+      reps: 12,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.data.version).toBe(0);
+
+    const completed = completeWorkoutSession(updated.data, new Date());
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.data.version).toBe(0);
   });
 });
 

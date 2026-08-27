@@ -36,6 +36,12 @@ CREATE TABLE "exercises" (
 	CONSTRAINT "exercises_slug_unique" UNIQUE("slug"),
 	CONSTRAINT "exercises_primary_muscle_check" CHECK ("exercises"."primary_muscle" IN ('chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body')),
 	CONSTRAINT "exercises_secondary_muscles_check" CHECK ("exercises"."secondary_muscles" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]),
+	CONSTRAINT "exercises_secondary_muscles_exclusion_check" CHECK (NOT ("exercises"."secondary_muscles" @> ARRAY["exercises"."primary_muscle"]::text[])),
+	CONSTRAINT "exercises_secondary_muscles_unique_check" CHECK ((
+        cardinality("exercises"."secondary_muscles") <= 1
+        OR NOT ("exercises"."secondary_muscles"[2:cardinality("exercises"."secondary_muscles")]
+                <@ "exercises"."secondary_muscles"[1:cardinality("exercises"."secondary_muscles") - 1])
+      )),
 	CONSTRAINT "exercises_equipment_check" CHECK ("exercises"."equipment" IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')),
 	CONSTRAINT "exercises_difficulty_check" CHECK ("exercises"."difficulty" IN ('beginner','intermediate','advanced')),
 	CONSTRAINT "exercises_movement_pattern_check" CHECK ("exercises"."movement_pattern" IN ('squat','hinge','push-horizontal','push-vertical','pull-horizontal','pull-vertical','carry','core','isolation','locomotion')),
@@ -148,7 +154,8 @@ CREATE TABLE "workouts" (
 	"slug" text NOT NULL,
 	"description" text NOT NULL,
 	"estimated_duration_minutes" integer NOT NULL,
-	CONSTRAINT "workouts_program_id_id_unique" UNIQUE("program_id","id")
+	CONSTRAINT "workouts_program_id_id_unique" UNIQUE("program_id","id"),
+	CONSTRAINT "workouts_estimated_duration_minutes_check" CHECK ("workouts"."estimated_duration_minutes" > 0)
 );
 --> statement-breakpoint
 ALTER TABLE "exercise_logs" ADD CONSTRAINT "exercise_logs_session_id_workout_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."workout_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TrainingProgram } from '@/domain/entities/training-program';
-import { scheduledWorkouts } from '@/infrastructure/database/schema';
+import { scheduledWorkouts, workouts } from '@/infrastructure/database/schema';
 import { seedPrograms } from '@/infrastructure/programs/seed-programs';
 
 import { closeDatabase, db, programRepository, resetAndSeed } from './setup';
@@ -119,6 +119,45 @@ describe('DrizzleProgramRepository', () => {
       expect(loaded).not.toBeUndefined();
       expect(sortWorkouts(loaded!)).toEqual(sortWorkouts(seeded));
     }
+  });
+
+  it('rejects a workout with zero estimated duration', async () => {
+    await expect(
+      db.insert(workouts).values({
+        id: 'wo-test-duration-zero',
+        programId: 'prog-beginner-strength',
+        name: 'Test Workout',
+        slug: 'test-workout-duration-zero',
+        description: 'A test workout.',
+        estimatedDurationMinutes: 0,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects a workout with a negative estimated duration', async () => {
+    await expect(
+      db.insert(workouts).values({
+        id: 'wo-test-duration-negative',
+        programId: 'prog-beginner-strength',
+        name: 'Test Workout',
+        slug: 'test-workout-duration-negative',
+        description: 'A test workout.',
+        estimatedDurationMinutes: -5,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('accepts a workout with a positive estimated duration', async () => {
+    await expect(
+      db.insert(workouts).values({
+        id: 'wo-test-duration-positive',
+        programId: 'prog-beginner-strength',
+        name: 'Test Workout',
+        slug: 'test-workout-duration-positive',
+        description: 'A test workout.',
+        estimatedDurationMinutes: 45,
+      }),
+    ).resolves.toBeDefined();
   });
 });
 

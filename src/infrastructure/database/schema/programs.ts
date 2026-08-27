@@ -69,6 +69,12 @@ export const workouts = pgTable(
     programIdIdx: index('workouts_program_id_idx').on(table.programId),
     // Unique key used as the target of the scheduled_workouts ownership FK.
     programIdIdUnique: unique('workouts_program_id_id_unique').on(table.programId, table.id),
+    // The domain factory rejects non-positive durations, so the DB enforces it
+    // at write time instead of surfacing as read-time corruption.
+    estimatedDurationMinutesCheck: check(
+      'workouts_estimated_duration_minutes_check',
+      sql`${table.estimatedDurationMinutes} > 0`,
+    ),
   }),
 );
 

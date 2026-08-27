@@ -1,5 +1,5 @@
 {
-  "id": "60d2cdba-6034-426b-a786-4b796f55e42b",
+  "id": "74dd9fa2-258b-4c26-ad5a-48a15dc006e6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -239,6 +239,14 @@
         "exercises_secondary_muscles_check": {
           "name": "exercises_secondary_muscles_check",
           "value": "\"exercises\".\"secondary_muscles\" <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]"
+        },
+        "exercises_secondary_muscles_exclusion_check": {
+          "name": "exercises_secondary_muscles_exclusion_check",
+          "value": "NOT (\"exercises\".\"secondary_muscles\" @> ARRAY[\"exercises\".\"primary_muscle\"]::text[])"
+        },
+        "exercises_secondary_muscles_unique_check": {
+          "name": "exercises_secondary_muscles_unique_check",
+          "value": "(\n        cardinality(\"exercises\".\"secondary_muscles\") <= 1\n        OR NOT (\"exercises\".\"secondary_muscles\"[2:cardinality(\"exercises\".\"secondary_muscles\")]\n                <@ \"exercises\".\"secondary_muscles\"[1:cardinality(\"exercises\".\"secondary_muscles\") - 1])\n      )"
         },
         "exercises_equipment_check": {
           "name": "exercises_equipment_check",
@@ -1006,7 +1014,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "workouts_estimated_duration_minutes_check": {
+          "name": "workouts_estimated_duration_minutes_check",
+          "value": "\"workouts\".\"estimated_duration_minutes\" > 0"
+        }
+      },
       "isRLSEnabled": false
     }
   },

@@ -94,6 +94,33 @@ describe('DrizzleExerciseRepository', () => {
       ),
     ).rejects.toThrow();
   });
+
+  it('persists distinct secondary muscles and reads them back', async () => {
+    await db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['back', 'shoulders'] }));
+
+    const exercise = await exerciseRepository.findBySlug('test-considerations');
+    expect(exercise).not.toBeNull();
+    expect(exercise?.secondaryMuscles).toEqual(['back', 'shoulders']);
+  });
+
+  it('rejects the primary muscle appearing in secondary_muscles', async () => {
+    // exerciseRow() has primaryMuscle 'chest'.
+    await expect(
+      db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['chest'] })),
+    ).rejects.toThrow();
+  });
+
+  it('rejects duplicate values in secondary_muscles', async () => {
+    await expect(
+      db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['back', 'back'] })),
+    ).rejects.toThrow();
+  });
+
+  it('rejects an unsupported muscle value in secondary_muscles', async () => {
+    await expect(
+      db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['banana'] })),
+    ).rejects.toThrow();
+  });
 });
 
 afterAll(async () => {

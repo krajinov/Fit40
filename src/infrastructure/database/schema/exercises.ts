@@ -35,6 +35,23 @@ export const exercises = pgTable(
       'exercises_secondary_muscles_check',
       sql`${table.secondaryMuscles} <@ ARRAY['chest','back','shoulders','quadriceps','hamstrings','glutes','calves','biceps','triceps','core','full-body']::text[]`,
     ),
+    // The primary muscle must not also appear in secondary_muscles (the domain
+    // factory rejects this, so it is enforced at write time instead of
+    // surfacing as read-time corruption).
+    secondaryMusclesExclusionCheck: check(
+      'exercises_secondary_muscles_exclusion_check',
+      sql`NOT (${table.secondaryMuscles} @> ARRAY[${table.primaryMuscle}]::text[])`,
+    ),
+    // secondary_muscles must not contain duplicates: no element in the tail
+    // (positions 2..n) may also appear in the head (positions 1..n-1).
+    secondaryMusclesUniqueCheck: check(
+      'exercises_secondary_muscles_unique_check',
+      sql`(
+        cardinality(${table.secondaryMuscles}) <= 1
+        OR NOT (${table.secondaryMuscles}[2:cardinality(${table.secondaryMuscles})]
+                <@ ${table.secondaryMuscles}[1:cardinality(${table.secondaryMuscles}) - 1])
+      )`,
+    ),
     equipmentCheck: check(
       'exercises_equipment_check',
       sql`${table.equipment} IN ('bodyweight','dumbbell','barbell','resistance-band','kettlebell','bench','machine','pull-up-bar')`,

@@ -114,10 +114,17 @@ if (isDirectRun) {
       // No .env file — rely on the caller's environment.
     }
 
-    const { db } = await import('./client');
-    const result = await seedDatabase(db);
-    console.log('Seed complete (insert-if-missing):');
-    console.log(JSON.stringify(result, null, 2));
+    const { client, db } = await import('./client');
+    try {
+      const result = await seedDatabase(db);
+      console.log('Seed complete (insert-if-missing):');
+      console.log(JSON.stringify(result, null, 2));
+    } finally {
+      // Always close the shared pool so the process exits promptly, on both
+      // success and failure. Programmatic callers use seedDatabase(db) and are
+      // unaffected.
+      await client.end();
+    }
   })().catch((error: unknown) => {
     console.error('Seed failed:', error);
     process.exitCode = 1;

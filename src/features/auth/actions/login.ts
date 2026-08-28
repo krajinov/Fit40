@@ -24,6 +24,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionState> 
   if (!parsed.success) {
     return {
       ok: false,
+      email: submittedEmail(formData),
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Please fix the errors below.',
@@ -40,12 +41,24 @@ export async function loginAction(formData: FormData): Promise<AuthActionState> 
   if (!result.ok) {
     return {
       ok: false,
+      email: submittedEmail(formData),
       error: { code: result.error.code, message: result.error.message },
     };
   }
 
   await setSessionCookie(result.data.session.token, result.data.session.expiresAt);
   redirect(resolveNextPath(formData.get('next')));
+}
+
+/**
+ * Echoes the submitted email back to the client so the form can preserve it
+ * across expected errors (including INVALID_CREDENTIALS). Passwords are
+ * intentionally never echoed — action state must not carry credentials back
+ * to the client.
+ */
+function submittedEmail(formData: FormData): string | undefined {
+  const value = formData.get('email');
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function flattenFieldErrors(error: {

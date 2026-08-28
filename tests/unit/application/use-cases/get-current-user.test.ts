@@ -19,6 +19,7 @@ describe('GetCurrentUserUseCase', () => {
     create: vi.fn(),
     findByTokenHash: vi.fn(),
     deleteByTokenHash: vi.fn(),
+    deleteExpired: vi.fn(),
   };
 
   const useCase = new GetCurrentUserUseCase(userRepository, sessionRepository);
@@ -51,9 +52,10 @@ describe('GetCurrentUserUseCase', () => {
     expect(sessionRepository.findByTokenHash).not.toHaveBeenCalled();
   });
 
-  it('returns null for an expired session', async () => {
+  it('returns null for an expired session and deletes the row on encounter', async () => {
+    const expiredTokenHash = hashSessionToken('token');
     vi.mocked(sessionRepository.findByTokenHash).mockResolvedValue({
-      tokenHash: hashSessionToken('token'),
+      tokenHash: expiredTokenHash,
       userId: 'u-1' as UserId,
       expiresAt: new Date('2000-01-01T00:00:00Z'),
       createdAt: new Date(),
@@ -63,6 +65,7 @@ describe('GetCurrentUserUseCase', () => {
 
     expect(result).toBeNull();
     expect(userRepository.findById).not.toHaveBeenCalled();
+    expect(sessionRepository.deleteByTokenHash).toHaveBeenCalledWith(expiredTokenHash);
   });
 
   it('returns null if the session user no longer exists', async () => {

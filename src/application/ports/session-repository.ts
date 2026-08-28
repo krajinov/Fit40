@@ -33,4 +33,13 @@ export interface SessionRepository {
    * does not exist succeeds silently.
    */
   deleteByTokenHash(tokenHash: string): Promise<void>;
+
+  /**
+   * Deletes all sessions whose expiry has passed `now`. Returns the number of
+   * deleted rows. Used for opportunistic expired-session cleanup — bounds
+   * accumulation of sessions whose owner never presents the token again
+   * (e.g. a cookie that reached its fixed browser expiry), without
+   * schedulers, queues, or background workers.
+   */
+  deleteExpired(now: Date): Promise<number>;
 }

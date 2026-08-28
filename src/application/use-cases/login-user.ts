@@ -5,6 +5,9 @@
  * never reveals whether the email exists. For unknown emails a dummy argon2
  * verification runs against a constant hash so response timing does not
  * leak account existence either.
+ *
+ * Every login attempt also opportunistically purges expired sessions so
+ * abandoned rows cannot accumulate indefinitely.
  */
 
 import type { PasswordHasher } from '@/application/ports/password-hasher';
@@ -46,6 +49,12 @@ export class LoginUserUseCase {
   ) {}
 
   async execute(input: LoginUserInput): Promise<Result<LoginUserResult, LoginUserError>> {
+    // Opportunistic hygiene, not authentication: a global, index-backed purge
+    // of expired sessions on every login attempt bounds table growth without
+    // schedulers or background workers (login is the natural recurring auth
+    // boundary). Expected to succeed whenever the DB is reachable at all.
+    await this.sessionRepository.deleteExpired(new Date());
+
     const emailResult = createEmailAddress(input.email);
     if (!emailResult.ok) {
       await this.passwordHasher.verify(DUMMY_PASSWORD_HASH, input.password);

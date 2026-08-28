@@ -7,7 +7,7 @@ import { createUserId } from '@/domain/types/ids';
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
 
-import { db, resetDatabase } from './setup';
+import { client, db, resetDatabase } from './setup';
 
 const userRepository = new DrizzleUserRepository(db);
 const sessionRepository = new DrizzleSessionRepository(db);
@@ -83,5 +83,44 @@ describe('DrizzleSessionRepository', () => {
 
     const found = await sessionRepository.findByTokenHash('hash-token-3');
     expect(found).toBeNull();
+  });
+
+  it('deleteExpired removes only expired sessions and returns the deleted count', async () => {
+    const userId = createUserId(await createSampleUser('user@example.com'));
+    if (!userId.ok) throw new Error('unexpected user id failure');
+
+    await sessionRepository.create({
+      tokenHash: 'expired-token',
+      userId: userId.data,
+      expiresAt: new Date('2020-01-01T00:00:00Z'),
+      createdAt: new Date('2019-12-01T00:00:00Z'),
+    });
+    await sessionRepository.create({
+      tokenHash: 'live-token',
+      userId: userId.data,
+      expiresAt: new Date('2099-01-01T00:00:00Z'),
+      createdAt: new Date(),
+    });
+
+    const deleted = await sessionRepository.deleteExpired(new Date());
+
+    expect(deleted).toBe(1);
+    expect(await sessionRepository.findByTokenHash('expired-token')).toBeNull();
+    expect(await sessionRepository.findByTokenHash('live-token')).not.toBeNull();
+  });
+
+  it('deleteExpired returns 0 when nothing is expired', async () => {
+    const deleted = await sessionRepository.deleteExpired(new Date());
+    expect(deleted).toBe(0);
+  });
+
+  it('indexes auth_sessions.expires_at for the cleanup purge', async () => {
+    const rows = await client<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE tablename = 'auth_sessions'
+    `;
+
+    const indexNames = rows.map((row) => row.indexname);
+    expect(indexNames).toContain('auth_sessions_expires_at_idx');
+    expect(indexNames).toContain('auth_sessions_user_id_idx');
   });
 });

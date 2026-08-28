@@ -149,6 +149,54 @@ describe('auth actions', () => {
       await expect(registerAction(fd)).rejects.toThrow('NEXT_REDIRECT:/dashboard');
       expect(redirect).toHaveBeenCalledWith('/dashboard');
     });
+
+    it('preserves the submitted email in state on VALIDATION_ERROR', async () => {
+      const fd = makeRegisterFormData({ email: 'User@Example.com', password: 'short' });
+      const result = (await registerAction(fd)) as AuthActionState;
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unexpected success');
+
+      expect(result.email).toBe('User@Example.com');
+    });
+
+    it('preserves the submitted email in state on EMAIL_ALREADY_EXISTS', async () => {
+      vi.mocked(registerUserUseCase.execute).mockResolvedValue({
+        ok: false,
+        error: {
+          code: 'EMAIL_ALREADY_EXISTS',
+          email: 'user@example.com',
+          message: 'An account with this email already exists.',
+        },
+      });
+
+      const result = (await registerAction(makeRegisterFormData())) as AuthActionState;
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unexpected success');
+
+      expect(result.error.code).toBe('EMAIL_ALREADY_EXISTS');
+      expect(result.email).toBe('user@example.com');
+      expect(JSON.stringify(result)).not.toContain('password123');
+    });
+
+    it('never returns password values in action state', async () => {
+      const fd = makeRegisterFormData({
+        email: 'not-an-email',
+        password: 'secret-value-123',
+        confirmPassword: 'different-secret-456',
+      });
+      const result = (await registerAction(fd)) as AuthActionState;
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unexpected success');
+
+      // Field-error KEYS (e.g. confirmPassword as a fieldErrors entry) are
+      // intentional UX; credential VALUES must never appear in state.
+      expect(JSON.stringify(result)).not.toContain('secret-value-123');
+      expect(Object.keys(result.error.fieldErrors ?? {})).toContain('confirmPassword');
+      expect(result.email).toBe('not-an-email');
+    });
   });
 
   describe('loginAction', () => {
@@ -174,6 +222,8 @@ describe('auth actions', () => {
       if (result.ok) throw new Error('unexpected success');
 
       expect(result.error.code).toBe('INVALID_CREDENTIALS');
+      expect(result.email).toBe('user@example.com');
+      expect(JSON.stringify(result)).not.toContain('password123');
     });
 
     it('sets the session cookie and redirects on success', async () => {
@@ -202,6 +252,24 @@ describe('auth actions', () => {
       expect(logoutUserUseCase.execute).toHaveBeenCalledWith({ token: 'old-token' });
       expect(mockCookieStore.get('fit40_session')).toBeUndefined();
       expect(redirect).toHaveBeenCalledWith('/');
+    });
+
+    it('is idempotent when no session cookie exists', async () => {
+      await expect(logoutAction()).rejects.toThrow('NEXT_REDIRECT:/');
+
+      expect(logoutUserUseCase.execute).not.toHaveBeenCalled();
+      expect(mockCookieStore.get('fit40_session')).toBeUndefined();
+      expect(redirect).toHaveBeenCalledWith('/');
+    });
+
+    it('still clears the cookie when server-side revocation fails', async () => {
+      mockCookieStore.set('fit40_session', 'old-token', {});
+      vi.mocked(logoutUserUseCase.execute).mockRejectedValue(new Error('db unreachable'));
+
+      await expect(logoutAction()).rejects.toThrow('db unreachable');
+
+      expect(mockCookieStore.get('fit40_session')).toBeUndefined();
+      expect(redirect).not.toHaveBeenCalled();
     });
   });
 });

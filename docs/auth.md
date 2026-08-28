@@ -68,6 +68,39 @@ Only `/dashboard` is protected in this slice. Public catalog routes
 **unchanged**; authentication + `WorkoutSession.userId` ownership will be
 introduced together in the later Enrollment/Ownership slice.
 
+## Session lifecycle & cleanup
+
+Expired sessions are prevented from accumulating without schedulers or
+background workers:
+
+- **Current-user resolution** (`GetCurrentUserUseCase`): an expired session
+  encountered by its token is deleted on the spot (the token can never
+  authenticate again) and the caller is treated as anonymous.
+- **Login** (`LoginUserUseCase`): every login attempt opportunistically purges
+  all expired sessions via `SessionRepository.deleteExpired(now)`. Login is the
+  natural recurring auth boundary, so never-represented expired rows are bounded
+  too.
+- **Index:** `auth_sessions_expires_at_idx` (forward-only migration `0002`)
+  keeps the bulk purge cheap. Migrations `0000` and `0001` are untouched.
+
+## Logout failure semantics
+
+`logoutAction` attempts server-side revocation, then clears the session cookie
+in a `finally` block. A transient database failure therefore still logs the
+browser out locally; the unexpected error then propagates to the error boundary
+(it is not swallowed) and the redirect to `/` is skipped. `redirect()` sits
+outside the `try`, so `NEXT_REDIRECT` is never caught. Logout is idempotent:
+a missing cookie still redirects without calling the use case.
+
+## Form UX: email preservation
+
+Auth action state (`AuthActionState.ok === false`) may carry the user-submitted
+email so `LoginForm`/`RegisterForm` can preserve it across expected errors
+(`VALIDATION_ERROR`, `EMAIL_ALREADY_EXISTS`, `INVALID_CREDENTIALS`). Password
+values are **never** echoed in action state — password fields intentionally
+clear after submission, and no credential ever leaves the request lifecycle.
+Server-side Zod validation remains authoritative.
+
 ## Registration duplicate race
 
 Registration performs a friendly preflight `findByEmail` check, but the

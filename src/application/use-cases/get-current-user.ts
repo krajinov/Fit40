@@ -24,7 +24,15 @@ export class GetCurrentUserUseCase {
     }
 
     const session = await this.sessionRepository.findByTokenHash(hashSessionToken(token));
-    if (session === null || session.expiresAt <= new Date()) {
+    if (session === null) {
+      return null;
+    }
+
+    if (session.expiresAt <= new Date()) {
+      // Hygiene, not authentication: an expired token can never authenticate
+      // again, so remove the row now. Idempotent; no scheduler needed. Bulk
+      // cleanup of never-represented expired rows happens at login.
+      await this.sessionRepository.deleteByTokenHash(session.tokenHash);
       return null;
     }
 

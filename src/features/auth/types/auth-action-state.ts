@@ -18,6 +18,12 @@ export interface AuthActionError {
   readonly fieldErrors?: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
+/**
+ * `AuthActionState.ok === false` may carry the user-submitted email so the
+ * form can preserve it across expected errors (validation failure, duplicate
+ * email, invalid credentials). Credentials are NEVER part of action state —
+ * password fields intentionally clear after submission.
+ */
 export type AuthActionState =
   | { readonly ok: true }
-  | { readonly ok: false; readonly error: AuthActionError };
+  | { readonly ok: false; readonly email?: string; readonly error: AuthActionError };

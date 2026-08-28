@@ -13,7 +13,7 @@ import { seedDatabase } from '@/infrastructure/database/seed';
 
 import { getTestDatabaseUrl } from './test-env';
 
-const client = postgres(getTestDatabaseUrl(), { max: 1 });
+export const client = postgres(getTestDatabaseUrl(), { max: 1 });
 
 export const db = drizzle(client, { schema });
 

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, lte } from 'drizzle-orm';
 
 import type { AuthSession, SessionRepository } from '@/application/ports/session-repository';
 
@@ -29,5 +29,14 @@ export class DrizzleSessionRepository implements SessionRepository {
 
   async deleteByTokenHash(tokenHash: string): Promise<void> {
     await this.db.delete(authSessions).where(eq(authSessions.tokenHash, tokenHash));
+  }
+
+  async deleteExpired(now: Date): Promise<number> {
+    const deleted = await this.db
+      .delete(authSessions)
+      .where(lte(authSessions.expiresAt, now))
+      .returning({ tokenHash: authSessions.tokenHash });
+
+    return deleted.length;
   }
 }

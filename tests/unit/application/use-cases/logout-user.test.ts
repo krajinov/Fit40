@@ -9,6 +9,7 @@ describe('LogoutUserUseCase', () => {
     create: vi.fn(),
     findByTokenHash: vi.fn(),
     deleteByTokenHash: vi.fn(),
+    deleteExpired: vi.fn(),
   };
 
   const useCase = new LogoutUserUseCase(sessionRepository);

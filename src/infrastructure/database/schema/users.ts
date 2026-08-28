@@ -40,6 +40,7 @@ export const authSessions = pgTable(
   },
   (table) => ({
     userIdIdx: index('auth_sessions_user_id_idx').on(table.userId),
+    expiresAtIdx: index('auth_sessions_expires_at_idx').on(table.expiresAt),
     expiryCheck: check(
       'auth_sessions_expiry_check',
       sql`${table.expiresAt} > ${table.createdAt}`,

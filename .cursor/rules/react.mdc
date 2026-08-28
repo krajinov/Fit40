@@ -47,9 +47,10 @@ NOT for: derived state, data fetching, state synchronization.
 
 ## Forms
 
-- React Hook Form + `@hookform/resolvers/zod`.
-- Zod schema defines validation.
-- Submit calls Server Action.
+- Native `<form>` bound to a Next.js Server Action.
+- `useActionState` / `useFormStatus` when client-side action state is needed.
+- Server-side Zod validation is authoritative. HTML attributes are UX only, not a security boundary.
+- Do not add React Hook Form or `@hookform/resolvers` without explicit approval.
 - Reset on success. Preserve on validation error.
 
 ## Hooks

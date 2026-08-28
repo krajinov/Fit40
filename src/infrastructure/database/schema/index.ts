@@ -13,3 +13,4 @@ export {
   workouts,
 } from './programs';
 export { exerciseLogs, setLogs, workoutSessions } from './sessions';
+export { authSessions, users } from './users';

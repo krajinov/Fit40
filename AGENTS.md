@@ -8,7 +8,7 @@ This file is the **canonical source of truth** for AI coding agents and human de
 
 **Fit40** is a fitness and training platform for adults aged 40+. It covers user profiles, training programs, workout tracking, progressive overload, exercise selection with equipment/limitation awareness, progress dashboards, and potentially AI-assisted program generation.
 
-**Tech stack (fixed):** Next.js (App Router), TypeScript (strict), React, Tailwind CSS, shadcn/ui, PostgreSQL, Drizzle ORM, Zod, React Hook Form.
+**Tech stack (fixed):** Next.js (App Router), TypeScript (strict), React, Tailwind CSS, shadcn/ui, PostgreSQL, Drizzle ORM, Zod. Mutations and forms use Next.js Server Actions (see [Forms & Mutations](#forms--mutations)).
 
 ---
 
@@ -229,7 +229,7 @@ See `docs/coding-conventions.md` for full details.
 - Avoid `useState` for values derivable from props or other state.
 - Avoid `useMemo`/`useCallback` unless there is a measured performance need.
 - Avoid global state (Redux, Zustand) unless a clear need emerges. Prefer server state + URL state + local component state.
-- Forms use React Hook Form + Zod resolver.
+- Forms follow the Server Action architecture: native `<form>` bound to a Server Action, with `useActionState` where client-side action state is required. See [Forms & Mutations](#forms--mutations).
 - Feature components live in `src/features/[name]/components/`.
 - Shared components live in `src/components/`.
 
@@ -259,7 +259,7 @@ See `docs/coding-conventions.md` for full details.
 | Input Source | Validate? | How |
 |-------------|-----------|-----|
 | HTTP request body/params | ✅ Yes | Zod schema at Server Action / Route Handler boundary |
-| Form input | ✅ Yes | Zod schema + React Hook Form resolver (client) + re-validate server-side |
+| Form input | ✅ Yes | Zod schema at the Server Action boundary (server-side validation is authoritative) |
 | Route params | ✅ Yes | Zod schema in Server Component or Action |
 | Query params | ✅ Yes | Zod schema |
 | Environment variables | ✅ Yes | Zod schema at app startup (`src/lib/env.ts`) |
@@ -310,12 +310,15 @@ See `docs/database.md` for full details.
 
 ## Forms & Mutations
 
-- React Hook Form + `@hookform/resolvers/zod`.
-- Client-side validation for UX. Server-side validation for security.
-- Server Actions return `Result<T, E>` discriminated union.
+- Forms follow the established Server Action architecture: native `<form>` elements bound to Next.js Server Actions.
+- Use `useActionState` where client-side action state (pending, result rendering) is required, and `useFormStatus` for loading states.
+- Shared Zod schemas define boundary validation. Server-side validation is authoritative and always runs; security-sensitive validation never depends on the client.
+- Client-side validation (e.g. HTML attributes) may improve UX but is not a security boundary and never replaces server-side validation.
+- Avoid unnecessary client components. Keep form client boundaries as small as possible.
+- Do not introduce React Hook Form, `@hookform/resolvers`, or another form-management library unless form complexity clearly justifies it and the dependency is explicitly approved.
+- Server Actions return typed action-state results (`Result<T, E>` discriminated union) for expected errors.
 - Expected errors (validation, business rules) are returned as data, not thrown.
-- Unexpected errors are thrown and caught by error boundaries.
-- Use `useFormStatus` for loading states.
+- Unexpected errors are thrown and caught by error boundaries — never silently converted into expected validation errors.
 - Use `useOptimistic` for optimistic updates where appropriate.
 - Reset form on success. Preserve values on validation error.
 

@@ -78,6 +78,22 @@ export function createScheduledWorkoutId(
 }
 
 /**
+ * Unique identifier for a User.
+ */
+export type UserId = string & { readonly __brand: 'UserId' };
+
+/**
+ * Creates a validated UserId.
+ */
+export function createUserId(value: string): Result<UserId, { readonly message: string }> {
+  if (value.trim().length === 0) {
+    return err({ message: 'UserId cannot be empty' });
+  }
+
+  return ok(value as UserId);
+}
+
+/**
  * Unique identifier for a WorkoutSession.
  */
 export type WorkoutSessionId = string & { readonly __brand: 'WorkoutSessionId' };

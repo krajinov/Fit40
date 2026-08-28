@@ -216,23 +216,27 @@ Invalid uses:
 
 ### Forms
 
-- Use **React Hook Form** with `@hookform/resolvers/zod`.
-- Zod schema defines validation.
-- Form state is local to the form component.
-- Submission calls a Server Action.
+Forms follow the established Server Action architecture.
 
-```typescript
-const form = useForm<CreateWorkoutInput>({
-  resolver: zodResolver(createWorkoutSchema),
-  defaultValues: { ... },
-});
+- Use native `<form>` elements bound to Next.js Server Actions.
+- Use `useActionState` (in small client components) when client-side action state is required; use `useFormStatus` for loading state.
+- Shared Zod schemas define boundary validation. Server-side validation is authoritative and always runs.
+- Client-side validation (e.g. HTML `required`/`min`/`max` attributes) may improve UX but is not a security boundary and never replaces server-side validation.
+- Expected validation/business errors are returned to the form as typed action state (a discriminated union). Unexpected errors are thrown — never silently converted into validation errors.
+- Do not introduce React Hook Form, `@hookform/resolvers`, or another form-management library unless form complexity clearly justifies it and the dependency is explicitly approved.
+- Reset form on success. Preserve values on validation error.
 
-async function onSubmit(data: CreateWorkoutInput) {
-  const result = await createWorkout(data);
-  if (result.ok) {
-    form.reset();
-  }
-}
+```tsx
+// Established pattern (see src/features/sessions/components/SetLoggerForm.tsx)
+'use client';
+
+const [state, formAction, pending] = useActionState(submitAction, initialState);
+
+return (
+  <form action={formAction}>
+    {/* native fields; validation is enforced server-side by the action's Zod schema */}
+  </form>
+);
 ```
 
 ### Component Size
@@ -424,7 +428,7 @@ export function ErrorPage({ error, reset }: { error: Error; reset: () => void })
 | Input Source | Validate? | How |
 |-------------|-----------|-----|
 | HTTP request body/params | ✅ Yes | Zod at Server Action / Route Handler |
-| Form input | ✅ Yes | Zod + RHF resolver (client) + re-validate server |
+| Form input | ✅ Yes | Zod at the Server Action boundary (authoritative); client-side validation is optional UX only |
 | Route params | ✅ Yes | Zod in Server Component or Action |
 | Query params | ✅ Yes | Zod |
 | Environment variables | ✅ Yes | Zod at startup (`src/lib/env.ts`) |
@@ -454,8 +458,8 @@ export const env = envSchema.parse(process.env);
 Once data is validated at a boundary, internal layers trust it.
 
 ```
-Form → Zod validates → Server Action → Use Case → Domain
-         ↑ validated here    ↑ trusted from here on
+Server Action → Zod validates → Use Case → Domain
+                    ↑ boundary               ↑ trusted from here on
 ```
 
 ---

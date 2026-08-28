@@ -15,24 +15,8 @@ import {
   mapSessionToRow,
   mapSetToRow,
 } from '../mappers/session-mapper';
+import { isUniqueViolation } from '../pg-error';
 import { exerciseLogs, setLogs, workoutSessions } from '../schema';
-
-function errorCode(error: unknown): unknown {
-  if (typeof error !== 'object' || error === null) {
-    return undefined;
-  }
-
-  const candidate = error as { code?: unknown; cause?: unknown };
-  if (candidate.code !== undefined) {
-    return candidate.code;
-  }
-
-  return errorCode(candidate.cause);
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return errorCode(error) === '23505';
-}
 
 type SessionRow = typeof workoutSessions.$inferSelect;
 

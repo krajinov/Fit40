@@ -428,7 +428,7 @@ export function ErrorPage({ error, reset }: { error: Error; reset: () => void })
 | Input Source | Validate? | How |
 |-------------|-----------|-----|
 | HTTP request body/params | ✅ Yes | Zod at Server Action / Route Handler |
-| Form input | ✅ Yes | Zod + RHF resolver (client) + re-validate server |
+| Form input | ✅ Yes | Zod at the Server Action boundary (authoritative); client-side validation is optional UX only |
 | Route params | ✅ Yes | Zod in Server Component or Action |
 | Query params | ✅ Yes | Zod |
 | Environment variables | ✅ Yes | Zod at startup (`src/lib/env.ts`) |

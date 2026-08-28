@@ -12,5 +12,6 @@ export {
   workoutExercises,
   workouts,
 } from './programs';
+export { profiles } from './profiles';
 export { exerciseLogs, setLogs, workoutSessions } from './sessions';
 export { authSessions, users } from './users';

@@ -8,6 +8,7 @@ import { DrizzleProgramRepository } from '@/infrastructure/database/repositories
 import { DrizzleRegistrationRepository } from '@/infrastructure/database/repositories/drizzle-registration-repository';
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
+import { DrizzleUserProfileRepository } from '@/infrastructure/database/repositories/drizzle-user-profile-repository';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import { seedDatabase } from '@/infrastructure/database/seed';
 
@@ -23,6 +24,7 @@ export const workoutSessionRepository = new DrizzleWorkoutSessionRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
+export const userProfileRepository = new DrizzleUserProfileRepository(db);
 
 /**
  * Truncates every table, providing deterministic per-test isolation.
@@ -31,6 +33,7 @@ export async function resetDatabase(): Promise<void> {
   await db.execute(sql`
     TRUNCATE TABLE
       auth_sessions,
+      profiles,
       set_logs,
       exercise_logs,
       workout_sessions,

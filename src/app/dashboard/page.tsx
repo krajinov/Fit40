@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 
 import { LogoutButton } from '@/features/auth/components/LogoutButton';
 import { requireUser } from '@/features/auth/current-user';
+import { getUserProfileUseCase } from '@/features/profile/services';
 
 export const metadata: Metadata = {
   title: 'Dashboard',
@@ -9,6 +11,14 @@ export const metadata: Metadata = {
 
 export default async function DashboardPage() {
   const user = await requireUser('/dashboard');
+
+  // New users are steered to onboarding before the dashboard content. This is
+  // the single profile-awareness point after login/registration, so the auth
+  // redirect flow itself stays unchanged.
+  const profile = await getUserProfileUseCase.execute(user.id);
+  if (profile === null) {
+    redirect('/onboarding');
+  }
 
   return (
     <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">

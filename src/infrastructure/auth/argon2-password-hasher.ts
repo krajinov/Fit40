@@ -16,11 +16,14 @@ export class Argon2PasswordHasher implements PasswordHasher {
   }
 
   async verify(storedHash: string, plaintext: string): Promise<boolean> {
-    try {
-      return await verify(storedHash, plaintext);
-    } catch {
-      // A malformed stored hash is a verification failure, not a crash.
-      return false;
-    }
+    // The library returns `false` ONLY for a well-formed stored hash whose
+    // password does not match (a legitimate bad-credential outcome).
+    //
+    // Malformed/corrupt stored hashes and native/runtime/operational verifier
+    // failures throw. Those are unexpected infrastructure errors and MUST
+    // propagate — converting them to `false` would disguise broken persisted
+    // state or outages as INVALID_CREDENTIALS. Failures are preserved with
+    // their original error for observability.
+    return verify(storedHash, plaintext);
   }
 }

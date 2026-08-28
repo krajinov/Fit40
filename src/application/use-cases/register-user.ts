@@ -8,10 +8,10 @@
  * outcome without leaking PostgreSQL details.
  */
 
-import crypto from 'crypto';
-
+import type { IdGenerator } from '@/application/ports/id-generator';
 import type { RegistrationRepository } from '@/application/ports/registration-repository';
 import type { PasswordHasher } from '@/application/ports/password-hasher';
+import type { SessionTokenService } from '@/application/ports/session-token-service';
 import {
   EmailAlreadyExistsError,
   type UserRepository,
@@ -41,13 +41,15 @@ export class RegisterUserUseCase {
     private readonly userRepository: UserRepository,
     private readonly registrationRepository: RegistrationRepository,
     private readonly passwordHasher: PasswordHasher,
+    private readonly idGenerator: IdGenerator,
+    private readonly tokenService: SessionTokenService,
   ) {}
 
   async execute(input: RegisterUserInput): Promise<Result<RegisterUserResult, RegisterUserError>> {
     const email = normalizeEmail(input.email);
 
     const userResult = createUser({
-      id: crypto.randomUUID(),
+      id: this.idGenerator.generate(),
       email,
       createdAt: new Date(),
     });
@@ -69,7 +71,7 @@ export class RegisterUserUseCase {
 
     // User + initial session are persisted atomically by the repository so a
     // failed session write never leaves an orphaned account behind.
-    const { token, session } = buildSession(user.id);
+    const { token, session } = buildSession(this.tokenService, user.id);
 
     try {
       await this.registrationRepository.createUserWithSession(user, passwordHash, session);

@@ -12,6 +12,7 @@
 
 import type { PasswordHasher } from '@/application/ports/password-hasher';
 import type { SessionRepository } from '@/application/ports/session-repository';
+import type { SessionTokenService } from '@/application/ports/session-token-service';
 import type { UserRepository } from '@/application/ports/user-repository';
 import { toUserDto, type UserDto } from '@/application/dto/user';
 import {
@@ -46,6 +47,7 @@ export class LoginUserUseCase {
     private readonly userRepository: UserRepository,
     private readonly sessionRepository: SessionRepository,
     private readonly passwordHasher: PasswordHasher,
+    private readonly tokenService: SessionTokenService,
   ) {}
 
   async execute(input: LoginUserInput): Promise<Result<LoginUserResult, LoginUserError>> {
@@ -79,7 +81,7 @@ export class LoginUserUseCase {
       return err(invalidCredentials());
     }
 
-    const session = await issueSession(this.sessionRepository, credentials.user.id);
+    const session = await issueSession(this.sessionRepository, this.tokenService, credentials.user.id);
 
     return ok({ user: toUserDto(credentials.user), session });
   }

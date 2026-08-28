@@ -6,7 +6,7 @@
  */
 
 import type { SessionRepository } from '@/application/ports/session-repository';
-import { hashSessionToken } from '@/application/use-cases/issue-session';
+import type { SessionTokenService } from '@/application/ports/session-token-service';
 import { ok, type Result } from '@/lib/result';
 
 export interface LogoutUserInput {
@@ -15,11 +15,14 @@ export interface LogoutUserInput {
 }
 
 export class LogoutUserUseCase {
-  constructor(private readonly sessionRepository: SessionRepository) {}
+  constructor(
+    private readonly sessionRepository: SessionRepository,
+    private readonly tokenService: SessionTokenService,
+  ) {}
 
   async execute(input: LogoutUserInput): Promise<Result<null, never>> {
     if (input.token.length > 0) {
-      await this.sessionRepository.deleteByTokenHash(hashSessionToken(input.token));
+      await this.sessionRepository.deleteByTokenHash(this.tokenService.hash(input.token));
     }
 
     return ok(null);

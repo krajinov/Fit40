@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionRepository } from '@/application/ports/session-repository';
 import { LogoutUserUseCase } from '@/application/use-cases/logout-user';
-import { hashSessionToken } from '@/application/use-cases/issue-session';
+import { FakeSessionTokenService } from '../../helpers/fake-crypto';
 
 describe('LogoutUserUseCase', () => {
   const sessionRepository: SessionRepository = {
@@ -12,7 +12,8 @@ describe('LogoutUserUseCase', () => {
     deleteExpired: vi.fn(),
   };
 
-  const useCase = new LogoutUserUseCase(sessionRepository);
+  const tokenService = new FakeSessionTokenService();
+  const useCase = new LogoutUserUseCase(sessionRepository, tokenService);
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -24,9 +25,7 @@ describe('LogoutUserUseCase', () => {
     const result = await useCase.execute({ token });
 
     expect(result.ok).toBe(true);
-    expect(sessionRepository.deleteByTokenHash).toHaveBeenCalledWith(
-      hashSessionToken(token),
-    );
+    expect(sessionRepository.deleteByTokenHash).toHaveBeenCalledWith('fake-hash:raw-token');
   });
 
   it('is idempotent when no session exists', async () => {
@@ -35,8 +34,6 @@ describe('LogoutUserUseCase', () => {
     const result = await useCase.execute({ token: 'unknown-token' });
 
     expect(result.ok).toBe(true);
-    expect(sessionRepository.deleteByTokenHash).toHaveBeenCalledWith(
-      hashSessionToken('unknown-token'),
-    );
+    expect(sessionRepository.deleteByTokenHash).toHaveBeenCalledWith('fake-hash:unknown-token');
   });
 });

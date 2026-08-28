@@ -6,8 +6,10 @@ import {
   EmailAlreadyExistsError,
   type UserRepository,
 } from '@/application/ports/user-repository';
-import type { User } from '@/domain/entities/user';
 import { RegisterUserUseCase } from '@/application/use-cases/register-user';
+import type { User } from '@/domain/entities/user';
+import { SESSION_TTL_MS } from '@/application/use-cases/issue-session';
+import { FakeIdGenerator, FakeSessionTokenService } from '../../helpers/fake-crypto';
 
 describe('RegisterUserUseCase', () => {
   const now = new Date('2026-01-01T00:00:00Z');
@@ -24,18 +26,25 @@ describe('RegisterUserUseCase', () => {
   };
 
   const passwordHasher: PasswordHasher = {
-    hash: vi.fn().mockResolvedValue('hashed-password'),
+    hash: vi.fn(),
     verify: vi.fn(),
   };
 
-  const useCase = new RegisterUserUseCase(
-    userRepository,
-    registrationRepository,
-    passwordHasher,
-  );
+  let idGenerator: FakeIdGenerator;
+  let tokenService: FakeSessionTokenService;
+  let useCase: RegisterUserUseCase;
 
   beforeEach(() => {
     vi.resetAllMocks();
+    idGenerator = new FakeIdGenerator();
+    tokenService = new FakeSessionTokenService();
+    useCase = new RegisterUserUseCase(
+      userRepository,
+      registrationRepository,
+      passwordHasher,
+      idGenerator,
+      tokenService,
+    );
   });
 
   it('creates a user and issues a session for valid input', async () => {
@@ -50,13 +59,20 @@ describe('RegisterUserUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unexpected failure');
 
+    // Deterministic ID/token assertions via the injected crypto ports.
+    expect(result.data.user.id).toBe('fake-id-1');
     expect(result.data.user.email).toBe('user@example.com');
-    expect(result.data.session.token).toHaveLength(43); // base64url of 32 bytes
+    expect(result.data.session.token).toBe('fake-token-1');
     expect(passwordHasher.hash).toHaveBeenCalledWith('password123');
+
     expect(registrationRepository.createUserWithSession).toHaveBeenCalledTimes(1);
     const persistedSession = vi.mocked(registrationRepository.createUserWithSession).mock
       .calls[0]?.[2];
-    expect(persistedSession?.userId).toBe(result.data.user.id);
+    expect(persistedSession?.tokenHash).toBe('fake-hash:fake-token-1');
+    expect(persistedSession?.userId).toBe('fake-id-1');
+    expect(
+      (persistedSession?.expiresAt.getTime() ?? 0) - (persistedSession?.createdAt.getTime() ?? 0),
+    ).toBe(SESSION_TTL_MS);
   });
 
   it('returns EMAIL_ALREADY_EXISTS for a duplicate email', async () => {

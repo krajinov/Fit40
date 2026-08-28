@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionRepository } from '@/application/ports/session-repository';
 import type { UserRepository } from '@/application/ports/user-repository';
 import { GetCurrentUserUseCase } from '@/application/use-cases/get-current-user';
-import { hashSessionToken } from '@/application/use-cases/issue-session';
 import type { User } from '@/domain/entities/user';
 import type { UserId } from '@/domain/types/ids';
+import { FakeSessionTokenService } from '../../helpers/fake-crypto';
 
 describe('GetCurrentUserUseCase', () => {
   const userRepository: UserRepository = {
@@ -22,7 +22,8 @@ describe('GetCurrentUserUseCase', () => {
     deleteExpired: vi.fn(),
   };
 
-  const useCase = new GetCurrentUserUseCase(userRepository, sessionRepository);
+  const tokenService = new FakeSessionTokenService();
+  const useCase = new GetCurrentUserUseCase(userRepository, sessionRepository, tokenService);
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -31,7 +32,7 @@ describe('GetCurrentUserUseCase', () => {
   it('returns the user for a valid, unexpired session', async () => {
     const user = { id: 'u-1', email: 'user@example.com', createdAt: new Date() } as User;
     vi.mocked(sessionRepository.findByTokenHash).mockResolvedValue({
-      tokenHash: hashSessionToken('token'),
+      tokenHash: tokenService.hash('token'),
       userId: 'u-1' as UserId,
       expiresAt: new Date('2099-01-01T00:00:00Z'),
       createdAt: new Date(),
@@ -43,6 +44,7 @@ describe('GetCurrentUserUseCase', () => {
     expect(result).not.toBeNull();
     expect(result?.email).toBe('user@example.com');
     expect(result?.id).toBe('u-1');
+    expect(sessionRepository.findByTokenHash).toHaveBeenCalledWith('fake-hash:token');
   });
 
   it('returns null for a missing token', async () => {
@@ -53,7 +55,7 @@ describe('GetCurrentUserUseCase', () => {
   });
 
   it('returns null for an expired session and deletes the row on encounter', async () => {
-    const expiredTokenHash = hashSessionToken('token');
+    const expiredTokenHash = tokenService.hash('token');
     vi.mocked(sessionRepository.findByTokenHash).mockResolvedValue({
       tokenHash: expiredTokenHash,
       userId: 'u-1' as UserId,
@@ -70,7 +72,7 @@ describe('GetCurrentUserUseCase', () => {
 
   it('returns null if the session user no longer exists', async () => {
     vi.mocked(sessionRepository.findByTokenHash).mockResolvedValue({
-      tokenHash: hashSessionToken('token'),
+      tokenHash: tokenService.hash('token'),
       userId: 'u-1' as UserId,
       expiresAt: new Date('2099-01-01T00:00:00Z'),
       createdAt: new Date(),

@@ -8,14 +8,15 @@
  */
 
 import type { SessionRepository } from '@/application/ports/session-repository';
+import type { SessionTokenService } from '@/application/ports/session-token-service';
 import type { UserRepository } from '@/application/ports/user-repository';
 import { toUserDto, type UserDto } from '@/application/dto/user';
-import { hashSessionToken } from '@/application/use-cases/issue-session';
 
 export class GetCurrentUserUseCase {
   constructor(
     private readonly userRepository: UserRepository,
     private readonly sessionRepository: SessionRepository,
+    private readonly tokenService: SessionTokenService,
   ) {}
 
   async execute(token: string): Promise<UserDto | null> {
@@ -23,7 +24,7 @@ export class GetCurrentUserUseCase {
       return null;
     }
 
-    const session = await this.sessionRepository.findByTokenHash(hashSessionToken(token));
+    const session = await this.sessionRepository.findByTokenHash(this.tokenService.hash(token));
     if (session === null) {
       return null;
     }

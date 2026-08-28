@@ -10,17 +10,14 @@
 
 import crypto from 'crypto';
 
+import type { RegistrationRepository } from '@/application/ports/registration-repository';
 import type { PasswordHasher } from '@/application/ports/password-hasher';
-import type { SessionRepository } from '@/application/ports/session-repository';
 import {
   EmailAlreadyExistsError,
   type UserRepository,
 } from '@/application/ports/user-repository';
 import { toUserDto, type UserDto } from '@/application/dto/user';
-import {
-  issueSession,
-  type IssuedSession,
-} from '@/application/use-cases/issue-session';
+import { buildSession, type IssuedSession } from '@/application/use-cases/issue-session';
 import { createUser } from '@/domain/entities/user';
 import { normalizeEmail } from '@/domain/value-objects/email-address';
 import { err, ok, type Result } from '@/lib/result';
@@ -42,7 +39,7 @@ export interface RegisterUserResult {
 export class RegisterUserUseCase {
   constructor(
     private readonly userRepository: UserRepository,
-    private readonly sessionRepository: SessionRepository,
+    private readonly registrationRepository: RegistrationRepository,
     private readonly passwordHasher: PasswordHasher,
   ) {}
 
@@ -62,7 +59,7 @@ export class RegisterUserUseCase {
     const user = userResult.data;
 
     // Friendly preflight check. The unique constraint is the final authority
-    // for the race between this check and the insert below.
+    // for the race between this check and the transactional insert below.
     const existing = await this.userRepository.findByEmail(user.email);
     if (existing !== null) {
       return err(emailAlreadyExists(user.email));
@@ -70,8 +67,12 @@ export class RegisterUserUseCase {
 
     const passwordHash = await this.passwordHasher.hash(input.password);
 
+    // User + initial session are persisted atomically by the repository so a
+    // failed session write never leaves an orphaned account behind.
+    const { token, session } = buildSession(user.id);
+
     try {
-      await this.userRepository.create(user, passwordHash);
+      await this.registrationRepository.createUserWithSession(user, passwordHash, session);
     } catch (error) {
       if (error instanceof EmailAlreadyExistsError) {
         return err(emailAlreadyExists(user.email));
@@ -79,9 +80,7 @@ export class RegisterUserUseCase {
       throw error;
     }
 
-    const session = await issueSession(this.sessionRepository, user.id);
-
-    return ok({ user: toUserDto(user), session });
+    return ok({ user: toUserDto(user), session: { token, expiresAt: session.expiresAt } });
   }
 }
 

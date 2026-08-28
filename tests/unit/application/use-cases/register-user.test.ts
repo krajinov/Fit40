@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PasswordHasher } from '@/application/ports/password-hasher';
-import type { SessionRepository } from '@/application/ports/session-repository';
+import type { RegistrationRepository } from '@/application/ports/registration-repository';
 import {
   EmailAlreadyExistsError,
   type UserRepository,
@@ -19,10 +19,8 @@ describe('RegisterUserUseCase', () => {
     create: vi.fn(),
   };
 
-  const sessionRepository: SessionRepository = {
-    create: vi.fn(),
-    findByTokenHash: vi.fn(),
-    deleteByTokenHash: vi.fn(),
+  const registrationRepository: RegistrationRepository = {
+    createUserWithSession: vi.fn(),
   };
 
   const passwordHasher: PasswordHasher = {
@@ -32,7 +30,7 @@ describe('RegisterUserUseCase', () => {
 
   const useCase = new RegisterUserUseCase(
     userRepository,
-    sessionRepository,
+    registrationRepository,
     passwordHasher,
   );
 
@@ -42,6 +40,7 @@ describe('RegisterUserUseCase', () => {
 
   it('creates a user and issues a session for valid input', async () => {
     vi.mocked(userRepository.findByEmail).mockResolvedValue(null);
+    vi.mocked(registrationRepository.createUserWithSession).mockResolvedValue(undefined);
 
     const result = await useCase.execute({
       email: 'User@Example.com',
@@ -54,8 +53,10 @@ describe('RegisterUserUseCase', () => {
     expect(result.data.user.email).toBe('user@example.com');
     expect(result.data.session.token).toHaveLength(43); // base64url of 32 bytes
     expect(passwordHasher.hash).toHaveBeenCalledWith('password123');
-    expect(userRepository.create).toHaveBeenCalledTimes(1);
-    expect(sessionRepository.create).toHaveBeenCalledTimes(1);
+    expect(registrationRepository.createUserWithSession).toHaveBeenCalledTimes(1);
+    const persistedSession = vi.mocked(registrationRepository.createUserWithSession).mock
+      .calls[0]?.[2];
+    expect(persistedSession?.userId).toBe(result.data.user.id);
   });
 
   it('returns EMAIL_ALREADY_EXISTS for a duplicate email', async () => {
@@ -71,12 +72,12 @@ describe('RegisterUserUseCase', () => {
     if (result.ok) throw new Error('unexpected success');
 
     expect(result.error.code).toBe('EMAIL_ALREADY_EXISTS');
-    expect(userRepository.create).not.toHaveBeenCalled();
+    expect(registrationRepository.createUserWithSession).not.toHaveBeenCalled();
   });
 
   it('maps concurrent unique-constraint race to EMAIL_ALREADY_EXISTS', async () => {
     vi.mocked(userRepository.findByEmail).mockResolvedValue(null);
-    vi.mocked(userRepository.create).mockRejectedValue(
+    vi.mocked(registrationRepository.createUserWithSession).mockRejectedValue(
       new EmailAlreadyExistsError('user@example.com'),
     );
 
@@ -89,5 +90,15 @@ describe('RegisterUserUseCase', () => {
     if (result.ok) throw new Error('unexpected success');
 
     expect(result.error.code).toBe('EMAIL_ALREADY_EXISTS');
+  });
+
+  it('rethrows unexpected persistence failures', async () => {
+    vi.mocked(userRepository.findByEmail).mockResolvedValue(null);
+    const failure = new Error('database connection lost');
+    vi.mocked(registrationRepository.createUserWithSession).mockRejectedValue(failure);
+
+    await expect(
+      useCase.execute({ email: 'user@example.com', password: 'password123' }),
+    ).rejects.toBe(failure);
   });
 });

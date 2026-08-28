@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { AuthSession, SessionRepository } from '@/application/ports/session-repository';
 
 import type { Database } from '../client';
-import { mapRowToAuthSession } from '../mappers/user-mapper';
+import { mapAuthSessionToRow, mapRowToAuthSession } from '../mappers/user-mapper';
 import { authSessions } from '../schema';
 
 /**
@@ -13,12 +13,7 @@ export class DrizzleSessionRepository implements SessionRepository {
   constructor(private readonly db: Database) {}
 
   async create(session: AuthSession): Promise<void> {
-    await this.db.insert(authSessions).values({
-      tokenHash: session.tokenHash,
-      userId: session.userId,
-      expiresAt: session.expiresAt,
-      createdAt: session.createdAt,
-    });
+    await this.db.insert(authSessions).values(mapAuthSessionToRow(session));
   }
 
   async findByTokenHash(tokenHash: string): Promise<AuthSession | null> {

@@ -38,6 +38,15 @@ export function mapUserToRow(user: User, passwordHash: string): typeof users.$in
   };
 }
 
+export function mapAuthSessionToRow(session: AuthSession): typeof authSessions.$inferInsert {
+  return {
+    tokenHash: session.tokenHash,
+    userId: session.userId,
+    expiresAt: session.expiresAt,
+    createdAt: session.createdAt,
+  };
+}
+
 export function mapRowToAuthSession(row: AuthSessionRow): AuthSession {
   const userIdResult = createUserId(row.userId);
   if (!userIdResult.ok) {

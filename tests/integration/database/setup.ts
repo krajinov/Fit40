@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
+import { DrizzleRegistrationRepository } from '@/infrastructure/database/repositories/drizzle-registration-repository';
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
@@ -21,6 +22,7 @@ export const programRepository = new DrizzleProgramRepository(db);
 export const workoutSessionRepository = new DrizzleWorkoutSessionRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
+export const registrationRepository = new DrizzleRegistrationRepository(db);
 
 /**
  * Truncates every table, providing deterministic per-test isolation.

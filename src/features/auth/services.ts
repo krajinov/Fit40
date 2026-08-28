@@ -3,13 +3,17 @@ import { LoginUserUseCase } from '@/application/use-cases/login-user';
 import { LogoutUserUseCase } from '@/application/use-cases/logout-user';
 import { RegisterUserUseCase } from '@/application/use-cases/register-user';
 import { Argon2PasswordHasher } from '@/infrastructure/auth/argon2-password-hasher';
-import { sessionRepository, userRepository } from '@/infrastructure/database/repositories';
+import {
+  registrationRepository,
+  sessionRepository,
+  userRepository,
+} from '@/infrastructure/database/repositories';
 
 const passwordHasher = new Argon2PasswordHasher();
 
 export const registerUserUseCase = new RegisterUserUseCase(
   userRepository,
-  sessionRepository,
+  registrationRepository,
   passwordHasher,
 );
 

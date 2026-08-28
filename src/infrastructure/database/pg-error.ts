@@ -24,3 +24,31 @@ export function errorCode(error: unknown): unknown {
 export function isUniqueViolation(error: unknown): boolean {
   return errorCode(error) === '23505';
 }
+
+/**
+ * The constraint name for a PostgreSQL constraint violation, resolved through
+ * the same `cause` chain as {@link errorCode}.
+ *
+ * postgres.js exposes the name as `constraint_name`; the native libpq-based
+ * drivers use `constraint`. We accept either.
+ */
+export function pgConstraintName(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+
+  const candidate = error as {
+    constraint?: unknown;
+    constraint_name?: unknown;
+    cause?: unknown;
+  };
+
+  if (typeof candidate.constraint_name === 'string') {
+    return candidate.constraint_name;
+  }
+  if (typeof candidate.constraint === 'string') {
+    return candidate.constraint;
+  }
+
+  return pgConstraintName(candidate.cause);
+}

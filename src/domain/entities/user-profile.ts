@@ -33,14 +33,13 @@
  * - createdAt and updatedAt are valid dates and updatedAt >= createdAt
  */
 
-import { err, ok, type Result } from '@/lib/result';
-
 import type { UserId } from '@/domain/types/ids';
 import { createUserId } from '@/domain/types/ids';
 import type { EquipmentType, PhysicalConsideration } from '@/domain/types/exercise';
 import { EQUIPMENT_VALUES, PHYSICAL_CONSIDERATION_VALUES } from '@/domain/types/exercise';
 import type { ProgramGoal } from '@/domain/types/program';
 import type { ExperienceLevel } from '@/domain/types/profile';
+import { err, ok, type Result } from '@/domain/types/result';
 
 // ─── Invariant constants (shared with boundary validation) ──────────────────
 

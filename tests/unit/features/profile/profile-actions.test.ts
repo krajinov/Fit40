@@ -104,7 +104,7 @@ describe('completeOnboardingAction', () => {
     expect(input?.userId).toBe(SESSION_USER.id);
   });
 
-  it('redirects to the dashboard after successful onboarding', async () => {
+  it('revalidates the affected routes before redirecting to the dashboard', async () => {
     vi.mocked(completeOnboardingUseCase.execute).mockResolvedValue({
       ok: true,
       data: PROFILE_DTO,
@@ -113,6 +113,18 @@ describe('completeOnboardingAction', () => {
     await expect(completeOnboardingAction(makeValidFormData())).rejects.toThrow(
       'NEXT_REDIRECT:/dashboard',
     );
+
+    expect(vi.mocked(revalidatePath).mock.calls.map((call) => call[0])).toEqual([
+      '/dashboard',
+      '/onboarding',
+      '/profile',
+    ]);
+
+    // Revalidation must complete before the redirect fires, never after.
+    const redirectOrder = redirectMock.mock.invocationCallOrder.at(-1);
+    if (redirectOrder === undefined) throw new Error('redirect was not called');
+    const revalidateOrders = vi.mocked(revalidatePath).mock.invocationCallOrder;
+    expect(Math.max(...revalidateOrders)).toBeLessThan(redirectOrder);
   });
 
   it('returns typed validation errors without calling the use case', async () => {
@@ -153,6 +165,7 @@ describe('completeOnboardingAction', () => {
     if (state.ok) throw new Error('unexpected success');
 
     expect(state.error.code).toBe('PROFILE_ALREADY_EXISTS');
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it('maps INVALID_PROFILE factory errors into field errors', async () => {

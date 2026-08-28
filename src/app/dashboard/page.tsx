@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { LogoutButton } from '@/features/auth/components/LogoutButton';
@@ -29,7 +30,15 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <LogoutButton className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" />
+      <div className="flex items-center gap-3">
+        <Link
+          href="/profile"
+          className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+        >
+          Edit profile
+        </Link>
+        <LogoutButton className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" />
+      </div>
     </main>
   );
 }

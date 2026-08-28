@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { requireUser } from '@/features/auth/current-user';
@@ -20,7 +21,8 @@ import type { ProfileActionState } from '@/features/profile/types/profile-action
  * The UserId comes exclusively from the trusted session — any userId field in
  * the form data is ignored by design. Expected failures are returned as typed
  * action state (with submitted values preserved); unexpected errors propagate
- * to the error boundary. On success this never returns: `redirect` throws
+ * to the error boundary. On success the affected authenticated routes are
+ * revalidated before the redirect. This never returns: `redirect` throws
  * NEXT_REDIRECT, which must not be caught.
  */
 export async function completeOnboardingAction(formData: FormData): Promise<ProfileActionState> {
@@ -58,6 +60,14 @@ export async function completeOnboardingAction(formData: FormData): Promise<Prof
       },
     };
   }
+
+  // The mutation changes what these pages render for this user (dashboard
+  // content appears, onboarding starts redirecting to the profile, the profile
+  // editor becomes reachable), so revalidate each affected route before the
+  // redirect per the repository's mutation conventions.
+  revalidatePath('/dashboard');
+  revalidatePath('/onboarding');
+  revalidatePath('/profile');
 
   redirect('/dashboard');
 }

@@ -122,5 +122,5 @@ deployment edge (reverse proxy/WAF).
 - Sliding session renewal
 - Session/device management UI
 - Program enrollment and WorkoutSession ownership
-- User fitness profile / onboarding
+- User fitness profile / onboarding (implemented in the Profile/Onboarding slice; see docs/profile.md)
 - Admin/RBAC

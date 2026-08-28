@@ -327,7 +327,7 @@ Client form data
 
 | Layer | Validates? | What |
 |-------|-----------|------|
-| Presentation (forms) | ✅ | User input shape and constraints (Zod + RHF) |
+| Presentation (forms) | ✅ | User input shape and constraints (Zod) |
 | Server Actions | ✅ | Re-validate input (never trust client) |
 | Application (use cases) | ❌ | Input is already validated. Business rules checked via domain. |
 | Domain (factories) | ✅ | Invariants (RPE range, positive weight, etc.) |

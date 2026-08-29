@@ -55,6 +55,13 @@ export const workoutSessions = pgTable(
   (table) => ({
     userIdIdx: index('workout_sessions_user_id_idx').on(table.userId),
     workoutIdIdx: index('workout_sessions_workout_id_idx').on(table.workoutId),
+    // Standalone index on the scheduled occurrence: the composite
+    // (enrollment_id, scheduled_workout_id) unique leads with enrollment_id,
+    // so it cannot serve scheduled_workout_id-only predicates or the FK
+    // checks against scheduled_workouts when a scheduled workout is deleted.
+    scheduledWorkoutIdIdx: index('workout_sessions_scheduled_workout_id_idx').on(
+      table.scheduledWorkoutId,
+    ),
     // At most one session per enrollment per scheduled occurrence (the
     // previous global one-session-per-occurrence rule made a second user's
     // session for the same occurrence impossible). PostgreSQL treats NULL

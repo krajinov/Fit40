@@ -16,7 +16,7 @@ import {
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import { createUserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type EnrollInProgramError =
   | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }

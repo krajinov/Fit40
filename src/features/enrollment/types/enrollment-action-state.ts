@@ -11,6 +11,7 @@ export type EnrollmentActionErrorCode =
   | 'PROGRAM_NOT_FOUND'
   | 'ALREADY_ENROLLED'
   | 'NOT_ENROLLED'
+  | 'ENROLLMENT_CHANGED'
   | 'INVALID_ENROLLMENT';
 
 export interface EnrollmentActionError {

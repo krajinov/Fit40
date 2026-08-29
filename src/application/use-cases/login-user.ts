@@ -20,7 +20,7 @@ import {
   type IssuedSession,
 } from '@/application/use-cases/issue-session';
 import { createEmailAddress } from '@/domain/value-objects/email-address';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type LoginUserError = {
   readonly code: 'INVALID_CREDENTIALS';

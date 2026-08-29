@@ -74,7 +74,7 @@ describe('LeaveProgramUseCase', () => {
     expect(result.error.code).toBe('PROGRAM_NOT_FOUND');
   });
 
-  it('maps an enrollment that vanished mid-request to NOT_ENROLLED', async () => {
+  it('maps a lost delete race with the enrollment still present to ENROLLMENT_CHANGED', async () => {
     const { enrollmentRepo, uc } = makeUseCase();
     await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
     vi.spyOn(enrollmentRepo, 'delete').mockResolvedValue(false);
@@ -83,7 +83,73 @@ describe('LeaveProgramUseCase', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
+    expect(result.error.code).toBe('ENROLLMENT_CHANGED');
+    // The current enrollment was never deleted, so NOT_ENROLLED would be a lie.
+    expect(await enrollmentRepo.findByUserAndProgram(uid('user-a'), pid('p1'))).not.toBeNull();
+  });
+
+  it('returns NOT_ENROLLED when the enrollment vanished and no replacement exists', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const realDelete = enrollmentRepo.delete.bind(enrollmentRepo);
+    vi.spyOn(enrollmentRepo, 'delete').mockImplementationOnce(async (id) => {
+      await realDelete(id); // another tab's delete won; ours finds nothing
+      return false;
+    });
+
+    const result = await uc.execute({ userId: 'user-a', programSlug: 'prog-1' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
     expect(result.error.code).toBe('NOT_ENROLLED');
+  });
+
+  it('deletes the replacement enrollment once when A was replaced by B (bounded retry)', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const realDelete = enrollmentRepo.delete.bind(enrollmentRepo);
+    const deleteSpy = vi.spyOn(enrollmentRepo, 'delete').mockImplementationOnce(async (id) => {
+      await realDelete(id); // the other tab deleted A
+      await enroll(enrollmentRepo, 'enr-b', 'user-a', 'p1'); // the rejoin created B
+      return false; // our delete(A) lost the race
+    });
+
+    const result = await uc.execute({ userId: 'user-a', programSlug: 'prog-1' });
+
+    expect(result.ok).toBe(true);
+    expect(deleteSpy).toHaveBeenCalledTimes(2); // A, then exactly one retry on B
+    expect(await enrollmentRepo.findByUserAndProgram(uid('user-a'), pid('p1'))).toBeNull();
+  });
+
+  it('returns ENROLLMENT_CHANGED when the replacement vanishes during the bounded retry', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const realDelete = enrollmentRepo.delete.bind(enrollmentRepo);
+    const deleteSpy = vi
+      .spyOn(enrollmentRepo, 'delete')
+      .mockImplementationOnce(async (id) => {
+        await realDelete(id);
+        await enroll(enrollmentRepo, 'enr-b', 'user-a', 'p1');
+        return false;
+      })
+      .mockResolvedValueOnce(false); // B disappears before the retry lands
+
+    const result = await uc.execute({ userId: 'user-a', programSlug: 'prog-1' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ENROLLMENT_CHANGED');
+    expect(deleteSpy).toHaveBeenCalledTimes(2); // bounded: no third attempt
+  });
+
+  it('propagates unrelated repository errors from the delete', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    vi.spyOn(enrollmentRepo, 'delete').mockRejectedValue(new Error('connection lost'));
+
+    await expect(uc.execute({ userId: 'user-a', programSlug: 'prog-1' })).rejects.toThrow(
+      'connection lost',
+    );
   });
 
   it('does not touch another user\'s enrollment in the same program', async () => {

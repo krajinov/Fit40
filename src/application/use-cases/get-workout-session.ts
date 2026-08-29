@@ -14,7 +14,7 @@ import type { WorkoutSessionRepository } from '@/application/ports/workout-sessi
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
 import { createUserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type GetWorkoutSessionError =
   | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }

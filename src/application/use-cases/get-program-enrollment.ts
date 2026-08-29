@@ -20,7 +20,7 @@ import {
   getNextWorkout,
 } from '@/domain/services/program-progress';
 import { createUserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type GetProgramEnrollmentError =
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string };

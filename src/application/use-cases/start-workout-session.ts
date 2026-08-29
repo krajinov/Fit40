@@ -43,7 +43,7 @@ import {
   type ScheduledWorkoutOccurrence,
 } from '@/domain/services/scheduled-workout';
 import { createUserId, type EnrollmentId, type UserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type StartWorkoutSessionError =
   | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }

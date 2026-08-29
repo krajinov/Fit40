@@ -181,4 +181,26 @@ describe('leaveProgramAction', () => {
     });
     expect(revalidatePath).not.toHaveBeenCalled();
   });
+
+  it('propagates ENROLLMENT_CHANGED as typed action state without revalidating', async () => {
+    vi.mocked(leaveProgramUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        programSlug: 'fit40-beginner-strength',
+        message: 'Your enrollment changed while leaving the program. Please try again.',
+      },
+    });
+
+    const state = await leaveProgramAction(makeFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while leaving the program. Please try again.',
+      },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
 });

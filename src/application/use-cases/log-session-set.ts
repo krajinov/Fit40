@@ -14,7 +14,7 @@ import {
   type SessionMutationError,
 } from '@/domain/entities/workout-session';
 import { createUserId, createWorkoutSessionId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type LogSessionSetError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }

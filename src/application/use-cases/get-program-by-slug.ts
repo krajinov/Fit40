@@ -9,7 +9,7 @@ import type {
   ProgramWeekDto,
 } from '@/application/dto/program';
 import type { ProgramWeek, TrainingProgram } from '@/domain/entities/training-program';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export interface ProgramNotFoundError {
   readonly code: 'PROGRAM_NOT_FOUND';

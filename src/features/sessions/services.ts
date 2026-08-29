@@ -31,4 +31,5 @@ export const updateSessionSetUseCase = new UpdateSessionSetUseCase(workoutSessio
 export const deleteSessionSetUseCase = new DeleteSessionSetUseCase(workoutSessionRepository);
 export const completeWorkoutSessionUseCase = new CompleteWorkoutSessionUseCase(
   workoutSessionRepository,
+  programRepository,
 );

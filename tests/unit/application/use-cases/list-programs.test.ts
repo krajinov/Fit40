@@ -72,6 +72,7 @@ function createMockRepository(): ProgramRepository {
   return {
     list: vi.fn(),
     findBySlug: vi.fn(),
+    findSlugByScheduledWorkoutId: vi.fn(),
   };
 }
 

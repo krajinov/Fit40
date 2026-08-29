@@ -1,11 +1,15 @@
 /**
- * Builds canonical session/program route paths from submitted form data.
+ * Builds the canonical session route path from submitted form data.
  *
- * Server Actions use these both as the post-login redirect target for
- * unauthenticated callers and as the revalidation targets after a successful
- * mutation. Each returns null when its route coordinates are missing or
+ * Server Actions use it both as the post-login redirect target for
+ * unauthenticated callers and as the revalidation target after a successful
+ * mutation. It returns null when the route coordinates are missing or
  * invalid, so callers fall back to a safe default instead of redirecting to
  * or revalidating a bogus path.
+ *
+ * There is deliberately no program-path builder here: after completing a
+ * session, the owning program page is derived from trusted server-side data
+ * (see CompleteWorkoutSessionUseCase), not from form fields.
  */
 
 import {
@@ -37,13 +41,4 @@ export function sessionPathFromFormData(formData: FormData): string | null {
   }
 
   return `/programs/${slug.data}/weeks/${week.data}/workouts/${order.data}/session`;
-}
-
-export function programPathFromFormData(formData: FormData): string | null {
-  const slug = programSlugSchema.safeParse(formData.get('programSlug'));
-  if (!slug.success) {
-    return null;
-  }
-
-  return `/programs/${slug.data}`;
 }

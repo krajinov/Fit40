@@ -5,6 +5,7 @@
  * Completed sessions are immutable thereafter.
  */
 
+import type { ProgramRepository } from '@/application/ports/program-repository';
 import {
   SessionStaleVersionError,
   type WorkoutSessionRepository,
@@ -29,12 +30,26 @@ export interface CompleteWorkoutSessionInput {
   readonly userId: string;
 }
 
+/**
+ * Successful completion outcome. `programSlug` is the owning program's slug
+ * resolved server-side from the session's own scheduled workout — never from
+ * client input — so the presentation layer revalidates the true affected
+ * program page. Null when the owning program no longer exists.
+ */
+export interface CompletedWorkoutSessionView {
+  readonly session: WorkoutSessionDto;
+  readonly programSlug: string | null;
+}
+
 export class CompleteWorkoutSessionUseCase {
-  constructor(private readonly sessionRepository: WorkoutSessionRepository) {}
+  constructor(
+    private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly programRepository: ProgramRepository,
+  ) {}
 
   async execute(
     input: CompleteWorkoutSessionInput,
-  ): Promise<Result<WorkoutSessionDto, CompleteWorkoutSessionError>> {
+  ): Promise<Result<CompletedWorkoutSessionView, CompleteWorkoutSessionError>> {
     const idResult = createWorkoutSessionId(input.sessionId);
     if (!idResult.ok) {
       return err({ code: 'INVALID_INPUT', message: idResult.error.message, field: 'sessionId' });
@@ -77,6 +92,13 @@ export class CompleteWorkoutSessionUseCase {
       throw error;
     }
 
-    return ok(toWorkoutSessionDto(result.data));
+    // Derive the trusted owning program from the session's own data, never
+    // from client-supplied route coordinates: the revalidation target must
+    // not be forgeable via form fields.
+    const programSlug = await this.programRepository.findSlugByScheduledWorkoutId(
+      result.data.scheduledWorkoutId,
+    );
+
+    return ok({ session: toWorkoutSessionDto(result.data), programSlug });
   }
 }

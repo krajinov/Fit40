@@ -104,6 +104,9 @@ function mutationActionTests(
   action: (formData: FormData) => Promise<SessionActionState>,
   execute: Mock,
   makeFormData: () => FormData,
+  // log/update/delete use cases resolve to a bare WorkoutSessionDto; the
+  // complete use case resolves to { session, programSlug } (trusted slug).
+  successData: { ok: true; data: unknown } = { ok: true, data: {} as WorkoutSessionDto },
 ): void {
   describe(name, () => {
     beforeEach(() => {
@@ -114,7 +117,7 @@ function mutationActionTests(
     });
 
     it('propagates success and revalidates the session path', async () => {
-      execute.mockResolvedValue({ ok: true, data: {} as WorkoutSessionDto });
+      execute.mockResolvedValue(successData);
 
       const state = await action(makeFormData());
 
@@ -123,7 +126,7 @@ function mutationActionTests(
     });
 
     it('passes the session-derived userId to the use case, never form data', async () => {
-      execute.mockResolvedValue({ ok: true, data: {} as WorkoutSessionDto });
+      execute.mockResolvedValue(successData);
 
       const fd = makeFormData();
       fd.set('userId', 'attacker-supplied-id');
@@ -202,7 +205,55 @@ mutationActionTests(
   completeSessionAction,
   vi.mocked(completeWorkoutSessionUseCase.execute),
   makeCompleteSessionFormData,
+  {
+    ok: true,
+    data: { session: {} as WorkoutSessionDto, programSlug: 'fit40-beginner-strength' },
+  },
 );
+
+describe('completeSessionAction revalidation target', () => {
+  beforeEach(() => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockReset();
+    vi.mocked(revalidatePath).mockClear();
+    requireUserMock.mockReset();
+    requireUserMock.mockResolvedValue(SESSION_USER);
+  });
+
+  it('revalidates the owning program page from trusted data, never the forged form slug', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: { session: {} as WorkoutSessionDto, programSlug: 'fit40-beginner-strength' },
+    });
+
+    const fd = makeCompleteSessionFormData();
+    fd.set('programSlug', 'forged-program');
+
+    const state = await completeSessionAction(fd);
+
+    expect(state).toEqual({ ok: true });
+    expect(revalidatePath).toHaveBeenCalledWith('/programs/fit40-beginner-strength');
+    expect(revalidatePath).not.toHaveBeenCalledWith('/programs/forged-program');
+  });
+
+  it('skips program-page revalidation when the trusted slug cannot be resolved', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: { session: {} as WorkoutSessionDto, programSlug: null },
+    });
+
+    const fd = makeCompleteSessionFormData();
+    fd.set('programSlug', 'forged-program');
+
+    await completeSessionAction(fd);
+
+    // The session page keeps its unchanged form-derived revalidation, but no
+    // bare program page may be derived from the forged form field.
+    const revalidated = vi.mocked(revalidatePath).mock.calls.map((call) => String(call[0]));
+    expect(revalidated).toHaveLength(1);
+    expect(revalidated[0]).toMatch(/\/session$/);
+    expect(revalidated).not.toContain('/programs/forged-program');
+  });
+});
 
 function makeStartSessionFormData(): FormData {
   const fd = new FormData();

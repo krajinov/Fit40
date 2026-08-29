@@ -47,7 +47,7 @@ function makeProgram(): TrainingProgram {
 }
 
 function createMockRepo(): ProgramRepository {
-  return { list: vi.fn(), findBySlug: vi.fn() };
+  return { list: vi.fn(), findBySlug: vi.fn(), findSlugByScheduledWorkoutId: vi.fn() };
 }
 
 function enroll(repo: InMemoryProgramEnrollmentRepository, enrollmentId: string, userId: string, programId: string) {

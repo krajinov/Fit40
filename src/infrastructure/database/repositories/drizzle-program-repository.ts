@@ -2,6 +2,7 @@ import { asc, eq, inArray } from 'drizzle-orm';
 
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
+import type { ScheduledWorkoutId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapProgramRows } from '../mappers/program-read-mapper';
@@ -65,6 +66,19 @@ export class DrizzleProgramRepository implements ProgramRepository {
 
     const programs = await this.hydrate(programRows);
     return programs[0] ?? null;
+  }
+
+  async findSlugByScheduledWorkoutId(
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<string | null> {
+    const rows = await this.db
+      .select({ slug: trainingPrograms.slug })
+      .from(scheduledWorkouts)
+      .innerJoin(trainingPrograms, eq(scheduledWorkouts.programId, trainingPrograms.id))
+      .where(eq(scheduledWorkouts.id, scheduledWorkoutId))
+      .limit(1);
+
+    return rows[0]?.slug ?? null;
   }
 
   private async loadChildren(programIds: string[]): Promise<ProgramChildren> {

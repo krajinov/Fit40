@@ -46,7 +46,7 @@ function seedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, 
 
 function makeUseCase() {
   const { program } = seedProgram();
-  const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn() };
+  const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
   const uc = new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo);
@@ -100,7 +100,7 @@ describe('GetWorkoutSessionUseCase', () => {
   });
 
   it('returns PROGRAM_NOT_FOUND', async () => {
-    const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn() };
+    const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
     const uc = new GetWorkoutSessionUseCase(programRepo, new InMemoryWorkoutSessionRepository(), new InMemoryProgramEnrollmentRepository());
     const r = await uc.execute({ ...INPUT, programSlug: 'missing', userId: 'user-a' });
     expect(r.ok).toBe(false);

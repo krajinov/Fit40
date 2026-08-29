@@ -96,6 +96,7 @@ function createMockProgramRepository(): ProgramRepository {
     list: vi.fn(),
     findBySlug: vi.fn(),
     findSessionRouteByScheduledWorkoutId: vi.fn(),
+    listMetadataByIds: vi.fn(),
   };
 }
 

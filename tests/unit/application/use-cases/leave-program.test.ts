@@ -34,6 +34,7 @@ function makeUseCase(programs = [makeProgram('p1', 'prog-1')]) {
     findBySlug: vi.fn().mockImplementation((slug: string) =>
       Promise.resolve(programs.find((p) => p.slug === slug) ?? null)),
     findSessionRouteByScheduledWorkoutId: vi.fn(),
+    listMetadataByIds: vi.fn(),
   };
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
   const uc = new LeaveProgramUseCase(programRepo, enrollmentRepo);

@@ -5,9 +5,13 @@
  * replace this class without changing domain or application code.
  */
 
-import type { ProgramRepository, SessionRoute } from '@/application/ports/program-repository';
+import type {
+  ProgramMetadata,
+  ProgramRepository,
+  SessionRoute,
+} from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
-import type { ScheduledWorkoutId } from '@/domain/types/ids';
+import type { ProgramId, ScheduledWorkoutId } from '@/domain/types/ids';
 import { seedPrograms } from '@/infrastructure/programs/seed-programs';
 
 export class InMemoryProgramRepository implements ProgramRepository {
@@ -38,5 +42,14 @@ export class InMemoryProgramRepository implements ProgramRepository {
       }
     }
     return null;
+  }
+
+  async listMetadataByIds(
+    programIds: ReadonlyArray<ProgramId>,
+  ): Promise<ReadonlyArray<ProgramMetadata>> {
+    const requested = new Set<string>(programIds);
+    return seedPrograms
+      .filter((program) => requested.has(program.id))
+      .map((program) => ({ id: program.id, slug: program.slug, name: program.name }));
   }
 }

@@ -29,7 +29,13 @@ export class ListUserEnrollmentsUseCase {
       return [];
     }
 
-    const programs = await this.programRepository.list();
+    // Metadata-only lookup scoped to exactly the user's enrolled programs.
+    // Loading the full catalog (or program aggregates) here would hydrate
+    // workouts, exercises, weeks, and scheduled workouts just to read
+    // id/slug/name for the summary view.
+    const programs = await this.programRepository.listMetadataByIds(
+      enrollments.map((enrollment) => enrollment.programId),
+    );
     const programsById = new Map(programs.map((program) => [program.id, program]));
 
     const summaries: EnrollmentSummaryDto[] = [];

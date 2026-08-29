@@ -5,7 +5,7 @@
  * repository must satisfy. The application layer depends only on this port.
  */
 
-import type { ScheduledWorkoutId } from '@/domain/types/ids';
+import type { ProgramId, ScheduledWorkoutId } from '@/domain/types/ids';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 
 export interface ProgramRepository {
@@ -30,6 +30,28 @@ export interface ProgramRepository {
   findSessionRouteByScheduledWorkoutId(
     scheduledWorkoutId: ScheduledWorkoutId,
   ): Promise<SessionRoute | null>;
+
+  /**
+   * Returns lightweight display metadata (id, slug, name) for the given
+   * program ids. Programs that no longer exist are omitted. Scoped to the
+   * requested ids — callers must not use this to load the whole catalog.
+   */
+  listMetadataByIds(
+    programIds: ReadonlyArray<ProgramId>,
+  ): Promise<ReadonlyArray<ProgramMetadata>>;
+}
+
+/**
+ * Lightweight program display metadata for enrollment list views.
+ *
+ * Deliberately carries no training content: hydrating full program
+ * aggregates for these views would load workouts, exercises, weeks, and
+ * scheduled workouts only to discard them.
+ */
+export interface ProgramMetadata {
+  readonly id: string;
+  readonly slug: string;
+  readonly name: string;
 }
 
 /**

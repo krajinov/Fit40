@@ -27,6 +27,7 @@ function programRepo(
     list: async () => [],
     findBySlug: async () => null,
     findSessionRouteByScheduledWorkoutId: routeLookup,
+    listMetadataByIds: async () => [],
   };
 }
 

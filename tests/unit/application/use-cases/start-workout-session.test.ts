@@ -56,6 +56,12 @@ function enroll(repo: InMemoryProgramEnrollmentRepository, enrollmentId: string,
   return repo.create(r.data);
 }
 
+function makeEnrollment(id: string) {
+  const r = createProgramEnrollment({ id, userId: OWNER_A, programId: 'prog-test', enrolledAt: new Date('2026-01-01T00:00:00Z') });
+  if (!r.ok) throw Error();
+  return r.data;
+}
+
 function makeUseCase(program: TrainingProgram | null = makeProgram()) {
   const programRepo = createMockRepo();
   vi.mocked(programRepo.findBySlug).mockResolvedValue(program);
@@ -241,23 +247,93 @@ describe('StartWorkoutSessionUseCase', () => {
     );
   });
 
-  it('propagates a retry failure instead of looping on a repeated enrollment error', async () => {
+  it('returns NOT_ENROLLED when the replacement enrollment is deleted before the retry', async () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
     const sessionRepo = new InMemoryWorkoutSessionRepository();
-    // Every save fails with the same stale-enrollment error while the
-    // re-checked enrollment (enr-b) differs from it: the recovery must retry
-    // exactly once and surface the error, never loop.
-    const saveSpy = vi
-      .spyOn(sessionRepo, 'save')
-      .mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    // Preflight sees enr-a, the first save races its leave, the recovery
+    // finds replacement enr-b, but enr-b is deleted before the retry insert.
+    vi.spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
-    await enroll(enrollmentRepo, 'enr-b', OWNER_A, 'prog-test');
+    vi.spyOn(enrollmentRepo, 'findByUserAndProgram')
+      .mockResolvedValueOnce(makeEnrollment('enr-a'))
+      .mockResolvedValueOnce(makeEnrollment('enr-b'))
+      .mockResolvedValueOnce(null);
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('NOT_ENROLLED');
+  });
+
+  it('rethrows when the same replacement enrollment still exists after the retry FK failure', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // The retry against enr-b fails its FK, yet the re-check still shows
+    // enr-b: the error contradicts observable state and must propagate.
+    vi.spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    vi.spyOn(enrollmentRepo, 'findByUserAndProgram')
+      .mockResolvedValueOnce(makeEnrollment('enr-a'))
+      .mockResolvedValueOnce(makeEnrollment('enr-b'))
+      .mockResolvedValueOnce(makeEnrollment('enr-b'));
     const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
 
     await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toBeInstanceOf(
       SessionEnrollmentNotFoundError,
     );
+  });
+
+  it('returns a typed conflict instead of a third save when the enrollment changes again', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // The retry against enr-b fails its FK too, and the re-check shows the
+    // enrollment churned yet again (enr-c): recovery must stop after the
+    // single bounded retry and surface the race as a typed conflict.
+    const saveSpy = vi
+      .spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    vi.spyOn(enrollmentRepo, 'findByUserAndProgram')
+      .mockResolvedValueOnce(makeEnrollment('enr-a'))
+      .mockResolvedValueOnce(makeEnrollment('enr-b'))
+      .mockResolvedValueOnce(makeEnrollment('enr-c'));
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ENROLLMENT_CHANGED');
+    expect(saveSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates unrelated retry errors instead of recovering', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // A retry failure that is not an enrollment or duplicate error is
+    // unexpected and must propagate untouched.
+    const saveSpy = vi
+      .spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
+      .mockRejectedValueOnce(new Error('connection lost'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    vi.spyOn(enrollmentRepo, 'findByUserAndProgram')
+      .mockResolvedValueOnce(makeEnrollment('enr-a'))
+      .mockResolvedValueOnce(makeEnrollment('enr-b'));
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toThrow('connection lost');
     expect(saveSpy).toHaveBeenCalledTimes(2);
   });
 });

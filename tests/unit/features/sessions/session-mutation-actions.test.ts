@@ -317,6 +317,28 @@ describe('startSessionAction', () => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
+  it('propagates ENROLLMENT_CHANGED as typed action state without revalidating', async () => {
+    vi.mocked(startWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        programSlug: 'fit40-beginner-strength',
+        message: 'Your enrollment changed while starting the session. Please try again.',
+      },
+    });
+
+    const state = await startSessionAction(makeStartSessionFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while starting the session. Please try again.',
+      },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
   it('propagates success and revalidates the session path', async () => {
     vi.mocked(startWorkoutSessionUseCase.execute).mockResolvedValue({
       ok: true,

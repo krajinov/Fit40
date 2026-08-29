@@ -17,6 +17,10 @@
  * replacement enrollment (leave followed by a rejoin) gets the session
  * re-pointed and saved exactly once, and an unchanged enrollment means the
  * error contradicts observable state and is rethrown rather than swallowed.
+ * If the retry itself loses its enrollment, current state is re-checked once
+ * more without saving again: a missing enrollment resolves to NOT_ENROLLED, a
+ * further replacement to the typed ENROLLMENT_CHANGED conflict, and an
+ * unchanged enrollment is rethrown as contradictory.
  */
 
 import type { IdGenerator } from '@/application/ports/id-generator';
@@ -52,6 +56,7 @@ export type StartWorkoutSessionError =
     }
   | { readonly code: 'NOT_ENROLLED'; readonly programSlug: string; readonly message: string }
   | { readonly code: 'SESSION_ALREADY_EXISTS'; readonly scheduledWorkoutId: string; readonly message: string }
+  | { readonly code: 'ENROLLMENT_CHANGED'; readonly programSlug: string; readonly message: string }
   | { readonly code: 'INVALID_WORKOUT_SESSION'; readonly message: string; readonly field?: string };
 
 export interface StartWorkoutSessionInput {
@@ -156,8 +161,9 @@ export class StartWorkoutSessionUseCase {
    * re-checked against current state:
    * - enrollment gone -> typed NOT_ENROLLED outcome;
    * - different enrollment (leave + rejoin race) -> the session is re-pointed
-   *   at the replacement and saved exactly once; that retry performs no error
-   *   recovery of its own, so a second failure propagates;
+   *   at the replacement and saved exactly once; that retry re-checks state
+   *   once more without saving if it loses its enrollment too (see
+   *   saveForReplacementEnrollment);
    * - same enrollment -> the error contradicts observable state and is
    *   rethrown instead of being converted to a false business outcome.
    */
@@ -182,7 +188,13 @@ export class StartWorkoutSessionUseCase {
           return err(notEnrolled(program.slug));
         }
         if (rechecked.id !== error.enrollmentId) {
-          return this.saveForReplacementEnrollment(session, rechecked.id, occurrence);
+          return this.saveForReplacementEnrollment(
+            session,
+            rechecked.id,
+            userId,
+            program,
+            occurrence,
+          );
         }
       }
       throw error;
@@ -193,13 +205,18 @@ export class StartWorkoutSessionUseCase {
   /**
    * A leave-and-rejoin race replaced the enrollment this session was built
    * against. The failed save persisted nothing, so the same entity (same id,
-   * same version) is safe to re-point at the replacement enrollment. Saved
-   * exactly once with no retry of its own: any failure here is unexpected
-   * and propagates to the caller.
+   * same version) is safe to re-point at the replacement enrollment. This is
+   * the single bounded retry: if its insert loses the replacement enrollment
+   * too, current state is re-checked once and resolved without saving again
+   * (missing -> NOT_ENROLLED, replaced again -> ENROLLMENT_CHANGED, unchanged
+   * -> rethrown as contradictory). Duplicate failures keep the typed
+   * SESSION_ALREADY_EXISTS outcome; unrelated failures propagate.
    */
   private async saveForReplacementEnrollment(
     session: WorkoutSession,
     replacementEnrollmentId: EnrollmentId,
+    userId: UserId,
+    program: TrainingProgram,
     occurrence: ScheduledWorkoutOccurrence,
   ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
     const replacement: WorkoutSession = { ...session, enrollmentId: replacementEnrollmentId };
@@ -210,6 +227,23 @@ export class StartWorkoutSessionUseCase {
         // The occurrence was already started under the replacement
         // enrollment; keep the duplicate-session outcome typed.
         return err(sessionAlreadyExists(occurrence.scheduled.id));
+      }
+      if (retryError instanceof SessionEnrollmentNotFoundError) {
+        // The replacement enrollment was deleted mid-retry. Re-check current
+        // state once, but never save again: this recovery stays a single
+        // bounded retry.
+        const rechecked = await this.enrollmentRepository.findByUserAndProgram(
+          userId,
+          program.id,
+        );
+        if (rechecked === null) {
+          return err(notEnrolled(program.slug));
+        }
+        if (rechecked.id !== retryError.enrollmentId) {
+          // The enrollment churned yet again. Saving once more would make the
+          // recovery unbounded, so surface the race as a typed conflict.
+          return err(enrollmentChanged(program.slug));
+        }
       }
       throw retryError;
     }
@@ -222,6 +256,14 @@ function notEnrolled(programSlug: string): StartWorkoutSessionError {
     code: 'NOT_ENROLLED',
     programSlug,
     message: 'Join this program before starting its workouts.',
+  };
+}
+
+function enrollmentChanged(programSlug: string): StartWorkoutSessionError {
+  return {
+    code: 'ENROLLMENT_CHANGED',
+    programSlug,
+    message: 'Your enrollment changed while starting the session. Please try again.',
   };
 }
 

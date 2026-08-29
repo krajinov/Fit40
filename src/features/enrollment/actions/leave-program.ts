@@ -6,6 +6,7 @@ import { requireUser } from '@/features/auth/current-user';
 import { enrollmentFormSchema } from '@/features/enrollment/schemas/enrollment-actions-schema';
 import { leaveProgramUseCase } from '@/features/enrollment/services';
 import type { EnrollmentActionState } from '@/features/enrollment/types/enrollment-action-state';
+import { SESSION_PAGE_PATH_TEMPLATE } from '@/features/sessions/session-path';
 
 /**
  * Removes the authenticated user's enrollment from a program.
@@ -15,7 +16,10 @@ import type { EnrollmentActionState } from '@/features/enrollment/types/enrollme
  * global program/workout definitions are untouched, and the user's workout
  * sessions survive as detached history that no longer counts toward the
  * program. Expected failures are returned as typed action state; unexpected
- * errors propagate to the error boundary.
+ * errors propagate to the error boundary. On success the program catalog,
+ * detail, and nested session routes are revalidated — mirroring the join
+ * action — so an open session page immediately reflects the detached
+ * enrollment instead of keeping its stale start/track view.
  */
 export async function leaveProgramAction(formData: FormData): Promise<EnrollmentActionState> {
   const user = await requireUser(programRedirectTarget(formData));
@@ -35,6 +39,7 @@ export async function leaveProgramAction(formData: FormData): Promise<Enrollment
 
   revalidatePath('/programs');
   revalidatePath(`/programs/${parsed.data.programSlug}`);
+  revalidatePath(SESSION_PAGE_PATH_TEMPLATE, 'page');
 
   return { ok: true };
 }

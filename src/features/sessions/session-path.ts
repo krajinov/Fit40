@@ -14,6 +14,20 @@ import {
   workoutOrderSchema,
 } from '@/features/sessions/schemas/session-actions-schema';
 
+/**
+ * The nested session route as a dynamic template, paired with the 'page'
+ * revalidation type in callers.
+ *
+ * `revalidatePath` only takes effect on a dynamic route when given the route
+ * template plus a type, and `revalidatePath(template, 'page')` invalidates
+ * every concrete URL matching the template. Enrollment actions revalidate
+ * this because their forms carry only the program slug, while a session page
+ * can be open for any week/workout of that program and must stop showing its
+ * stale join prompt the moment enrollment state changes.
+ */
+export const SESSION_PAGE_PATH_TEMPLATE =
+  '/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session';
+
 export function sessionPathFromFormData(formData: FormData): string | null {
   const slug = programSlugSchema.safeParse(formData.get('programSlug'));
   const week = weekNumberSchema.safeParse(formData.get('weekNumber'));

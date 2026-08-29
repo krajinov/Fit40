@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import { SessionAlreadyExistsError } from '@/application/ports/workout-session-repository';
+import { SessionAlreadyExistsError, SessionEnrollmentNotFoundError } from '@/application/ports/workout-session-repository';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
@@ -155,5 +155,38 @@ describe('StartWorkoutSessionUseCase', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('SESSION_ALREADY_EXISTS');
+  });
+
+  it('resolves a concurrent-leave race to NOT_ENROLLED instead of an untyped 500', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // The repository's enrollment FK translation: the enrollment existed at
+    // preflight but a concurrent leave deleted it before the insert.
+    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('NOT_ENROLLED');
+  });
+
+  it('rethrows a save-level enrollment error when the enrollment is actually present', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    // The enrollment re-check contradicts the error, so it must propagate
+    // rather than be silently converted to NOT_ENROLLED.
+    await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toBeInstanceOf(
+      SessionEnrollmentNotFoundError,
+    );
   });
 });

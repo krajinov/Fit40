@@ -20,6 +20,7 @@ import { createDurationScheme, createRepScheme } from '@/domain/value-objects/re
 
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
 } from '@/application/ports/workout-session-repository';
 import { users, workoutSessions } from '@/infrastructure/database/schema';
@@ -363,6 +364,20 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     await expect(workoutSessionRepository.save(second)).rejects.toBeInstanceOf(
       SessionAlreadyExistsError,
+    );
+  });
+
+  it('maps a concurrently deleted enrollment to SessionEnrollmentNotFoundError', async () => {
+    // Simulates LeaveProgram deleting the enrollment between the use case's
+    // enrollment check and the session insert: the enrollment FK violation on
+    // insert must surface as the typed race error, not an untyped 500.
+    const deleted = await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
+    expect(deleted).toBe(true);
+
+    const session = makeSession('session-race-orphan');
+
+    await expect(workoutSessionRepository.save(session)).rejects.toBeInstanceOf(
+      SessionEnrollmentNotFoundError,
     );
   });
 

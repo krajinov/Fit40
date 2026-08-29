@@ -26,6 +26,19 @@ export class SessionAlreadyExistsError extends Error {
 }
 
 /**
+ * Thrown by `save` when the session's enrollment no longer exists: a
+ * concurrent leave deleted the enrollment between the caller's enrollment
+ * check and the insert. The caller should re-check enrollment and map this
+ * to the `NOT_ENROLLED` business outcome.
+ */
+export class SessionEnrollmentNotFoundError extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`Enrollment "${enrollmentId}" no longer exists; the session cannot attach to it`);
+    this.name = 'SessionEnrollmentNotFoundError';
+  }
+}
+
+/**
  * Thrown by `save` when the persisted session was modified concurrently after
  * the caller loaded its snapshot (optimistic-concurrency version mismatch).
  */
@@ -58,7 +71,8 @@ export interface WorkoutSessionRepository {
   /**
    * Saves a session (insert or update by session ID).
    *
-   * May throw {@link SessionAlreadyExistsError} or {@link SessionStaleVersionError}.
+   * May throw {@link SessionAlreadyExistsError},
+   * {@link SessionEnrollmentNotFoundError}, or {@link SessionStaleVersionError}.
    */
   save(session: WorkoutSession): Promise<void>;
 

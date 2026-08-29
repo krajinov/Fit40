@@ -9,7 +9,11 @@
  *
  * At most one session exists per (enrollment, scheduled workout) pair: a
  * friendly preflight covers the common case and the database's unique
- * constraint remains the final authority for a concurrent start race.
+ * constraint remains the final authority for a concurrent start race. A
+ * concurrent leave can delete the enrollment between the preflight and the
+ * insert; the repository surfaces that FK violation as
+ * SessionEnrollmentNotFoundError, which is re-checked here and resolved to
+ * the typed NOT_ENROLLED outcome instead of leaking an infrastructure 500.
  */
 
 import type { IdGenerator } from '@/application/ports/id-generator';
@@ -17,6 +21,7 @@ import type { ProgramEnrollmentRepository } from '@/application/ports/program-en
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentNotFoundError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
@@ -93,11 +98,7 @@ export class StartWorkoutSessionUseCase {
 
     const enrollment = await this.enrollmentRepository.findByUserAndProgram(userId, program.id);
     if (enrollment === null) {
-      return err({
-        code: 'NOT_ENROLLED',
-        programSlug: input.programSlug,
-        message: 'Join this program before starting its workouts.',
-      });
+      return err(notEnrolled(input.programSlug));
     }
 
     const existing = await this.sessionRepository.findByEnrollmentAndScheduledWorkout(
@@ -149,9 +150,30 @@ export class StartWorkoutSessionUseCase {
           message: `A session already exists for scheduled workout "${occurrence.scheduled.id}"`,
         });
       }
+      if (error instanceof SessionEnrollmentNotFoundError) {
+        // A concurrent leave deleted the enrollment between our check and the
+        // insert. Re-check so the typed outcome reflects the current state;
+        // if the enrollment is still there the error came from elsewhere and
+        // is rethrown rather than swallowed.
+        const rechecked = await this.enrollmentRepository.findByUserAndProgram(
+          userId,
+          program.id,
+        );
+        if (rechecked === null) {
+          return err(notEnrolled(input.programSlug));
+        }
+      }
       throw error;
     }
 
     return ok(toWorkoutSessionDto(sessionResult.data));
   }
+}
+
+function notEnrolled(programSlug: string): StartWorkoutSessionError {
+  return {
+    code: 'NOT_ENROLLED',
+    programSlug,
+    message: 'Join this program before starting its workouts.',
+  };
 }

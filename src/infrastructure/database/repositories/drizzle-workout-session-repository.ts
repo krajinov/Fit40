@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
@@ -15,8 +16,16 @@ import {
   mapSessionToRow,
   mapSetToRow,
 } from '../mappers/session-mapper';
-import { isUniqueViolation } from '../pg-error';
+import { isForeignKeyViolation, isUniqueViolation, pgConstraintName } from '../pg-error';
 import { exerciseLogs, setLogs, workoutSessions } from '../schema';
+
+/**
+ * The workout_sessions enrollment FK created by migration 0004. Its
+ * ON DELETE SET NULL behavior is the legitimate leave-detachment path; a
+ * violation of this constraint on insert means the enrollment was deleted
+ * between the use case's enrollment check and this write.
+ */
+const ENROLLMENT_FK_CONSTRAINT = 'workout_sessions_enrollment_id_program_enrollments_id_fk';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
 
@@ -28,7 +37,9 @@ type SessionRow = typeof workoutSessions.$inferSelect;
  * concurrency version check, so a stale snapshot is rejected instead of
  * silently overwriting concurrent changes. Unique-constraint races on the
  * one-session-per-(enrollment, occurrence) rule surface as
- * `SessionAlreadyExistsError`.
+ * `SessionAlreadyExistsError`; a concurrently deleted enrollment (a leave
+ * racing the insert) surfaces as `SessionEnrollmentNotFoundError`. Any other
+ * constraint violation propagates untouched.
  */
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: Database) {}
@@ -141,6 +152,18 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
+      }
+      if (
+        isForeignKeyViolation(error) &&
+        pgConstraintName(error) === ENROLLMENT_FK_CONSTRAINT
+      ) {
+        // A concurrent leave deleted the enrollment after the use case's
+        // enrollment check; the caller re-checks and maps this to the
+        // NOT_ENROLLED business outcome. The FK can only be violated by a
+        // non-null enrollment id, so the narrowing below cannot hide a case.
+        if (session.enrollmentId !== null) {
+          throw new SessionEnrollmentNotFoundError(session.enrollmentId);
+        }
       }
       throw error;
     }

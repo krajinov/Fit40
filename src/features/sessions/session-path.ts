@@ -7,11 +7,13 @@
  * invalid, so callers fall back to a safe default instead of redirecting to
  * or revalidating a bogus path.
  *
- * There is deliberately no program-path builder here: after completing a
- * session, the owning program page is derived from trusted server-side data
- * (see CompleteWorkoutSessionUseCase), not from form fields.
+ * Completion additionally revalidates from trusted server-side data (see
+ * CompleteWorkoutSessionUseCase): programPathFromSlug and sessionPathFromRoute
+ * build those targets from the use case's resolved route, never from form
+ * fields.
  */
 
+import type { SessionRoute } from '@/application/ports/program-repository';
 import {
   programSlugSchema,
   weekNumberSchema,
@@ -40,5 +42,33 @@ export function sessionPathFromFormData(formData: FormData): string | null {
     return null;
   }
 
-  return `/programs/${slug.data}/weeks/${week.data}/workouts/${order.data}/session`;
+  return buildSessionPath({
+    programSlug: slug.data,
+    weekNumber: week.data,
+    workoutOrder: order.data,
+  });
+}
+
+function buildSessionPath(coordinates: {
+  readonly programSlug: string;
+  readonly weekNumber: number;
+  readonly workoutOrder: number;
+}): string {
+  return `/programs/${coordinates.programSlug}/weeks/${coordinates.weekNumber}/workouts/${coordinates.workoutOrder}/session`;
+}
+
+/**
+ * The owning program page path for a trusted server-resolved slug.
+ */
+export function programPathFromSlug(programSlug: string): string {
+  return `/programs/${programSlug}`;
+}
+
+/**
+ * The canonical session route path for a trusted server-resolved occurrence
+ * route (SessionRoute on the ProgramRepository port). Unlike
+ * sessionPathFromFormData, its inputs can never come from client fields.
+ */
+export function sessionPathFromRoute(route: SessionRoute): string {
+  return buildSessionPath(route);
 }

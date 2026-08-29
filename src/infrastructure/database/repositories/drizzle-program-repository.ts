@@ -1,6 +1,6 @@
 import { asc, eq, inArray } from 'drizzle-orm';
 
-import type { ProgramRepository } from '@/application/ports/program-repository';
+import type { ProgramRepository, SessionRoute } from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import type { ScheduledWorkoutId } from '@/domain/types/ids';
 
@@ -68,17 +68,21 @@ export class DrizzleProgramRepository implements ProgramRepository {
     return programs[0] ?? null;
   }
 
-  async findSlugByScheduledWorkoutId(
+  async findSessionRouteByScheduledWorkoutId(
     scheduledWorkoutId: ScheduledWorkoutId,
-  ): Promise<string | null> {
+  ): Promise<SessionRoute | null> {
     const rows = await this.db
-      .select({ slug: trainingPrograms.slug })
+      .select({
+        programSlug: trainingPrograms.slug,
+        weekNumber: scheduledWorkouts.weekNumber,
+        workoutOrder: scheduledWorkouts.orderInWeek,
+      })
       .from(scheduledWorkouts)
       .innerJoin(trainingPrograms, eq(scheduledWorkouts.programId, trainingPrograms.id))
       .where(eq(scheduledWorkouts.id, scheduledWorkoutId))
       .limit(1);
 
-    return rows[0]?.slug ?? null;
+    return rows[0] ?? null;
   }
 
   private async loadChildren(programIds: string[]): Promise<ProgramChildren> {

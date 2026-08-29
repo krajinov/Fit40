@@ -83,7 +83,7 @@ function createWorkoutIdForTest(v: string) { const r = createWorkoutId(v); if (!
 
 function makeUseCase() {
   const program = makeProgram();
-  const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSlugByScheduledWorkoutId: vi.fn() };
+  const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
   const uc = new GetProgramEnrollmentUseCase(programRepo, enrollmentRepo, sessionRepo);
@@ -207,7 +207,7 @@ describe('GetProgramEnrollmentUseCase', () => {
   });
 
   it('returns PROGRAM_NOT_FOUND for an unknown program slug', async () => {
-    const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSlugByScheduledWorkoutId: vi.fn() };
+    const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn() };
     const uc = new GetProgramEnrollmentUseCase(programRepo, new InMemoryProgramEnrollmentRepository(), new InMemoryWorkoutSessionRepository());
     const r = await uc.execute({ userId: 'user-a', programSlug: 'missing' });
     expect(r.ok).toBe(false);

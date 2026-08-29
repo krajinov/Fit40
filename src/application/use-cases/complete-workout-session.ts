@@ -5,7 +5,7 @@
  * Completed sessions are immutable thereafter.
  */
 
-import type { ProgramRepository } from '@/application/ports/program-repository';
+import type { ProgramRepository, SessionRoute } from '@/application/ports/program-repository';
 import {
   SessionStaleVersionError,
   type WorkoutSessionRepository,
@@ -31,14 +31,15 @@ export interface CompleteWorkoutSessionInput {
 }
 
 /**
- * Successful completion outcome. `programSlug` is the owning program's slug
- * resolved server-side from the session's own scheduled workout — never from
- * client input — so the presentation layer revalidates the true affected
- * program page. Null when the owning program no longer exists.
+ * Successful completion outcome. `route` holds the owning occurrence's route
+ * coordinates resolved server-side from the session's own scheduled workout —
+ * never from client input — so the presentation layer revalidates the true
+ * affected program page and session page. Null when the owning program no
+ * longer exists, in which case there is no trustworthy page to revalidate.
  */
 export interface CompletedWorkoutSessionView {
   readonly session: WorkoutSessionDto;
-  readonly programSlug: string | null;
+  readonly route: SessionRoute | null;
 }
 
 export class CompleteWorkoutSessionUseCase {
@@ -92,13 +93,13 @@ export class CompleteWorkoutSessionUseCase {
       throw error;
     }
 
-    // Derive the trusted owning program from the session's own data, never
-    // from client-supplied route coordinates: the revalidation target must
-    // not be forgeable via form fields.
-    const programSlug = await this.programRepository.findSlugByScheduledWorkoutId(
+    // Derive the trusted owning occurrence route from the session's own data,
+    // never from client-supplied route coordinates: the revalidation targets
+    // must not be forgeable via form fields.
+    const route = await this.programRepository.findSessionRouteByScheduledWorkoutId(
       result.data.scheduledWorkoutId,
     );
 
-    return ok({ session: toWorkoutSessionDto(result.data), programSlug });
+    return ok({ session: toWorkoutSessionDto(result.data), route });
   }
 }

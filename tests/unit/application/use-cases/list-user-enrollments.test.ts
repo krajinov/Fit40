@@ -34,7 +34,7 @@ function enroll(repo: InMemoryProgramEnrollmentRepository, enrollmentId: string,
 
 function makeUseCase() {
   const programs = [makeProgram('p1', 'prog-1', 'Program One'), makeProgram('p2', 'prog-2', 'Program Two')];
-  const programRepo: ProgramRepository = { list: vi.fn().mockResolvedValue(programs), findBySlug: vi.fn(), findSlugByScheduledWorkoutId: vi.fn() };
+  const programRepo: ProgramRepository = { list: vi.fn().mockResolvedValue(programs), findBySlug: vi.fn(), findSessionRouteByScheduledWorkoutId: vi.fn() };
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
   const uc = new ListUserEnrollmentsUseCase(enrollmentRepo, programRepo);
   return { enrollmentRepo, uc };

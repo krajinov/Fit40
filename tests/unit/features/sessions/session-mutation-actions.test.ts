@@ -105,7 +105,7 @@ function mutationActionTests(
   execute: Mock,
   makeFormData: () => FormData,
   // log/update/delete use cases resolve to a bare WorkoutSessionDto; the
-  // complete use case resolves to { session, programSlug } (trusted slug).
+  // complete use case resolves to { session, route } (trusted occurrence route).
   successData: { ok: true; data: unknown } = { ok: true, data: {} as WorkoutSessionDto },
 ): void {
   describe(name, () => {
@@ -207,7 +207,10 @@ mutationActionTests(
   makeCompleteSessionFormData,
   {
     ok: true,
-    data: { session: {} as WorkoutSessionDto, programSlug: 'fit40-beginner-strength' },
+    data: {
+      session: {} as WorkoutSessionDto,
+      route: { programSlug: 'fit40-beginner-strength', weekNumber: 1, workoutOrder: 1 },
+    },
   },
 );
 
@@ -219,39 +222,50 @@ describe('completeSessionAction revalidation target', () => {
     requireUserMock.mockResolvedValue(SESSION_USER);
   });
 
-  it('revalidates the owning program page from trusted data, never the forged form slug', async () => {
+  it('revalidates both pages from trusted data, never the forged form coordinates', async () => {
     vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
       ok: true,
-      data: { session: {} as WorkoutSessionDto, programSlug: 'fit40-beginner-strength' },
+      data: {
+        session: {} as WorkoutSessionDto,
+        route: { programSlug: 'real-program', weekNumber: 2, workoutOrder: 3 },
+      },
     });
 
     const fd = makeCompleteSessionFormData();
     fd.set('programSlug', 'forged-program');
+    fd.set('weekNumber', '9');
+    fd.set('workoutOrder', '9');
 
     const state = await completeSessionAction(fd);
 
     expect(state).toEqual({ ok: true });
-    expect(revalidatePath).toHaveBeenCalledWith('/programs/fit40-beginner-strength');
-    expect(revalidatePath).not.toHaveBeenCalledWith('/programs/forged-program');
+    const revalidated = vi.mocked(revalidatePath).mock.calls.map((call) => String(call[0]));
+    // Both targets come from the trusted route, exactly once each.
+    expect(revalidated).toEqual([
+      '/programs/real-program',
+      '/programs/real-program/weeks/2/workouts/3/session',
+    ]);
+    // No forged coordinate may leak into any revalidated path.
+    expect(revalidated.some((path) => path.includes('forged-program'))).toBe(false);
+    expect(revalidated.some((path) => path.includes('/weeks/9/'))).toBe(false);
   });
 
-  it('skips program-page revalidation when the trusted slug cannot be resolved', async () => {
+  it('skips both revalidation targets when the trusted route cannot be resolved', async () => {
     vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
       ok: true,
-      data: { session: {} as WorkoutSessionDto, programSlug: null },
+      data: { session: {} as WorkoutSessionDto, route: null },
     });
 
     const fd = makeCompleteSessionFormData();
     fd.set('programSlug', 'forged-program');
+    fd.set('weekNumber', '9');
+    fd.set('workoutOrder', '9');
 
     await completeSessionAction(fd);
 
-    // The session page keeps its unchanged form-derived revalidation, but no
-    // bare program page may be derived from the forged form field.
-    const revalidated = vi.mocked(revalidatePath).mock.calls.map((call) => String(call[0]));
-    expect(revalidated).toHaveLength(1);
-    expect(revalidated[0]).toMatch(/\/session$/);
-    expect(revalidated).not.toContain('/programs/forged-program');
+    // With no trustworthy occurrence route there is no page to revalidate,
+    // and no form field may substitute for it.
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 

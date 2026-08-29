@@ -20,10 +20,25 @@ export interface ProgramRepository {
   findBySlug(slug: string): Promise<TrainingProgram | null>;
 
   /**
-   * Returns the slug of the program owning the given scheduled workout, or
-   * null when no such scheduled workout exists. Lets use cases derive the
-   * trusted owning-program route coordinate from session data instead of
+   * Resolves the trusted route coordinates of a scheduled workout occurrence:
+   * the owning program's slug plus the occurrence's week number and workout
+   * order — the exact coordinates of its canonical session URL. Null when the
+   * scheduled workout (or its program) no longer exists. Use cases derive
+   * revalidation targets from this server-side data instead of
    * client-supplied form fields.
    */
-  findSlugByScheduledWorkoutId(scheduledWorkoutId: ScheduledWorkoutId): Promise<string | null>;
+  findSessionRouteByScheduledWorkoutId(
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<SessionRoute | null>;
+}
+
+/**
+ * The owning program and canonical route coordinates of a scheduled workout
+ * occurrence, resolved server-side so presentation code never trusts
+ * client-supplied route fields for cache invalidation.
+ */
+export interface SessionRoute {
+  readonly programSlug: string;
+  readonly weekNumber: number;
+  readonly workoutOrder: number;
 }

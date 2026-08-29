@@ -5,7 +5,7 @@
  * replace this class without changing domain or application code.
  */
 
-import type { ProgramRepository } from '@/application/ports/program-repository';
+import type { ProgramRepository, SessionRoute } from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import type { ScheduledWorkoutId } from '@/domain/types/ids';
 import { seedPrograms } from '@/infrastructure/programs/seed-programs';
@@ -20,13 +20,20 @@ export class InMemoryProgramRepository implements ProgramRepository {
     return seedPrograms.find((program) => program.slug === slug) ?? null;
   }
 
-  async findSlugByScheduledWorkoutId(
+  async findSessionRouteByScheduledWorkoutId(
     scheduledWorkoutId: ScheduledWorkoutId,
-  ): Promise<string | null> {
+  ): Promise<SessionRoute | null> {
     for (const program of seedPrograms) {
       for (const week of program.weeks) {
-        if (week.scheduledWorkouts.some((scheduled) => scheduled.id === scheduledWorkoutId)) {
-          return program.slug;
+        const scheduled = week.scheduledWorkouts.find(
+          (candidate) => candidate.id === scheduledWorkoutId,
+        );
+        if (scheduled !== undefined) {
+          return {
+            programSlug: program.slug,
+            weekNumber: week.weekNumber,
+            workoutOrder: scheduled.order,
+          };
         }
       }
     }

@@ -31,9 +31,9 @@ function programRepo(
   };
 }
 
-async function seedSession(ownerId: string = OWNER_ID) {
+async function seedSession(ownerId: string = OWNER_ID, enrollmentId: string | null = 'enr-1') {
   const repo = new InMemoryWorkoutSessionRepository();
-  const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enid('enr-1'), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+  const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
   await repo.save(sr.data);
   const loaded = await repo.findById(sr.data.id);
@@ -73,6 +73,39 @@ describe('CompleteWorkoutSessionUseCase', () => {
     // The attempt must not have mutated the session.
     const untouched = await repo.findById(sessionId);
     expect(untouched?.completedAt).toBeNull();
+  });
+
+  it('rejects completing a detached session (enrollment nulled by leaving)', async () => {
+    const { repo, sessionId } = await seedSession(OWNER_ID, null);
+    const uc = new CompleteWorkoutSessionUseCase(repo, programRepo(null));
+
+    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
+
+    // The historical session stays untouched and readable.
+    const untouched = await repo.findById(sessionId);
+    expect(untouched?.completedAt).toBeNull();
+    expect(untouched?.enrollmentId).toBeNull();
+  });
+
+  it('never reactivates a detached session after a leave-and-rejoin', async () => {
+    // Leaving deleted the enrollment and detached the session
+    // (enrollment_id = null). Rejoining creates a NEW enrollment identity
+    // that can never be attached to the old session, so it stays read-only
+    // regardless of any enrollment created afterwards.
+    const { repo, sessionId } = await seedSession(OWNER_ID, null);
+    const uc = new CompleteWorkoutSessionUseCase(repo, programRepo(null));
+
+    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
+    const still = await repo.findById(sessionId);
+    expect(still?.enrollmentId).toBeNull();
   });
 
   it('derives the trusted owning occurrence route from session data', async () => {

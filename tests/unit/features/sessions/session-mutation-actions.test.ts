@@ -267,6 +267,29 @@ describe('completeSessionAction revalidation target', () => {
     // and no form field may substitute for it.
     expect(revalidatePath).not.toHaveBeenCalled();
   });
+
+  it('propagates NOT_ENROLLED for a detached session without revalidating', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'NOT_ENROLLED',
+        message:
+          'You are no longer enrolled in this program, so this session can no longer be modified.',
+      },
+    });
+
+    const state = await completeSessionAction(makeCompleteSessionFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: {
+        code: 'NOT_ENROLLED',
+        message:
+          'You are no longer enrolled in this program, so this session can no longer be modified.',
+      },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
 });
 
 function makeStartSessionFormData(): FormData {

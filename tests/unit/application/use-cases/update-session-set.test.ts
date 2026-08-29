@@ -14,9 +14,9 @@ function enid(v: string) { const r = createEnrollmentId(v); if (!r.ok) throw Err
 
 const OWNER_ID = 'user-1';
 
-async function sessionWithSet(ownerId: string = OWNER_ID) {
+async function sessionWithSet(ownerId: string = OWNER_ID, enrollmentId: string | null = 'enr-1') {
   const repo = new InMemoryWorkoutSessionRepository();
-  const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enid('enr-1'), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+  const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
   await repo.save(sr.data);
   const loaded = await repo.findById(sr.data.id);
@@ -52,5 +52,16 @@ describe('UpdateSessionSetUseCase', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('FORBIDDEN');
+  });
+
+  it('rejects updating a set in a detached session (enrollment nulled by leaving)', async () => {
+    const { repo, sessionId } = await sessionWithSet(OWNER_ID, null);
+    const uc = new UpdateSessionSetUseCase(repo);
+
+    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
   });
 });

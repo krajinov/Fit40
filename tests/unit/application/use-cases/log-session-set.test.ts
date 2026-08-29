@@ -14,8 +14,8 @@ function enid(v: string) { const r = createEnrollmentId(v); if (!r.ok) throw Err
 
 const OWNER_ID = 'user-1';
 
-function makeSession(ownerId: string = OWNER_ID) {
-  const r = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enid('enr-1'), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+function makeSession(ownerId: string = OWNER_ID, enrollmentId: string | null = 'enr-1') {
+  const r = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!r.ok) throw Error();
   return r.data;
 }
@@ -49,6 +49,22 @@ describe('LogSessionSetUseCase', () => {
     expect(r.error.code).toBe('FORBIDDEN');
 
     const untouched = await repo.findById(makeSession().id);
+    expect(untouched?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('rejects logging into a detached session (enrollment nulled by leaving)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(makeSession(OWNER_ID, null));
+    const uc = new LogSessionSetUseCase(repo);
+
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
+
+    const untouched = await repo.findById(makeSession().id);
+    expect(untouched?.enrollmentId).toBeNull();
     expect(untouched?.exerciseLogs[0]?.sets).toHaveLength(0);
   });
 });

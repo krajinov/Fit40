@@ -16,7 +16,7 @@
  * - Completed sessions are immutable
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 import type {
   EnrollmentId,

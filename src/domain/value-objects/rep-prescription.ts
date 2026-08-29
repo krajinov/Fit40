@@ -5,7 +5,7 @@
  * Factory functions enforce invariants.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export interface PrescriptionValidationError {
   readonly code: 'INVALID_PRESCRIPTION';

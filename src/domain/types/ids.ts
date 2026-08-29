@@ -5,7 +5,7 @@
  * where another is expected, while still compiling to plain strings at runtime.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 /**
  * Unique identifier for an Exercise.

@@ -5,7 +5,7 @@
  * Invariants are enforced at construction via createExercise.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 import type { ExerciseId } from '@/domain/types/ids';
 import {

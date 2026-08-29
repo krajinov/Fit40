@@ -1,0 +1,1 @@
+CREATE INDEX "program_enrollments_program_id_idx" ON "program_enrollments" USING btree ("program_id");

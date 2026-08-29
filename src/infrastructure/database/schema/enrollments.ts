@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import { index, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
 
 import { trainingPrograms } from './programs';
 import { users } from './users';
@@ -20,7 +20,10 @@ import { users } from './users';
  * The (user_id, program_id) unique constraint is the final authority against
  * duplicate enrollments, including concurrent joins. It doubles as the index
  * for both access patterns (lookup by pair, and listing a user's
- * enrollments), so no additional indexes are defined.
+ * enrollments), but its user-leading column order cannot serve
+ * program_id-only predicates. A standalone program_id index covers those
+ * and the FK restrict check against this table when deleting a training
+ * program.
  */
 export const programEnrollments = pgTable(
   'program_enrollments',
@@ -37,6 +40,9 @@ export const programEnrollments = pgTable(
   (table) => ({
     userProgramUnique: unique('program_enrollments_user_program_unique').on(
       table.userId,
+      table.programId,
+    ),
+    programIdIdx: index('program_enrollments_program_id_idx').on(
       table.programId,
     ),
   }),

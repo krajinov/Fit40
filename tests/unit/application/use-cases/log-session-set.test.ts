@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
-import { createWorkoutSession, logSessionSet } from '@/domain/entities/workout-session';
-import { createExerciseId, createScheduledWorkoutId, createWorkoutId } from '@/domain/types/ids';
+import { createWorkoutSession } from '@/domain/entities/workout-session';
+import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
 function swid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
+function uid(v: string) { const r = createUserId(v); if (!r.ok) throw Error(); return r.data; }
+function enid(v: string) { const r = createEnrollmentId(v); if (!r.ok) throw Error(); return r.data; }
 
-function makeSession() {
-  const r = createWorkoutSession({ id: 's-1', scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+const OWNER_ID = 'user-1';
+
+function makeSession(ownerId: string = OWNER_ID, enrollmentId: string | null = 'enr-1') {
+  const r = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!r.ok) throw Error();
   return r.data;
 }
@@ -21,7 +25,7 @@ describe('LogSessionSetUseCase', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(makeSession());
     const uc = new LogSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: 's-1', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.metrics.totalSets).toBe(1);
@@ -29,9 +33,38 @@ describe('LogSessionSetUseCase', () => {
 
   it('returns SESSION_NOT_FOUND for unknown session', async () => {
     const uc = new LogSessionSetUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
+  });
+
+  it('returns FORBIDDEN when the session belongs to another user', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(makeSession('user-1'));
+    const uc = new LogSessionSetUseCase(repo);
+    const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('FORBIDDEN');
+
+    const untouched = await repo.findById(makeSession().id);
+    expect(untouched?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('rejects logging into a detached session (enrollment nulled by leaving)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(makeSession(OWNER_ID, null));
+    const uc = new LogSessionSetUseCase(repo);
+
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
+
+    const untouched = await repo.findById(makeSession().id);
+    expect(untouched?.enrollmentId).toBeNull();
+    expect(untouched?.exerciseLogs[0]?.sets).toHaveLength(0);
   });
 });

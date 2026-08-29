@@ -7,7 +7,7 @@
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type { ExerciseDetailDto } from '@/application/dto/exercise';
 import type { Exercise } from '@/domain/entities/exercise';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export interface ExerciseNotFoundError {
   readonly code: 'EXERCISE_NOT_FOUND';

@@ -18,7 +18,7 @@ import {
   type UserProfileUpdate,
 } from '@/domain/entities/user-profile';
 import { createUserId, type UserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type UpdateUserProfileError =
   | { readonly code: 'PROFILE_NOT_FOUND'; readonly message: string }

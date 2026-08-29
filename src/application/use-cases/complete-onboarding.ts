@@ -21,7 +21,7 @@ import {
   type UserProfileUpdate,
 } from '@/domain/entities/user-profile';
 import { createUserId, type UserId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type CompleteOnboardingError =
   | { readonly code: 'PROFILE_ALREADY_EXISTS'; readonly message: string }

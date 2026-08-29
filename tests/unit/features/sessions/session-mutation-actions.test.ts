@@ -3,6 +3,24 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { WorkoutSessionDto } from '@/application/dto/workout-session';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
 
+const { redirectMock, requireUserMock } = vi.hoisted(() => {
+  const redirect = vi.fn((target: string) => {
+    const error = new Error(`NEXT_REDIRECT:${target}`);
+    error.name = 'NEXT_REDIRECT';
+    throw error;
+  });
+
+  return { redirectMock: redirect, requireUserMock: vi.fn() };
+});
+
+vi.mock('next/navigation', () => ({
+  redirect: redirectMock,
+}));
+
+vi.mock('@/features/auth/current-user', () => ({
+  requireUser: requireUserMock,
+}));
+
 vi.mock('@/features/sessions/services', () => ({
   logSessionSetUseCase: { execute: vi.fn() },
   updateSessionSetUseCase: { execute: vi.fn() },
@@ -14,6 +32,12 @@ vi.mock('@/features/sessions/services', () => ({
 vi.mock('next/cache', () => ({
   revalidatePath: vi.fn(),
 }));
+
+const SESSION_USER = {
+  id: '11111111-1111-1111-1111-111111111111',
+  email: 'user@example.com',
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
 
 import { revalidatePath } from 'next/cache';
 
@@ -80,20 +104,55 @@ function mutationActionTests(
   action: (formData: FormData) => Promise<SessionActionState>,
   execute: Mock,
   makeFormData: () => FormData,
+  // log/update/delete use cases resolve to a bare WorkoutSessionDto; the
+  // complete use case resolves to { session, route } (trusted occurrence route).
+  successData: { ok: true; data: unknown } = { ok: true, data: {} as WorkoutSessionDto },
 ): void {
   describe(name, () => {
     beforeEach(() => {
       execute.mockReset();
       vi.mocked(revalidatePath).mockClear();
+      requireUserMock.mockReset();
+      requireUserMock.mockResolvedValue(SESSION_USER);
     });
 
     it('propagates success and revalidates the session path', async () => {
-      execute.mockResolvedValue({ ok: true, data: {} as WorkoutSessionDto });
+      execute.mockResolvedValue(successData);
 
       const state = await action(makeFormData());
 
       expect(state).toEqual({ ok: true });
       expect(revalidatePath).toHaveBeenCalledWith(EXPECTED_SESSION_PATH);
+    });
+
+    it('passes the session-derived userId to the use case, never form data', async () => {
+      execute.mockResolvedValue(successData);
+
+      const fd = makeFormData();
+      fd.set('userId', 'attacker-supplied-id');
+
+      await action(fd);
+
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ userId: SESSION_USER.id }));
+    });
+
+    it('redirects unauthenticated users to login without calling the use case', async () => {
+      requireUserMock.mockImplementation(() => redirectMock('/login?next=test'));
+
+      await expect(action(makeFormData())).rejects.toThrow('NEXT_REDIRECT');
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(revalidatePath).not.toHaveBeenCalled();
+    });
+
+    it('propagates FORBIDDEN when the session belongs to another user', async () => {
+      const forbidden = { code: 'FORBIDDEN', message: 'You do not have access to this session.' } as const;
+      execute.mockResolvedValue({ ok: false, error: forbidden });
+
+      const state = await action(makeFormData());
+
+      expect(state).toEqual({ ok: false, error: forbidden });
+      expect(revalidatePath).not.toHaveBeenCalled();
     });
 
     it('propagates SESSION_MODIFIED instead of swallowing it', async () => {
@@ -146,7 +205,92 @@ mutationActionTests(
   completeSessionAction,
   vi.mocked(completeWorkoutSessionUseCase.execute),
   makeCompleteSessionFormData,
+  {
+    ok: true,
+    data: {
+      session: {} as WorkoutSessionDto,
+      route: { programSlug: 'fit40-beginner-strength', weekNumber: 1, workoutOrder: 1 },
+    },
+  },
 );
+
+describe('completeSessionAction revalidation target', () => {
+  beforeEach(() => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockReset();
+    vi.mocked(revalidatePath).mockClear();
+    requireUserMock.mockReset();
+    requireUserMock.mockResolvedValue(SESSION_USER);
+  });
+
+  it('revalidates both pages from trusted data, never the forged form coordinates', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {
+        session: {} as WorkoutSessionDto,
+        route: { programSlug: 'real-program', weekNumber: 2, workoutOrder: 3 },
+      },
+    });
+
+    const fd = makeCompleteSessionFormData();
+    fd.set('programSlug', 'forged-program');
+    fd.set('weekNumber', '9');
+    fd.set('workoutOrder', '9');
+
+    const state = await completeSessionAction(fd);
+
+    expect(state).toEqual({ ok: true });
+    const revalidated = vi.mocked(revalidatePath).mock.calls.map((call) => String(call[0]));
+    // Both targets come from the trusted route, exactly once each.
+    expect(revalidated).toEqual([
+      '/programs/real-program',
+      '/programs/real-program/weeks/2/workouts/3/session',
+    ]);
+    // No forged coordinate may leak into any revalidated path.
+    expect(revalidated.some((path) => path.includes('forged-program'))).toBe(false);
+    expect(revalidated.some((path) => path.includes('/weeks/9/'))).toBe(false);
+  });
+
+  it('skips both revalidation targets when the trusted route cannot be resolved', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: { session: {} as WorkoutSessionDto, route: null },
+    });
+
+    const fd = makeCompleteSessionFormData();
+    fd.set('programSlug', 'forged-program');
+    fd.set('weekNumber', '9');
+    fd.set('workoutOrder', '9');
+
+    await completeSessionAction(fd);
+
+    // With no trustworthy occurrence route there is no page to revalidate,
+    // and no form field may substitute for it.
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('propagates NOT_ENROLLED for a detached session without revalidating', async () => {
+    vi.mocked(completeWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'NOT_ENROLLED',
+        message:
+          'You are no longer enrolled in this program, so this session can no longer be modified.',
+      },
+    });
+
+    const state = await completeSessionAction(makeCompleteSessionFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: {
+        code: 'NOT_ENROLLED',
+        message:
+          'You are no longer enrolled in this program, so this session can no longer be modified.',
+      },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
 
 function makeStartSessionFormData(): FormData {
   const fd = new FormData();
@@ -163,6 +307,73 @@ describe('startSessionAction', () => {
   beforeEach(() => {
     vi.mocked(startWorkoutSessionUseCase.execute).mockReset();
     vi.mocked(revalidatePath).mockClear();
+    requireUserMock.mockReset();
+    requireUserMock.mockResolvedValue(SESSION_USER);
+  });
+
+  it('redirects unauthenticated users to login without calling the use case', async () => {
+    requireUserMock.mockImplementation(() => redirectMock('/login?next=test'));
+
+    await expect(startSessionAction(makeStartSessionFormData())).rejects.toThrow('NEXT_REDIRECT');
+
+    expect(startWorkoutSessionUseCase.execute).not.toHaveBeenCalled();
+  });
+
+  it('passes the session-derived userId to the use case, never form data', async () => {
+    vi.mocked(startWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {} as WorkoutSessionDto,
+    });
+
+    const fd = makeStartSessionFormData();
+    fd.set('userId', 'attacker-supplied-id');
+
+    await startSessionAction(fd);
+
+    expect(startWorkoutSessionUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION_USER.id }),
+    );
+  });
+
+  it('propagates NOT_ENROLLED as typed action state', async () => {
+    vi.mocked(startWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'NOT_ENROLLED',
+        programSlug: 'fit40-beginner-strength',
+        message: 'Join this program before starting its workouts.',
+      },
+    });
+
+    const state = await startSessionAction(makeStartSessionFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: { code: 'NOT_ENROLLED', message: 'Join this program before starting its workouts.' },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('propagates ENROLLMENT_CHANGED as typed action state without revalidating', async () => {
+    vi.mocked(startWorkoutSessionUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        programSlug: 'fit40-beginner-strength',
+        message: 'Your enrollment changed while starting the session. Please try again.',
+      },
+    });
+
+    const state = await startSessionAction(makeStartSessionFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: {
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while starting the session. Please try again.',
+      },
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it('propagates success and revalidates the session path', async () => {

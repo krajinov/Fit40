@@ -6,7 +6,7 @@
  * workouts and workout templates through it.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 import type { Difficulty } from '@/domain/types/exercise';
 import type { ProgramGoal } from '@/domain/types/program';

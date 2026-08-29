@@ -26,6 +26,13 @@ export function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * SQLSTATE 23503: foreign_key_violation.
+ */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return errorCode(error) === '23503';
+}
+
+/**
  * The constraint name for a PostgreSQL constraint violation, resolved through
  * the same `cause` chain as {@link errorCode}.
  *

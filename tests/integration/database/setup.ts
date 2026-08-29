@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
+import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleRegistrationRepository } from '@/infrastructure/database/repositories/drizzle-registration-repository';
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
@@ -21,6 +22,7 @@ export const db = drizzle(client, { schema });
 export const exerciseRepository = new DrizzleExerciseRepository(db);
 export const programRepository = new DrizzleProgramRepository(db);
 export const workoutSessionRepository = new DrizzleWorkoutSessionRepository(db);
+export const programEnrollmentRepository = new DrizzleProgramEnrollmentRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
@@ -37,6 +39,7 @@ export async function resetDatabase(): Promise<void> {
       set_logs,
       exercise_logs,
       workout_sessions,
+      program_enrollments,
       scheduled_workouts,
       program_weeks,
       workout_exercises,

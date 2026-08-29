@@ -13,9 +13,13 @@
  * domain or application code.
  */
 
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import {
+  SessionAlreadyExistsError,
+  SessionEnrollmentChangedError,
+  type WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
 export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepository {
   private readonly sessionsById = new Map<string, WorkoutSession>();
@@ -25,9 +29,15 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return session ? structuredClone(session) : null;
   }
 
-  async findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null> {
+  async findByEnrollmentAndScheduledWorkout(
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<WorkoutSession | null> {
     for (const session of this.sessionsById.values()) {
-      if (session.scheduledWorkoutId === id) {
+      if (
+        session.enrollmentId === enrollmentId &&
+        session.scheduledWorkoutId === scheduledWorkoutId
+      ) {
         return structuredClone(session);
       }
     }
@@ -35,13 +45,50 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
   }
 
   async save(session: WorkoutSession): Promise<void> {
+    // Mirror the database's write protection: an update of an existing row
+    // whose enrollment no longer matches the caller's snapshot (detached by
+    // a concurrent leave, or re-pointed) must not commit, so use-case tests
+    // observe the same detached-history race outcome as PostgreSQL.
+    const existing = this.sessionsById.get(session.id);
+    if (
+      existing !== undefined &&
+      session.enrollmentId !== null &&
+      existing.enrollmentId !== session.enrollmentId
+    ) {
+      throw new SessionEnrollmentChangedError(session.id);
+    }
+
+    // Mirror the database's one-session-per-(enrollment, occurrence) unique
+    // constraint so use-case tests observe the same race outcome. Detached
+    // sessions (null enrollment) never collide, matching PostgreSQL.
+    for (const other of this.sessionsById.values()) {
+      if (
+        other.id !== session.id &&
+        session.enrollmentId !== null &&
+        other.enrollmentId === session.enrollmentId &&
+        other.scheduledWorkoutId === session.scheduledWorkoutId
+      ) {
+        throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
+      }
+    }
     this.sessionsById.set(session.id, structuredClone(session));
   }
 
-  async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
-    return [...this.sessionsById.values()]
-      .filter((session) => session.completedAt !== null)
-      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
-      .map((session) => structuredClone(session));
+  async listCompletedScheduledWorkoutIds(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>> {
+    // Mirrors the SQL projection: completed sessions only, ordered by start
+    // time, deduplicated (save() already enforces one session per occurrence;
+    // the Set documents that contract explicitly).
+    const ids = new Set<ScheduledWorkoutId>();
+    const completed = [...this.sessionsById.values()]
+      .filter(
+        (session) => session.enrollmentId === enrollmentId && session.completedAt !== null,
+      )
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    for (const session of completed) {
+      ids.add(session.scheduledWorkoutId);
+    }
+    return [...ids];
   }
 }

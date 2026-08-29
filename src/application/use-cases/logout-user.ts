@@ -7,7 +7,7 @@
 
 import type { SessionRepository } from '@/application/ports/session-repository';
 import type { SessionTokenService } from '@/application/ports/session-token-service';
-import { ok, type Result } from '@/lib/result';
+import { ok, type Result } from '@/domain/types/result';
 
 export interface LogoutUserInput {
   /** Raw bearer token from the session cookie. */

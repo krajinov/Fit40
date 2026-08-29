@@ -20,7 +20,7 @@ import { toUserDto, type UserDto } from '@/application/dto/user';
 import { buildSession, type IssuedSession } from '@/application/use-cases/issue-session';
 import { createUser } from '@/domain/entities/user';
 import { normalizeEmail } from '@/domain/value-objects/email-address';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type RegisterUserError =
   | { readonly code: 'EMAIL_ALREADY_EXISTS'; readonly email: string; readonly message: string }

@@ -1,7 +1,12 @@
 import { asc, eq, inArray } from 'drizzle-orm';
 
-import type { ProgramRepository } from '@/application/ports/program-repository';
+import type {
+  ProgramMetadata,
+  ProgramRepository,
+  SessionRoute,
+} from '@/application/ports/program-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
+import type { ProgramId, ScheduledWorkoutId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapProgramRows } from '../mappers/program-read-mapper';
@@ -65,6 +70,44 @@ export class DrizzleProgramRepository implements ProgramRepository {
 
     const programs = await this.hydrate(programRows);
     return programs[0] ?? null;
+  }
+
+  async findSessionRouteByScheduledWorkoutId(
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<SessionRoute | null> {
+    const rows = await this.db
+      .select({
+        programSlug: trainingPrograms.slug,
+        weekNumber: scheduledWorkouts.weekNumber,
+        workoutOrder: scheduledWorkouts.orderInWeek,
+      })
+      .from(scheduledWorkouts)
+      .innerJoin(trainingPrograms, eq(scheduledWorkouts.programId, trainingPrograms.id))
+      .where(eq(scheduledWorkouts.id, scheduledWorkoutId))
+      .limit(1);
+
+    return rows[0] ?? null;
+  }
+
+  async listMetadataByIds(
+    programIds: ReadonlyArray<ProgramId>,
+  ): Promise<ReadonlyArray<ProgramMetadata>> {
+    if (programIds.length === 0) {
+      return [];
+    }
+
+    // Single lightweight query over the programs table only: no joins, no
+    // child hydration. Enrollment list views need id/slug/name and nothing
+    // else, so hydrating workouts/exercises/weeks/scheduled workouts here
+    // would be pure waste.
+    return this.db
+      .select({
+        id: trainingPrograms.id,
+        slug: trainingPrograms.slug,
+        name: trainingPrograms.name,
+      })
+      .from(trainingPrograms)
+      .where(inArray(trainingPrograms.id, [...programIds]));
   }
 
   private async loadChildren(programIds: string[]): Promise<ProgramChildren> {

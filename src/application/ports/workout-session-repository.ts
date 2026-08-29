@@ -10,17 +10,31 @@
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
 /**
- * Thrown by `save` when a second session for the same scheduled workout races
- * the database's one-session-per-occurrence constraint. The caller should map
- * this to the `SESSION_ALREADY_EXISTS` business outcome.
+ * Thrown by `save` when a second session for the same enrollment and
+ * scheduled workout races the database's one-session-per-occurrence-per-
+ * enrollment constraint. The caller should map this to the
+ * `SESSION_ALREADY_EXISTS` business outcome.
  */
 export class SessionAlreadyExistsError extends Error {
   constructor(readonly scheduledWorkoutId: string) {
     super(`A workout session already exists for scheduled workout "${scheduledWorkoutId}"`);
     this.name = 'SessionAlreadyExistsError';
+  }
+}
+
+/**
+ * Thrown by `save` when the session's enrollment no longer exists: a
+ * concurrent leave deleted the enrollment between the caller's enrollment
+ * check and the insert. The caller should re-check enrollment and map this
+ * to the `NOT_ENROLLED` business outcome.
+ */
+export class SessionEnrollmentNotFoundError extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`Enrollment "${enrollmentId}" no longer exists; the session cannot attach to it`);
+    this.name = 'SessionEnrollmentNotFoundError';
   }
 }
 
@@ -35,6 +49,23 @@ export class SessionStaleVersionError extends Error {
   }
 }
 
+/**
+ * Thrown by `save` when the session's enrollment changed between the caller's
+ * snapshot load and the write: the persisted row's enrollment_id no longer
+ * matches the snapshot — a concurrent leave detached it via ON DELETE SET
+ * NULL, or it was re-pointed. The mutation did not commit, so detached
+ * history stays read-only. The caller should map this to the `NOT_ENROLLED`
+ * business outcome.
+ */
+export class SessionEnrollmentChangedError extends Error {
+  constructor(readonly sessionId: string) {
+    super(
+      `Workout session "${sessionId}" is no longer attached to the enrollment it was loaded under`,
+    );
+    this.name = 'SessionEnrollmentChangedError';
+  }
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -42,21 +73,44 @@ export interface WorkoutSessionRepository {
   findById(id: WorkoutSessionId): Promise<WorkoutSession | null>;
 
   /**
-   * Finds a session by the scheduled workout occurrence ID, or null if not found.
+   * Finds a session by owning enrollment and scheduled workout occurrence, or
+   * null if not found.
    *
-   * There is at most one session per scheduled workout in this MVP.
+   * There is at most one session per (enrollment, scheduled workout) pair, so
+   * different users — and different enrollments of the same user — never see
+   * each other's sessions.
    */
-  findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null>;
+  findByEnrollmentAndScheduledWorkout(
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<WorkoutSession | null>;
 
   /**
    * Saves a session (insert or update by session ID).
    *
-   * May throw {@link SessionAlreadyExistsError} or {@link SessionStaleVersionError}.
+   * Updates of enrollment-owned sessions are conditional on the snapshot's
+   * version AND its enrollment identity, so a leave (or any enrollment
+   * change) between load and write makes the mutation a no-op instead of
+   * mutating detached history.
+   *
+   * May throw {@link SessionAlreadyExistsError},
+   * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
+   * or {@link SessionEnrollmentChangedError}.
    */
   save(session: WorkoutSession): Promise<void>;
 
   /**
-   * Returns all completed sessions.
+   * Returns the IDs of the scheduled workouts the enrollment has completed
+   * sessions for, ordered by session start time ascending.
+   *
+   * This is the completion source for per-user program progress. It is a
+   * lightweight projection: no full session aggregates, exercise logs, or set
+   * logs are hydrated. Sessions detached from their enrollment (after leaving
+   * a program) are excluded, so a rejoined program correctly starts with zero
+   * progress. IDs are unique — the (enrollment, scheduled workout) constraint
+   * admits at most one session per occurrence.
    */
-  listCompleted(): Promise<ReadonlyArray<WorkoutSession>>;
+  listCompletedScheduledWorkoutIds(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
 }

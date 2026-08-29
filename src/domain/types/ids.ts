@@ -5,7 +5,7 @@
  * where another is expected, while still compiling to plain strings at runtime.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 /**
  * Unique identifier for an Exercise.
@@ -91,6 +91,29 @@ export function createUserId(value: string): Result<UserId, { readonly message: 
   }
 
   return ok(value as UserId);
+}
+
+/**
+ * Unique identifier for a ProgramEnrollment.
+ *
+ * The enrollment has its own surrogate identity (not the (UserId, ProgramId)
+ * pair) so that leaving and rejoining a program produces a NEW identity: the
+ * rejoined enrollment must not inherit the previous enrollment's completion
+ * state.
+ */
+export type EnrollmentId = string & { readonly __brand: 'EnrollmentId' };
+
+/**
+ * Creates a validated EnrollmentId.
+ */
+export function createEnrollmentId(
+  value: string,
+): Result<EnrollmentId, { readonly message: string }> {
+  if (value.trim().length === 0) {
+    return err({ message: 'EnrollmentId cannot be empty' });
+  }
+
+  return ok(value as EnrollmentId);
 }
 
 /**

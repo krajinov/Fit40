@@ -2,10 +2,18 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TrainingProgram } from '@/domain/entities/training-program';
+import { createProgramId } from '@/domain/types/ids';
 import { scheduledWorkouts, workouts } from '@/infrastructure/database/schema';
 import { seedPrograms } from '@/infrastructure/programs/seed-programs';
 
 import { closeDatabase, db, programRepository, resetAndSeed } from './setup';
+
+/** Program ids are branded; the seed ids are known-valid strings. */
+function pid(value: string) {
+  const r = createProgramId(value);
+  if (!r.ok) throw new Error(r.error.message);
+  return r.data;
+}
 
 /**
  * Normalizes workout order (the aggregate treats workouts as an unordered
@@ -158,6 +166,33 @@ describe('DrizzleProgramRepository', () => {
         estimatedDurationMinutes: 45,
       }),
     ).resolves.toBeDefined();
+  });
+
+  it('listMetadataByIds returns only lightweight metadata for the requested programs', async () => {
+    const metadata = await programRepository.listMetadataByIds([
+      pid('prog-beginner-strength'),
+      pid('prog-strong-at-home'),
+    ]);
+
+    expect(metadata).toHaveLength(2);
+    for (const entry of metadata) {
+      // Exactly the three display columns — no aggregate content leaked in.
+      expect(Object.keys(entry).sort()).toEqual(['id', 'name', 'slug']);
+    }
+    expect(metadata.map((entry) => entry.id).sort()).toEqual([
+      'prog-beginner-strength',
+      'prog-strong-at-home',
+    ]);
+  });
+
+  it('listMetadataByIds omits unknown program ids and returns empty for an empty request', async () => {
+    const metadata = await programRepository.listMetadataByIds([
+      pid('prog-beginner-strength'),
+      pid('does-not-exist'),
+    ]);
+    expect(metadata.map((entry) => entry.id)).toEqual(['prog-beginner-strength']);
+
+    expect(await programRepository.listMetadataByIds([])).toEqual([]);
   });
 });
 

@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 
+import { getCurrentUser } from '@/features/auth/current-user';
+import { listUserEnrollmentsUseCase } from '@/features/enrollment/services';
 import { listProgramsUseCase } from '@/features/programs/services';
 import { ProgramList } from '@/features/programs/components/ProgramList';
 
@@ -9,6 +11,12 @@ export const metadata: Metadata = {
 
 export default async function ProgramsPage() {
   const programs = await listProgramsUseCase.execute();
+
+  // Catalog browsing is public; joined markers are resolved only for
+  // authenticated visitors, scoped to their user id from the session.
+  const user = await getCurrentUser();
+  const enrollments = user === null ? [] : await listUserEnrollmentsUseCase.execute(user.id);
+  const enrolledProgramIds = new Set(enrollments.map((enrollment) => enrollment.programId));
 
   return (
     <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
@@ -22,7 +30,7 @@ export default async function ProgramsPage() {
         </p>
       </div>
 
-      <ProgramList programs={programs} />
+      <ProgramList programs={programs} enrolledProgramIds={enrolledProgramIds} />
     </main>
   );
 }

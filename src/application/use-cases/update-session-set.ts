@@ -3,6 +3,7 @@
  */
 
 import {
+  SessionEnrollmentChangedError,
   SessionStaleVersionError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
@@ -12,17 +13,20 @@ import {
   type UpdateSetCommandInput,
   type SessionMutationError,
 } from '@/domain/entities/workout-session';
-import { createWorkoutSessionId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { createUserId, createWorkoutSessionId } from '@/domain/types/ids';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type UpdateSessionSetError =
   | { readonly code: 'SESSION_NOT_FOUND'; readonly sessionId: string; readonly message: string }
+  | { readonly code: 'FORBIDDEN'; readonly message: string }
+  | { readonly code: 'NOT_ENROLLED'; readonly message: string }
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string }
   | { readonly code: 'SESSION_MODIFIED'; readonly message: string }
   | SessionMutationError;
 
 export interface UpdateSessionSetInput {
   readonly sessionId: string;
+  readonly userId: string;
   readonly exerciseOrder: number;
   readonly setNumber: number;
   readonly type: 'reps';
@@ -33,6 +37,7 @@ export interface UpdateSessionSetInput {
 
 export interface UpdateSessionDurationSetInput {
   readonly sessionId: string;
+  readonly userId: string;
   readonly exerciseOrder: number;
   readonly setNumber: number;
   readonly type: 'duration';
@@ -54,12 +59,37 @@ export class UpdateSessionSetUseCase {
       return err({ code: 'INVALID_INPUT', message: idResult.error.message, field: 'sessionId' });
     }
 
+    const userIdResult = createUserId(input.userId);
+    if (!userIdResult.ok) {
+      return err({ code: 'INVALID_INPUT', message: userIdResult.error.message, field: 'userId' });
+    }
+
     const session = await this.sessionRepository.findById(idResult.data);
     if (session === null) {
       return err({
         code: 'SESSION_NOT_FOUND',
         sessionId: input.sessionId,
         message: `Session "${input.sessionId}" not found`,
+      });
+    }
+
+    // Ownership: only the session's owner may mutate it. The userId comes
+    // from the trusted authenticated session, never from client input.
+    if (session.userId !== userIdResult.data) {
+      return err({ code: 'FORBIDDEN', message: 'You do not have access to this session.' });
+    }
+
+    // A detached session (enrollment_id nulled by leaving the program) is
+    // historical, read-only data. No enrollment lookup is needed beyond this
+    // null check: the FK's ON DELETE SET NULL guarantees a non-null
+    // enrollment_id references a live enrollment owned by this session's
+    // user, and a leave-and-rejoin creates a NEW enrollment identity that
+    // can never reattach the old detached session.
+    if (session.enrollmentId === null) {
+      return err({
+        code: 'NOT_ENROLLED',
+        message:
+          'You are no longer enrolled in this program, so this session can no longer be modified.',
       });
     }
 
@@ -94,6 +124,16 @@ export class UpdateSessionSetUseCase {
         return err({
           code: 'SESSION_MODIFIED',
           message: `Session "${input.sessionId}" was modified concurrently; reload and retry`,
+        });
+      }
+      if (error instanceof SessionEnrollmentChangedError) {
+        // The write itself observed the enrollment vanish or change after the
+        // snapshot was loaded: the session is detached history now, and the
+        // mutation did not commit.
+        return err({
+          code: 'NOT_ENROLLED',
+          message:
+            'You are no longer enrolled in this program, so this session can no longer be modified.',
         });
       }
       throw error;

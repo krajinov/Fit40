@@ -6,7 +6,7 @@
  * aggregate; there is no standalone Workout repository in this slice.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 import type { ExerciseId } from '@/domain/types/ids';
 import { createWorkoutId, type WorkoutId } from '@/domain/types/ids';

@@ -1,0 +1,48 @@
+---
+description: Push-review skill - commit, push, and trigger the Codex review on a PR
+globs:
+alwaysApply: true
+---
+
+# Push-Review Skill
+
+Apply after completing a reviewed fix (e.g. a Codex finding) that must be
+delivered and re-reviewed on its pull request.
+
+## 1. Commit
+
+- One logical change per commit; conventional commit message
+  (`fix:`, `feat:`, `refactor:`, `test:`, `docs:`, `chore:`).
+- Stage only the files the fix touched — never `git add .`.
+- Confirm the working tree is clean after committing.
+
+## 2. Push
+
+- Push the current branch: `git push origin <branch>`.
+- If the push is rejected, fetch and rebase onto the updated remote; never
+  rewrite pushed history unless replacing an accidental commit, and then only
+  with lease protection (`git push --force-with-lease`).
+
+## 3. Trigger Codex review
+
+- `gh` CLI may be absent. Post a PR comment via the GitHub API instead:
+  resolve the token with `git credential fill` (keychain), pipe it directly
+  into `curl`, and never print or store it:
+
+  ```
+  cred=$(printf 'protocol=https\nhost=github.com\n' | git credential fill)
+  token=$(printf '%s' "$cred" | sed -n 's/^password=//p')
+  curl -s -X POST \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.github+json' \
+    https://api.github.com/repos/<owner>/<repo>/issues/<pr>/comments \
+    -d '{"body":"@codex review"}'
+  ```
+
+- Expect HTTP `201`; capture the returned comment URL and report it.
+
+## 4. Report
+
+In the final answer include: files changed, commit hash, push result
+(before/after SHAs), the review-trigger URL, and verification results for
+every gate that was run.

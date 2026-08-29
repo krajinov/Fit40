@@ -11,7 +11,7 @@ import type {
 } from '@/application/dto/program';
 import type { Exercise } from '@/domain/entities/exercise';
 import type { ExerciseId } from '@/domain/types/ids';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type ScheduledWorkoutError =
   | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }

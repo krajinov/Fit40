@@ -17,7 +17,7 @@
  * - createdAt must be a valid Date
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 import type { UserId } from '@/domain/types/ids';
 import { createUserId } from '@/domain/types/ids';

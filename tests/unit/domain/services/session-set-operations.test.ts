@@ -7,7 +7,7 @@ import {
   deleteSessionSet,
   completeWorkoutSession,
 } from '@/domain/entities/workout-session';
-import { createExerciseId, createScheduledWorkoutId, createWorkoutId } from '@/domain/types/ids';
+import { createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
 
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
@@ -15,10 +15,12 @@ function dur() { const r = createDurationScheme(3, 30); if (!r.ok) throw Error()
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
 function sid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
+function uid(v: string) { const r = createUserId(v); if (!r.ok) throw Error(); return r.data; }
 
 function session() {
   const r = createWorkoutSession({
-    id: 't', scheduledWorkoutId: sid('s-1'), workoutId: wid('w-1'),
+    id: 't', userId: uid('user-1'), enrollmentId: null,
+    scheduledWorkoutId: sid('s-1'), workoutId: wid('w-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [
       { exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 },

@@ -7,6 +7,7 @@
 
 import { db } from '../client';
 import { DrizzleExerciseRepository } from './drizzle-exercise-repository';
+import { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from './drizzle-program-repository';
 import { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 import { DrizzleSessionRepository } from './drizzle-session-repository';
@@ -21,8 +22,10 @@ export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
 export const userProfileRepository = new DrizzleUserProfileRepository(db);
+export const programEnrollmentRepository = new DrizzleProgramEnrollmentRepository(db);
 
 export { DrizzleExerciseRepository } from './drizzle-exercise-repository';
+export { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment-repository';
 export { DrizzleProgramRepository } from './drizzle-program-repository';
 export { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 export { DrizzleSessionRepository } from './drizzle-session-repository';

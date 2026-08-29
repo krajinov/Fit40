@@ -20,6 +20,9 @@ export type SessionActionErrorCode =
   | 'PROGRAM_NOT_FOUND'
   | 'SCHEDULED_WORKOUT_NOT_FOUND'
   | 'INVALID_WORKOUT_SESSION'
+  | 'NOT_ENROLLED'
+  | 'ENROLLMENT_CHANGED'
+  | 'FORBIDDEN'
   | 'INVALID_INPUT';
 
 export interface SessionActionError {

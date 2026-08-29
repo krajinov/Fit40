@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { requireUser } from '@/features/auth/current-user';
+import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { getScheduledWorkoutUseCase } from '@/features/programs/services';
 import { getWorkoutSessionUseCase } from '@/features/sessions/services';
 import {
@@ -30,9 +32,11 @@ const getWorkout = cache(async (programSlug: string, weekNumber: number, workout
   return getScheduledWorkoutUseCase.execute({ programSlug, weekNumber, workoutOrder });
 });
 
-const getSession = cache(async (programSlug: string, weekNumber: number, workoutOrder: number) => {
-  return getWorkoutSessionUseCase.execute({ programSlug, weekNumber, workoutOrder });
-});
+const getSession = cache(
+  async (programSlug: string, weekNumber: number, workoutOrder: number, userId: string) => {
+    return getWorkoutSessionUseCase.execute({ userId, programSlug, weekNumber, workoutOrder });
+  },
+);
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { programSlug, weekNumber, workoutOrder } = await params;
@@ -235,6 +239,38 @@ function CompletedPanel({
   );
 }
 
+function JoinPromptPanel({
+  workout,
+  programSlug,
+  weekNumber,
+  workoutOrder,
+}: {
+  readonly workout: ScheduledWorkoutDetailDto;
+  readonly programSlug: string;
+  readonly weekNumber: number;
+  readonly workoutOrder: number;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold tracking-tight">{workout.workout.name}</h1>
+        <p className="text-lg text-muted-foreground">
+          Join {workout.programName} to start and track this workout.
+        </p>
+      </div>
+      <JoinProgramButton programSlug={programSlug} />
+      <div>
+        <Link
+          href={`/programs/${programSlug}/weeks/${weekNumber}/workouts/${workoutOrder}`}
+          className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          &larr; Back to workout details
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default async function SessionPage({ params }: Props) {
   const { programSlug: rawSlug, weekNumber: rawWeek, workoutOrder: rawOrder } = await params;
 
@@ -249,21 +285,29 @@ export default async function SessionPage({ params }: Props) {
   const wn = weekResult.data;
   const wo = orderResult.data;
 
+  // Sessions are user-owned: this page and its mutations require auth, and
+  // the session is resolved through the user's enrollment in the program.
+  const user = await requireUser(`/programs/${ps}/weeks/${wn}/workouts/${wo}/session`);
+
   const workoutResult = await getWorkout(ps, wn, wo);
   if (!workoutResult.ok) notFound();
 
-  const sessionResult = await getSession(ps, wn, wo);
+  const sessionResult = await getSession(ps, wn, wo, user.id);
   if (!sessionResult.ok) notFound();
+
+  const view = sessionResult.data;
 
   return (
     <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      {sessionResult.data === null ? (
+      {!view.enrolled ? (
+        <JoinPromptPanel workout={workoutResult.data} programSlug={ps} weekNumber={wn} workoutOrder={wo} />
+      ) : view.session === null ? (
         <StartPanel workout={workoutResult.data} programSlug={ps} weekNumber={wn} workoutOrder={wo} />
-      ) : sessionResult.data.status === 'completed' ? (
-        <CompletedPanel session={sessionResult.data} programSlug={ps} weekNumber={wn} workoutOrder={wo} />
+      ) : view.session.status === 'completed' ? (
+        <CompletedPanel session={view.session} programSlug={ps} weekNumber={wn} workoutOrder={wo} />
       ) : (
         <InProgressPanel
-          session={sessionResult.data}
+          session={view.session}
           programSlug={ps}
           weekNumber={wn}
           workoutOrder={wo}

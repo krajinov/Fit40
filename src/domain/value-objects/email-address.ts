@@ -11,7 +11,7 @@
  * primary gate.
  */
 
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export type EmailAddress = string & { readonly __brand: 'EmailAddress' };
 

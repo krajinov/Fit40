@@ -9,12 +9,23 @@ import type {
   ProgramWeekDto,
 } from '@/application/dto/program';
 import type { ProgramWeek, TrainingProgram } from '@/domain/entities/training-program';
-import { err, ok, type Result } from '@/lib/result';
+import { err, ok, type Result } from '@/domain/types/result';
 
 export interface ProgramNotFoundError {
   readonly code: 'PROGRAM_NOT_FOUND';
   readonly slug: string;
   readonly message: string;
+}
+
+/**
+ * The loaded program aggregate plus its presentation DTO. Returning the
+ * aggregate lets a single request reuse the hydration (e.g. the program
+ * detail page also resolves enrollment state) instead of re-querying the
+ * catalog through a second repository call.
+ */
+export interface ProgramDetailResult {
+  readonly detail: ProgramDetailDto;
+  readonly program: TrainingProgram;
 }
 
 function toScheduledWorkoutDto(
@@ -63,7 +74,7 @@ function toDetailDto(program: TrainingProgram): ProgramDetailDto {
 export class GetProgramBySlugUseCase {
   constructor(private readonly programRepository: ProgramRepository) {}
 
-  async execute(slug: string): Promise<Result<ProgramDetailDto, ProgramNotFoundError>> {
+  async execute(slug: string): Promise<Result<ProgramDetailResult, ProgramNotFoundError>> {
     const program = await this.programRepository.findBySlug(slug);
 
     if (program === null) {
@@ -74,6 +85,6 @@ export class GetProgramBySlugUseCase {
       });
     }
 
-    return ok(toDetailDto(program));
+    return ok({ detail: toDetailDto(program), program });
   }
 }

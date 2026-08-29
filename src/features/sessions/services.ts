@@ -4,16 +4,26 @@ import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-se
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
 import { UpdateSessionSetUseCase } from '@/application/use-cases/update-session-set';
-import { programRepository, workoutSessionRepository } from '@/infrastructure/database/repositories';
+import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
+import {
+  programEnrollmentRepository,
+  programRepository,
+  workoutSessionRepository,
+} from '@/infrastructure/database/repositories';
+
+const idGenerator = new NodeIdGenerator();
 
 export const startWorkoutSessionUseCase = new StartWorkoutSessionUseCase(
   programRepository,
   workoutSessionRepository,
+  programEnrollmentRepository,
+  idGenerator,
 );
 
 export const getWorkoutSessionUseCase = new GetWorkoutSessionUseCase(
   programRepository,
   workoutSessionRepository,
+  programEnrollmentRepository,
 );
 
 export const logSessionSetUseCase = new LogSessionSetUseCase(workoutSessionRepository);
@@ -21,4 +31,5 @@ export const updateSessionSetUseCase = new UpdateSessionSetUseCase(workoutSessio
 export const deleteSessionSetUseCase = new DeleteSessionSetUseCase(workoutSessionRepository);
 export const completeWorkoutSessionUseCase = new CompleteWorkoutSessionUseCase(
   workoutSessionRepository,
+  programRepository,
 );

@@ -1,17 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProgramRepository } from '@/application/ports/program-repository';
+import { SessionAlreadyExistsError } from '@/application/ports/workout-session-repository';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
+import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
-import { createExercise } from '@/domain/entities/exercise';
+import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import { createTrainingProgram, type TrainingProgram } from '@/domain/entities/training-program';
 import { createWorkout, type Workout } from '@/domain/entities/workout';
-import { Difficulty, EquipmentType, MovementPattern, MuscleGroup } from '@/domain/types/exercise';
-import { createExerciseId, createScheduledWorkoutId } from '@/domain/types/ids';
+import { Difficulty } from '@/domain/types/exercise';
+import { createExerciseId, createScheduledWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
+import { FakeIdGenerator } from '../../helpers/fake-crypto';
+
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
+
+const OWNER_A = 'user-a';
+const OWNER_B = 'user-b';
 
 function makeWorkout(id: string, exerciseIds: string[]): Workout {
   const r = createWorkout({
@@ -43,71 +50,110 @@ function createMockRepo(): ProgramRepository {
   return { list: vi.fn(), findBySlug: vi.fn() };
 }
 
-describe('StartWorkoutSessionUseCase', () => {
-  it('starts a valid session from program slug/week/order', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
-    const sessionRepo = new InMemoryWorkoutSessionRepository();
-    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo);
-    const result = await useCase.execute({ programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 });
-    expect(result.ok).toBe(true);
-  });
+function enroll(repo: InMemoryProgramEnrollmentRepository, enrollmentId: string, userId: string, programId: string) {
+  const r = createProgramEnrollment({ id: enrollmentId, userId, programId, enrolledAt: new Date('2026-01-01T00:00:00Z') });
+  if (!r.ok) throw Error();
+  return repo.create(r.data);
+}
 
-  it('returns DTO with status in-progress', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
-    const sessionRepo = new InMemoryWorkoutSessionRepository();
-    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo);
-    const result = await useCase.execute({ programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 });
+function makeUseCase(program: TrainingProgram | null = makeProgram()) {
+  const programRepo = createMockRepo();
+  vi.mocked(programRepo.findBySlug).mockResolvedValue(program);
+  const sessionRepo = new InMemoryWorkoutSessionRepository();
+  const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+  const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+  return { sessionRepo, enrollmentRepo, useCase };
+}
+
+const START_INPUT = { programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 } as const;
+
+describe('StartWorkoutSessionUseCase', () => {
+  it('starts a valid session owned by the enrolled user', async () => {
+    const { enrollmentRepo, useCase } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.status).toBe('in-progress');
-    expect(result.data.sessionId).toBeTruthy();
-  });
-
-  it('snapshots exercise logs with correct data', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
-    const sessionRepo = new InMemoryWorkoutSessionRepository();
-    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo);
-    const result = await useCase.execute({ programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    expect(result.data.sessionId).toBe('fake-id-1');
     expect(result.data.exerciseLogs).toHaveLength(2);
-    expect(result.data.exerciseLogs[0]?.order).toBe(1);
-    expect(result.data.exerciseLogs[0]?.prescription.type).toBe('reps');
     expect(result.data.exerciseLogs[0]?.sets).toEqual([]);
   });
 
   it('returns PROGRAM_NOT_FOUND when program missing', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(null);
-    const useCase = new StartWorkoutSessionUseCase(programRepo, new InMemoryWorkoutSessionRepository());
-    const result = await useCase.execute({ programSlug: 'missing', weekNumber: 1, workoutOrder: 1 });
+    const { useCase } = makeUseCase(null);
+    const result = await useCase.execute({ ...START_INPUT, programSlug: 'missing', userId: OWNER_A });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('PROGRAM_NOT_FOUND');
   });
 
   it('returns SCHEDULED_WORKOUT_NOT_FOUND for invalid week', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
-    const useCase = new StartWorkoutSessionUseCase(programRepo, new InMemoryWorkoutSessionRepository());
-    const result = await useCase.execute({ programSlug: 'test-program', weekNumber: 99, workoutOrder: 1 });
+    const { enrollmentRepo, useCase } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+
+    const result = await useCase.execute({ ...START_INPUT, weekNumber: 99, userId: OWNER_A });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('SCHEDULED_WORKOUT_NOT_FOUND');
   });
 
-  it('returns SESSION_ALREADY_EXISTS when session already exists', async () => {
-    const programRepo = createMockRepo();
-    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
-    const sessionRepo = new InMemoryWorkoutSessionRepository();
-    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo);
-    await useCase.execute({ programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 });
-    const second = await useCase.execute({ programSlug: 'test-program', weekNumber: 1, workoutOrder: 1 });
+  it('returns NOT_ENROLLED when the user has not joined the program', async () => {
+    const { sessionRepo, useCase } = makeUseCase();
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('NOT_ENROLLED');
+
+    // No session may be persisted for a non-enrolled user.
+    const generatedId = createWorkoutSessionId('fake-id-1');
+    if (!generatedId.ok) throw Error();
+    expect(await sessionRepo.findById(generatedId.data)).toBeNull();
+  });
+
+  it('returns SESSION_ALREADY_EXISTS when the enrollment already has a session for the occurrence', async () => {
+    const { enrollmentRepo, useCase } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+
+    await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+    const second = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe('SESSION_ALREADY_EXISTS');
+  });
+
+  it('lets two users start the same occurrence independently', async () => {
+    const { enrollmentRepo, useCase } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+    await enroll(enrollmentRepo, 'enr-b', OWNER_B, 'prog-test');
+
+    const first = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+    const second = await useCase.execute({ ...START_INPUT, userId: OWNER_B });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.data.sessionId).not.toBe(second.data.sessionId);
+  });
+
+  it('maps a save-level unique race to SESSION_ALREADY_EXISTS', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionAlreadyExistsError('sched-w1'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SESSION_ALREADY_EXISTS');
   });
 });

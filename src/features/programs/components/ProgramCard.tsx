@@ -9,6 +9,8 @@ import {
 
 interface ProgramCardProps {
   readonly program: ProgramSummaryDto;
+  /** Whether the authenticated user is enrolled in this program. */
+  readonly joined?: boolean;
 }
 
 function Badge({ children }: { readonly children: React.ReactNode }) {
@@ -19,12 +21,17 @@ function Badge({ children }: { readonly children: React.ReactNode }) {
   );
 }
 
-export function ProgramCard({ program }: ProgramCardProps) {
+export function ProgramCard({ program, joined = false }: ProgramCardProps) {
   return (
     <article className="flex flex-col rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm transition-colors hover:border-muted-foreground/25">
       <div className="mb-3 flex flex-wrap gap-2">
         <Badge>{DIFFICULTY_LABELS[program.difficulty]}</Badge>
         <Badge>{PROGRAM_GOAL_LABELS[program.goal]}</Badge>
+        {joined && (
+          <span className="inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-green-700 dark:text-green-400">
+            Joined
+          </span>
+        )}
       </div>
 
       <h2 className="mb-2 text-xl font-semibold tracking-tight">

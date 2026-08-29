@@ -9,14 +9,24 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
 } from 'drizzle-orm/pg-core';
 
+import { programEnrollments } from './enrollments';
 import { exercises } from './exercises';
 import { scheduledWorkouts, workouts } from './programs';
+import { users } from './users';
 
 /**
  * Workout session aggregate tables: sessions, exercise log snapshots, and
  * individual set logs.
+ *
+ * Every session is owned by exactly one user (`user_id`, NOT NULL): sessions
+ * are user-owned training history, and per-user program progress is derived
+ * from owned sessions. `enrollment_id` ties the session to the program
+ * enrollment it counts toward; it is nullable because leaving a program
+ * deletes the enrollment and detaches its sessions (SET NULL), keeping the
+ * history while excluding it from every program's progress.
  *
  * `version` is an optimistic-concurrency token: `save` only applies when the
  * caller's snapshot matches the current row version, preventing stale aggregate
@@ -26,9 +36,14 @@ export const workoutSessions = pgTable(
   'workout_sessions',
   {
     id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    enrollmentId: text('enrollment_id').references(() => programEnrollments.id, {
+      onDelete: 'set null',
+    }),
     scheduledWorkoutId: text('scheduled_workout_id')
       .notNull()
-      .unique()
       .references(() => scheduledWorkouts.id, { onDelete: 'restrict' }),
     workoutId: text('workout_id')
       .notNull()
@@ -38,7 +53,17 @@ export const workoutSessions = pgTable(
     version: integer('version').notNull().default(0),
   },
   (table) => ({
+    userIdIdx: index('workout_sessions_user_id_idx').on(table.userId),
     workoutIdIdx: index('workout_sessions_workout_id_idx').on(table.workoutId),
+    // At most one session per enrollment per scheduled occurrence (the
+    // previous global one-session-per-occurrence rule made a second user's
+    // session for the same occurrence impossible). PostgreSQL treats NULL
+    // enrollment ids as distinct, so detached historical sessions never
+    // collide with a fresh enrollment's sessions after rejoining.
+    enrollmentOccurrenceUnique: unique('workout_sessions_enrollment_occurrence_unique').on(
+      table.enrollmentId,
+      table.scheduledWorkoutId,
+    ),
     // Enforces that a session's (scheduled_workout_id, workout_id) matches the
     // actual scheduled occurrence and its template, preventing a session from
     // being attributed to one occurrence while carrying another template's

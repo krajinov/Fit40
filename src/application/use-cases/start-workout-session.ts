@@ -1,12 +1,19 @@
 /**
  * Use case: start a new workout session for a scheduled workout occurrence.
  *
- * Resolves the program and scheduled occurrence, checks for an existing session,
- * creates exercise logs eagerly, and persists the new session.
+ * A session can only be started by a user who is enrolled in the program:
+ * the session is owned by that user and attached to their enrollment, which
+ * is what makes per-user program progress possible. The userId must come
+ * from the trusted authenticated session at the presentation layer, never
+ * from client form data.
+ *
+ * At most one session exists per (enrollment, scheduled workout) pair: a
+ * friendly preflight covers the common case and the database's unique
+ * constraint remains the final authority for a concurrent start race.
  */
 
-import crypto from 'crypto';
-
+import type { IdGenerator } from '@/application/ports/id-generator';
+import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import {
   SessionAlreadyExistsError,
@@ -15,6 +22,7 @@ import {
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { createWorkoutSession, type CreateExerciseLogInput } from '@/domain/entities/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
+import { createUserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
 
 export type StartWorkoutSessionError =
@@ -26,10 +34,12 @@ export type StartWorkoutSessionError =
       readonly workoutOrder: number;
       readonly message: string;
     }
+  | { readonly code: 'NOT_ENROLLED'; readonly programSlug: string; readonly message: string }
   | { readonly code: 'SESSION_ALREADY_EXISTS'; readonly scheduledWorkoutId: string; readonly message: string }
   | { readonly code: 'INVALID_WORKOUT_SESSION'; readonly message: string; readonly field?: string };
 
 export interface StartWorkoutSessionInput {
+  readonly userId: string;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -39,11 +49,23 @@ export class StartWorkoutSessionUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly enrollmentRepository: ProgramEnrollmentRepository,
+    private readonly idGenerator: IdGenerator,
   ) {}
 
   async execute(
     input: StartWorkoutSessionInput,
   ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
+    const userIdResult = createUserId(input.userId);
+    if (!userIdResult.ok) {
+      return err({
+        code: 'INVALID_WORKOUT_SESSION',
+        message: userIdResult.error.message,
+        field: 'userId',
+      });
+    }
+    const userId = userIdResult.data;
+
     const program = await this.programRepository.findBySlug(input.programSlug);
     if (program === null) {
       return err({
@@ -69,7 +91,19 @@ export class StartWorkoutSessionUseCase {
       });
     }
 
-    const existing = await this.sessionRepository.findByScheduledWorkoutId(occurrence.scheduled.id);
+    const enrollment = await this.enrollmentRepository.findByUserAndProgram(userId, program.id);
+    if (enrollment === null) {
+      return err({
+        code: 'NOT_ENROLLED',
+        programSlug: input.programSlug,
+        message: 'Join this program before starting its workouts.',
+      });
+    }
+
+    const existing = await this.sessionRepository.findByEnrollmentAndScheduledWorkout(
+      enrollment.id,
+      occurrence.scheduled.id,
+    );
     if (existing !== null) {
       return err({
         code: 'SESSION_ALREADY_EXISTS',
@@ -87,10 +121,10 @@ export class StartWorkoutSessionUseCase {
       }),
     );
 
-    const sessionId = crypto.randomUUID();
-
     const sessionResult = createWorkoutSession({
-      id: sessionId,
+      id: this.idGenerator.generate(),
+      userId,
+      enrollmentId: enrollment.id,
       scheduledWorkoutId: occurrence.scheduled.id,
       workoutId: occurrence.workout.id,
       startedAt: new Date(),

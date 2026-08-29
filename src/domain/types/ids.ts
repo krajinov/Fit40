@@ -94,6 +94,29 @@ export function createUserId(value: string): Result<UserId, { readonly message: 
 }
 
 /**
+ * Unique identifier for a ProgramEnrollment.
+ *
+ * The enrollment has its own surrogate identity (not the (UserId, ProgramId)
+ * pair) so that leaving and rejoining a program produces a NEW identity: the
+ * rejoined enrollment must not inherit the previous enrollment's completion
+ * state.
+ */
+export type EnrollmentId = string & { readonly __brand: 'EnrollmentId' };
+
+/**
+ * Creates a validated EnrollmentId.
+ */
+export function createEnrollmentId(
+  value: string,
+): Result<EnrollmentId, { readonly message: string }> {
+  if (value.trim().length === 0) {
+    return err({ message: 'EnrollmentId cannot be empty' });
+  }
+
+  return ok(value as EnrollmentId);
+}
+
+/**
  * Unique identifier for a WorkoutSession.
  */
 export type WorkoutSessionId = string & { readonly __brand: 'WorkoutSessionId' };

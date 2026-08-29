@@ -1,6 +1,8 @@
 import Link from 'next/link';
 
+import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import { EnrollmentPanel } from '@/features/enrollment/components/EnrollmentPanel';
 import { DIFFICULTY_LABELS } from '@/features/exercises/exercise-labels';
 import {
   PROGRAM_GOAL_LABELS,
@@ -8,6 +10,11 @@ import {
 
 interface ProgramDetailProps {
   readonly program: ProgramDetailDto;
+  /**
+   * The authenticated user's enrollment view of this program, or null when
+   * browsing anonymously (no enrollment controls or progress markers then).
+   */
+  readonly enrollment: ProgramEnrollmentViewDto | null;
 }
 
 function Badge({ children }: { readonly children: React.ReactNode }) {
@@ -23,11 +30,13 @@ function WorkoutLink({
   weekNumber,
   order,
   name,
+  done,
 }: {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly order: number;
   readonly name: string;
+  readonly done: boolean;
 }) {
   return (
     <Link
@@ -38,11 +47,21 @@ function WorkoutLink({
       <span className="ml-2 text-xs text-muted-foreground">
         Workout {order}
       </span>
+      {done && (
+        <span className="ml-2 inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
+          Done
+        </span>
+      )}
     </Link>
   );
 }
 
-export function ProgramDetail({ program }: ProgramDetailProps) {
+export function ProgramDetail({ program, enrollment }: ProgramDetailProps) {
+  const completedIds =
+    enrollment !== null && enrollment.status === 'enrolled'
+      ? new Set<string>(enrollment.completedScheduledWorkoutIds)
+      : new Set<string>();
+
   return (
     <div className="space-y-8">
       <div className="space-y-3">
@@ -61,6 +80,10 @@ export function ProgramDetail({ program }: ProgramDetailProps) {
           {program.description}
         </p>
       </div>
+
+      {enrollment !== null && (
+        <EnrollmentPanel programSlug={program.slug} enrollment={enrollment} />
+      )}
 
       <div className="space-y-6">
         <h2 className="text-xl font-semibold tracking-tight">Weekly schedule</h2>
@@ -86,6 +109,7 @@ export function ProgramDetail({ program }: ProgramDetailProps) {
                   weekNumber={week.weekNumber}
                   order={scheduled.order}
                   name={scheduled.workoutName}
+                  done={completedIds.has(scheduled.scheduledWorkoutId)}
                 />
               ))}
             </div>

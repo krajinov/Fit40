@@ -13,9 +13,12 @@
  * domain or application code.
  */
 
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import {
+  SessionAlreadyExistsError,
+  type WorkoutSessionRepository,
+} from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
 export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepository {
   private readonly sessionsById = new Map<string, WorkoutSession>();
@@ -25,9 +28,15 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return session ? structuredClone(session) : null;
   }
 
-  async findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null> {
+  async findByEnrollmentAndScheduledWorkout(
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<WorkoutSession | null> {
     for (const session of this.sessionsById.values()) {
-      if (session.scheduledWorkoutId === id) {
+      if (
+        session.enrollmentId === enrollmentId &&
+        session.scheduledWorkoutId === scheduledWorkoutId
+      ) {
         return structuredClone(session);
       }
     }
@@ -35,12 +44,29 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
   }
 
   async save(session: WorkoutSession): Promise<void> {
+    // Mirror the database's one-session-per-(enrollment, occurrence) unique
+    // constraint so use-case tests observe the same race outcome. Detached
+    // sessions (null enrollment) never collide, matching PostgreSQL.
+    for (const existing of this.sessionsById.values()) {
+      if (
+        existing.id !== session.id &&
+        session.enrollmentId !== null &&
+        existing.enrollmentId === session.enrollmentId &&
+        existing.scheduledWorkoutId === session.scheduledWorkoutId
+      ) {
+        throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
+      }
+    }
     this.sessionsById.set(session.id, structuredClone(session));
   }
 
-  async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
+  async listCompletedByEnrollmentId(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<WorkoutSession>> {
     return [...this.sessionsById.values()]
-      .filter((session) => session.completedAt !== null)
+      .filter(
+        (session) => session.enrollmentId === enrollmentId && session.completedAt !== null,
+      )
       .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
       .map((session) => structuredClone(session));
   }

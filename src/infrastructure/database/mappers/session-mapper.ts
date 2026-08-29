@@ -5,11 +5,15 @@ import {
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import {
+  createEnrollmentId,
   createExerciseId,
   createScheduledWorkoutId,
+  createUserId,
   createWorkoutId,
+  type EnrollmentId,
   type ExerciseId,
   type ScheduledWorkoutId,
+  type UserId,
   type WorkoutId,
 } from '@/domain/types/ids';
 
@@ -38,6 +42,25 @@ function parseScheduledWorkoutId(value: string, context: string): ScheduledWorko
 
 function parseWorkoutId(value: string, context: string): WorkoutId {
   const result = createWorkoutId(value);
+  if (!result.ok) {
+    throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+function parseUserId(value: string, context: string): UserId {
+  const result = createUserId(value);
+  if (!result.ok) {
+    throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+function parseOptionalEnrollmentId(value: string | null, context: string): EnrollmentId | null {
+  if (value === null) {
+    return null;
+  }
+  const result = createEnrollmentId(value);
   if (!result.ok) {
     throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
   }
@@ -110,6 +133,8 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
   const sessionContext = `workout_sessions (id=${rows.session.id})`;
   const base = createWorkoutSession({
     id: rows.session.id,
+    userId: parseUserId(rows.session.userId, sessionContext),
+    enrollmentId: parseOptionalEnrollmentId(rows.session.enrollmentId, sessionContext),
     scheduledWorkoutId: parseScheduledWorkoutId(rows.session.scheduledWorkoutId, sessionContext),
     workoutId: parseWorkoutId(rows.session.workoutId, sessionContext),
     startedAt: rows.session.startedAt,
@@ -146,6 +171,8 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
 export function mapSessionToRow(session: WorkoutSession): typeof workoutSessions.$inferInsert {
   return {
     id: session.id,
+    userId: session.userId,
+    enrollmentId: session.enrollmentId,
     scheduledWorkoutId: session.scheduledWorkoutId,
     workoutId: session.workoutId,
     startedAt: session.startedAt,

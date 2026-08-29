@@ -1,13 +1,19 @@
 /**
- * Use case: retrieve the current workout session for a scheduled workout.
+ * Use case: retrieve the current user's workout session for a scheduled
+ * workout occurrence, along with whether the user is enrolled in the program.
  *
- * Returns null if no session exists yet (i.e. the workout has not been started).
+ * The session is resolved through the user's enrollment, so users never see
+ * each other's sessions for the same occurrence. When the user is not
+ * enrolled, no session can exist for them and the view reports
+ * `enrolled: false` so the presentation layer can offer the join action.
  */
 
+import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
+import { createUserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
 
 export type GetWorkoutSessionError =
@@ -18,23 +24,31 @@ export type GetWorkoutSessionError =
       readonly weekNumber: number;
       readonly workoutOrder: number;
       readonly message: string;
-    };
+    }
+  | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string };
 
 export interface GetWorkoutSessionInput {
+  readonly userId: string;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+}
+
+export interface WorkoutSessionView {
+  readonly enrolled: boolean;
+  readonly session: WorkoutSessionDto | null;
 }
 
 export class GetWorkoutSessionUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly enrollmentRepository: ProgramEnrollmentRepository,
   ) {}
 
   async execute(
     input: GetWorkoutSessionInput,
-  ): Promise<Result<WorkoutSessionDto | null, GetWorkoutSessionError>> {
+  ): Promise<Result<WorkoutSessionView, GetWorkoutSessionError>> {
     const program = await this.programRepository.findBySlug(input.programSlug);
     if (program === null) {
       return err({
@@ -60,12 +74,31 @@ export class GetWorkoutSessionUseCase {
       });
     }
 
-    const session = await this.sessionRepository.findByScheduledWorkoutId(occurrence.scheduled.id);
-
-    if (session === null) {
-      return ok(null);
+    const userIdResult = createUserId(input.userId);
+    if (!userIdResult.ok) {
+      return err({
+        code: 'INVALID_INPUT',
+        message: userIdResult.error.message,
+        field: 'userId',
+      });
     }
 
-    return ok(toWorkoutSessionDto(session));
+    const enrollment = await this.enrollmentRepository.findByUserAndProgram(
+      userIdResult.data,
+      program.id,
+    );
+    if (enrollment === null) {
+      return ok({ enrolled: false, session: null });
+    }
+
+    const session = await this.sessionRepository.findByEnrollmentAndScheduledWorkout(
+      enrollment.id,
+      occurrence.scheduled.id,
+    );
+
+    return ok({
+      enrolled: true,
+      session: session === null ? null : toWorkoutSessionDto(session),
+    });
   }
 }

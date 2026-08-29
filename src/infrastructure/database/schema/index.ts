@@ -4,6 +4,7 @@
 // module as `* as schema` so that every table is registered with the Drizzle
 // instance.
 
+export { programEnrollments } from './enrollments';
 export { exercises } from './exercises';
 export {
   programWeeks,

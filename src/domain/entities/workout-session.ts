@@ -18,7 +18,14 @@
 
 import { err, ok, type Result } from '@/lib/result';
 
-import type { ExerciseId, ScheduledWorkoutId, WorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type {
+  EnrollmentId,
+  ExerciseId,
+  ScheduledWorkoutId,
+  UserId,
+  WorkoutId,
+  WorkoutSessionId,
+} from '@/domain/types/ids';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
@@ -58,6 +65,17 @@ export type WorkoutSessionStatus = 'in-progress' | 'completed';
 
 export interface WorkoutSession {
   readonly id: WorkoutSessionId;
+  /**
+   * The user who owns this session. Mandatory: every session is user-owned
+   * history, and per-user program progress is derived from owned sessions.
+   */
+  readonly userId: UserId;
+  /**
+   * The program enrollment this session counts toward, or null when the
+   * enrollment was left after the session was recorded. A null enrollment id
+   * is durable user history but never contributes to any program's progress.
+   */
+  readonly enrollmentId: EnrollmentId | null;
   readonly scheduledWorkoutId: ScheduledWorkoutId;
   readonly workoutId: WorkoutId;
   readonly startedAt: Date;
@@ -82,6 +100,8 @@ export interface CreateExerciseLogInput {
 
 export interface CreateWorkoutSessionInput {
   readonly id: string;
+  readonly userId: UserId;
+  readonly enrollmentId: EnrollmentId | null;
   readonly scheduledWorkoutId: ScheduledWorkoutId;
   readonly workoutId: WorkoutId;
   readonly startedAt: Date;
@@ -270,6 +290,8 @@ export function createWorkoutSession(
 
   return ok({
     id: idResult.data,
+    userId: input.userId,
+    enrollmentId: input.enrollmentId,
     scheduledWorkoutId: input.scheduledWorkoutId,
     workoutId: input.workoutId,
     startedAt: input.startedAt,

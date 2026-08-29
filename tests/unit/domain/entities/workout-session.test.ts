@@ -10,7 +10,7 @@ import {
   getSessionStatus,
   logSessionSet,
 } from '@/domain/entities/workout-session';
-import { createExerciseId, createScheduledWorkoutId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
+import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
 
 function validRepScheme() {
@@ -43,9 +43,23 @@ function workoutId(value: string) {
   return result.data;
 }
 
+function userId(value: string) {
+  const result = createUserId(value);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+function enrollmentId(value: string) {
+  const result = createEnrollmentId(value);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
 function makeValidInput() {
   return {
     id: 'session-1',
+    userId: userId('user-1'),
+    enrollmentId: enrollmentId('enrollment-1'),
     scheduledWorkoutId: scheduledId('sched-1'),
     workoutId: workoutId('wo-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
@@ -76,6 +90,24 @@ function sessionWithOneSet() {
 }
 
 describe('createWorkoutSession', () => {
+  it('creates a valid in-progress session owned by a user and enrollment', () => {
+    const result = createWorkoutSession(makeValidInput());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.userId).toBe('user-1');
+    expect(result.data.enrollmentId).toBe('enrollment-1');
+    expect(result.data.completedAt).toBeNull();
+  });
+
+  it('accepts a null enrollmentId (detached historical session)', () => {
+    const result = createWorkoutSession({ ...makeValidInput(), enrollmentId: null });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.enrollmentId).toBeNull();
+  });
+
   it('creates a valid in-progress session', () => {
     const input = makeValidInput();
     const result = createWorkoutSession(input);

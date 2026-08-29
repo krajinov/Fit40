@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
@@ -6,7 +6,7 @@ import {
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import {
@@ -27,7 +27,8 @@ type SessionRow = typeof workoutSessions.$inferSelect;
  * reinsert for children. The session row upsert is guarded by an optimistic-
  * concurrency version check, so a stale snapshot is rejected instead of
  * silently overwriting concurrent changes. Unique-constraint races on the
- * one-session-per-occurrence rule surface as `SessionAlreadyExistsError`.
+ * one-session-per-(enrollment, occurrence) rule surface as
+ * `SessionAlreadyExistsError`.
  */
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: Database) {}
@@ -43,22 +44,37 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return session === undefined ? null : this.hydrate(session);
   }
 
-  async findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null> {
+  async findByEnrollmentAndScheduledWorkout(
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<WorkoutSession | null> {
     const rows = await this.db
       .select()
       .from(workoutSessions)
-      .where(eq(workoutSessions.scheduledWorkoutId, id))
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          eq(workoutSessions.scheduledWorkoutId, scheduledWorkoutId),
+        ),
+      )
       .limit(1);
 
     const session = rows[0];
     return session === undefined ? null : this.hydrate(session);
   }
 
-  async listCompleted(): Promise<ReadonlyArray<WorkoutSession>> {
+  async listCompletedByEnrollmentId(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<WorkoutSession>> {
     const sessionRows = await this.db
       .select()
       .from(workoutSessions)
-      .where(isNotNull(workoutSessions.completedAt));
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          isNotNull(workoutSessions.completedAt),
+        ),
+      );
 
     if (sessionRows.length === 0) {
       return [];

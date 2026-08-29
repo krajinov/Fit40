@@ -2,11 +2,19 @@
 
 import { revalidatePath } from 'next/cache';
 
+import { requireUser } from '@/features/auth/current-user';
 import { logSetSchema } from '@/features/sessions/schemas/session-actions-schema';
 import { logSessionSetUseCase } from '@/features/sessions/services';
+import { sessionPathFromFormData } from '@/features/sessions/session-path';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
 
+/**
+ * Logs a set in the authenticated user's in-progress session. The UserId
+ * comes exclusively from the trusted session — never from the form data.
+ */
 export async function logSetAction(formData: FormData): Promise<SessionActionState> {
+  const user = await requireUser(sessionPathFromFormData(formData) ?? '/programs');
+
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
@@ -22,19 +30,16 @@ export async function logSetAction(formData: FormData): Promise<SessionActionSta
     return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid set input.' } };
   }
 
-  const result = await logSessionSetUseCase.execute(parsed.data);
+  const result = await logSessionSetUseCase.execute({ ...parsed.data, userId: user.id });
   if (!result.ok) {
     return { ok: false, error: { code: result.error.code, message: result.error.message } };
   }
 
-  const programSlug = formData.get('programSlug');
-  const weekNumber = formData.get('weekNumber');
-  const workoutOrder = formData.get('workoutOrder');
-  if (programSlug && weekNumber && workoutOrder) {
-    revalidatePath(
-      `/programs/${programSlug}/weeks/${weekNumber}/workouts/${workoutOrder}/session`,
-    );
+  const sessionPath = sessionPathFromFormData(formData);
+  if (sessionPath !== null) {
+    revalidatePath(sessionPath);
   }
 
   return { ok: true };
 }
+

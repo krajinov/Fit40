@@ -2,6 +2,9 @@ import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
+import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
+import { getCurrentUser } from '@/features/auth/current-user';
+import { getProgramEnrollmentUseCase } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
 import { ProgramDetail } from '@/features/programs/components/ProgramDetail';
 import { programSlugSchema } from '@/features/programs/schemas/program-routes-schema';
@@ -42,9 +45,28 @@ export default async function ProgramDetailPage({
     notFound();
   }
 
+  // The catalog page stays public; enrollment state is resolved only for
+  // authenticated visitors, scoped to their user id from the session.
+  const user = await getCurrentUser();
+  let enrollment: ProgramEnrollmentViewDto | null = null;
+  if (user !== null) {
+    const enrollmentResult = await getProgramEnrollmentUseCase.execute({
+      userId: user.id,
+      programSlug: result.data.slug,
+    });
+    if (!enrollmentResult.ok) {
+      // Unreachable in practice (the program was just loaded and the user id
+      // comes from the trusted session): treat as an unexpected failure.
+      throw new Error(
+        `Failed to resolve enrollment for program "${result.data.slug}": ${enrollmentResult.error.message}`,
+      );
+    }
+    enrollment = enrollmentResult.data;
+  }
+
   return (
     <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      <ProgramDetail program={result.data} />
+      <ProgramDetail program={result.data} enrollment={enrollment} />
     </main>
   );
 }

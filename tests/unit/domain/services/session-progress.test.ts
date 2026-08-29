@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkoutSession, completeWorkoutSession, logSessionSet } from '@/domain/entities/workout-session';
 import { getCompletedScheduledWorkoutIds } from '@/domain/services/session-progress';
-import { createExerciseId, createScheduledWorkoutId, createWorkoutId } from '@/domain/types/ids';
+import { createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
 function sid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
+function uid(v: string) { const r = createUserId(v); if (!r.ok) throw Error(); return r.data; }
 
 function makeSession(idSuffix: string) {
   const r = createWorkoutSession({
-    id: `s-${idSuffix}`, scheduledWorkoutId: sid(`sw-${idSuffix}`), workoutId: wid('w-1'),
+    id: `s-${idSuffix}`, userId: uid('user-1'), enrollmentId: null,
+    scheduledWorkoutId: sid(`sw-${idSuffix}`), workoutId: wid('w-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });

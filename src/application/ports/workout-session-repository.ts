@@ -10,12 +10,13 @@
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
 
 /**
- * Thrown by `save` when a second session for the same scheduled workout races
- * the database's one-session-per-occurrence constraint. The caller should map
- * this to the `SESSION_ALREADY_EXISTS` business outcome.
+ * Thrown by `save` when a second session for the same enrollment and
+ * scheduled workout races the database's one-session-per-occurrence-per-
+ * enrollment constraint. The caller should map this to the
+ * `SESSION_ALREADY_EXISTS` business outcome.
  */
 export class SessionAlreadyExistsError extends Error {
   constructor(readonly scheduledWorkoutId: string) {
@@ -42,11 +43,17 @@ export interface WorkoutSessionRepository {
   findById(id: WorkoutSessionId): Promise<WorkoutSession | null>;
 
   /**
-   * Finds a session by the scheduled workout occurrence ID, or null if not found.
+   * Finds a session by owning enrollment and scheduled workout occurrence, or
+   * null if not found.
    *
-   * There is at most one session per scheduled workout in this MVP.
+   * There is at most one session per (enrollment, scheduled workout) pair, so
+   * different users — and different enrollments of the same user — never see
+   * each other's sessions.
    */
-  findByScheduledWorkoutId(id: ScheduledWorkoutId): Promise<WorkoutSession | null>;
+  findByEnrollmentAndScheduledWorkout(
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<WorkoutSession | null>;
 
   /**
    * Saves a session (insert or update by session ID).
@@ -56,7 +63,13 @@ export interface WorkoutSessionRepository {
   save(session: WorkoutSession): Promise<void>;
 
   /**
-   * Returns all completed sessions.
+   * Returns all completed sessions belonging to the given enrollment.
+   *
+   * This is the completion source for per-user program progress: sessions
+   * detached from their enrollment (after leaving a program) are excluded,
+   * so a rejoined program correctly starts with zero progress.
    */
-  listCompleted(): Promise<ReadonlyArray<WorkoutSession>>;
+  listCompletedByEnrollmentId(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<WorkoutSession>>;
 }

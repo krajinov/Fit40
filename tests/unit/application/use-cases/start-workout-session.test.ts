@@ -174,6 +174,57 @@ describe('StartWorkoutSessionUseCase', () => {
     expect(result.error.code).toBe('NOT_ENROLLED');
   });
 
+  it('retries once against a replacement enrollment on a leave-and-rejoin race', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // The first save races a concurrent leave: the enrollment existed at
+    // preflight (enr-a) but was deleted before the insert.
+    const saveSpy = vi
+      .spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    // The user rejoined before the FK-failure recovery ran, creating a new
+    // enrollment identity (enr-b) for the same user and program.
+    await enroll(enrollmentRepo, 'enr-b', OWNER_A, 'prog-test');
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(true);
+    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy.mock.calls[1]?.[0]).toMatchObject({
+      userId: OWNER_A,
+      enrollmentId: 'enr-b',
+      scheduledWorkoutId: 'sched-w1',
+    });
+    if (!result.ok) return;
+    const storedId = createWorkoutSessionId(result.data.sessionId);
+    if (!storedId.ok) throw Error();
+    const stored = await sessionRepo.findById(storedId.data);
+    expect(stored?.enrollmentId).toBe('enr-b');
+  });
+
+  it('maps a duplicate under the replacement enrollment to SESSION_ALREADY_EXISTS', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // The first save races the leave; the retry hits a session the user
+    // already started under the replacement enrollment.
+    vi.spyOn(sessionRepo, 'save')
+      .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
+      .mockRejectedValueOnce(new SessionAlreadyExistsError('sched-w1'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await enroll(enrollmentRepo, 'enr-b', OWNER_A, 'prog-test');
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SESSION_ALREADY_EXISTS');
+  });
+
   it('rethrows a save-level enrollment error when the enrollment is actually present', async () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
@@ -188,5 +239,25 @@ describe('StartWorkoutSessionUseCase', () => {
     await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toBeInstanceOf(
       SessionEnrollmentNotFoundError,
     );
+  });
+
+  it('propagates a retry failure instead of looping on a repeated enrollment error', async () => {
+    const programRepo = createMockRepo();
+    vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    // Every save fails with the same stale-enrollment error while the
+    // re-checked enrollment (enr-b) differs from it: the recovery must retry
+    // exactly once and surface the error, never loop.
+    const saveSpy = vi
+      .spyOn(sessionRepo, 'save')
+      .mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await enroll(enrollmentRepo, 'enr-b', OWNER_A, 'prog-test');
+    const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
+
+    await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toBeInstanceOf(
+      SessionEnrollmentNotFoundError,
+    );
+    expect(saveSpy).toHaveBeenCalledTimes(2);
   });
 });

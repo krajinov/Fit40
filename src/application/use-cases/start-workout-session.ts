@@ -12,8 +12,11 @@
  * constraint remains the final authority for a concurrent start race. A
  * concurrent leave can delete the enrollment between the preflight and the
  * insert; the repository surfaces that FK violation as
- * SessionEnrollmentNotFoundError, which is re-checked here and resolved to
- * the typed NOT_ENROLLED outcome instead of leaking an infrastructure 500.
+ * SessionEnrollmentNotFoundError, which is re-checked here against current
+ * state: a missing enrollment resolves to the typed NOT_ENROLLED outcome, a
+ * replacement enrollment (leave followed by a rejoin) gets the session
+ * re-pointed and saved exactly once, and an unchanged enrollment means the
+ * error contradicts observable state and is rethrown rather than swallowed.
  */
 
 import type { IdGenerator } from '@/application/ports/id-generator';
@@ -25,9 +28,17 @@ import {
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
-import { createWorkoutSession, type CreateExerciseLogInput } from '@/domain/entities/workout-session';
-import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
-import { createUserId } from '@/domain/types/ids';
+import type { TrainingProgram } from '@/domain/entities/training-program';
+import {
+  createWorkoutSession,
+  type CreateExerciseLogInput,
+  type WorkoutSession,
+} from '@/domain/entities/workout-session';
+import {
+  findScheduledWorkoutOccurrence,
+  type ScheduledWorkoutOccurrence,
+} from '@/domain/services/scheduled-workout';
+import { createUserId, type EnrollmentId, type UserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
 
 export type StartWorkoutSessionError =
@@ -106,11 +117,7 @@ export class StartWorkoutSessionUseCase {
       occurrence.scheduled.id,
     );
     if (existing !== null) {
-      return err({
-        code: 'SESSION_ALREADY_EXISTS',
-        scheduledWorkoutId: occurrence.scheduled.id,
-        message: `A session already exists for scheduled workout "${occurrence.scheduled.id}"`,
-      });
+      return err(sessionAlreadyExists(occurrence.scheduled.id));
     }
 
     const exerciseLogInputs: ReadonlyArray<CreateExerciseLogInput> = occurrence.workout.exercises.map(
@@ -140,33 +147,73 @@ export class StartWorkoutSessionUseCase {
       });
     }
 
+    return this.saveWithEnrollmentRaceRecovery(sessionResult.data, userId, program, occurrence);
+  }
+
+  /**
+   * Persists a new session, resolving enrollment races against the database's
+   * FK authority. The repository's SessionEnrollmentNotFoundError is
+   * re-checked against current state:
+   * - enrollment gone -> typed NOT_ENROLLED outcome;
+   * - different enrollment (leave + rejoin race) -> the session is re-pointed
+   *   at the replacement and saved exactly once; that retry performs no error
+   *   recovery of its own, so a second failure propagates;
+   * - same enrollment -> the error contradicts observable state and is
+   *   rethrown instead of being converted to a false business outcome.
+   */
+  private async saveWithEnrollmentRaceRecovery(
+    session: WorkoutSession,
+    userId: UserId,
+    program: TrainingProgram,
+    occurrence: ScheduledWorkoutOccurrence,
+  ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
     try {
-      await this.sessionRepository.save(sessionResult.data);
+      await this.sessionRepository.save(session);
     } catch (error) {
       if (error instanceof SessionAlreadyExistsError) {
-        return err({
-          code: 'SESSION_ALREADY_EXISTS',
-          scheduledWorkoutId: occurrence.scheduled.id,
-          message: `A session already exists for scheduled workout "${occurrence.scheduled.id}"`,
-        });
+        return err(sessionAlreadyExists(occurrence.scheduled.id));
       }
       if (error instanceof SessionEnrollmentNotFoundError) {
-        // A concurrent leave deleted the enrollment between our check and the
-        // insert. Re-check so the typed outcome reflects the current state;
-        // if the enrollment is still there the error came from elsewhere and
-        // is rethrown rather than swallowed.
         const rechecked = await this.enrollmentRepository.findByUserAndProgram(
           userId,
           program.id,
         );
         if (rechecked === null) {
-          return err(notEnrolled(input.programSlug));
+          return err(notEnrolled(program.slug));
+        }
+        if (rechecked.id !== error.enrollmentId) {
+          return this.saveForReplacementEnrollment(session, rechecked.id, occurrence);
         }
       }
       throw error;
     }
+    return ok(toWorkoutSessionDto(session));
+  }
 
-    return ok(toWorkoutSessionDto(sessionResult.data));
+  /**
+   * A leave-and-rejoin race replaced the enrollment this session was built
+   * against. The failed save persisted nothing, so the same entity (same id,
+   * same version) is safe to re-point at the replacement enrollment. Saved
+   * exactly once with no retry of its own: any failure here is unexpected
+   * and propagates to the caller.
+   */
+  private async saveForReplacementEnrollment(
+    session: WorkoutSession,
+    replacementEnrollmentId: EnrollmentId,
+    occurrence: ScheduledWorkoutOccurrence,
+  ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
+    const replacement: WorkoutSession = { ...session, enrollmentId: replacementEnrollmentId };
+    try {
+      await this.sessionRepository.save(replacement);
+    } catch (retryError) {
+      if (retryError instanceof SessionAlreadyExistsError) {
+        // The occurrence was already started under the replacement
+        // enrollment; keep the duplicate-session outcome typed.
+        return err(sessionAlreadyExists(occurrence.scheduled.id));
+      }
+      throw retryError;
+    }
+    return ok(toWorkoutSessionDto(replacement));
   }
 }
 
@@ -175,5 +222,13 @@ function notEnrolled(programSlug: string): StartWorkoutSessionError {
     code: 'NOT_ENROLLED',
     programSlug,
     message: 'Join this program before starting its workouts.',
+  };
+}
+
+function sessionAlreadyExists(scheduledWorkoutId: string): StartWorkoutSessionError {
+  return {
+    code: 'SESSION_ALREADY_EXISTS',
+    scheduledWorkoutId,
+    message: `A session already exists for scheduled workout "${scheduledWorkoutId}"`,
   };
 }

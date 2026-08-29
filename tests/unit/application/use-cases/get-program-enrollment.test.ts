@@ -1,5 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { ProgramRepository } from '@/application/ports/program-repository';
+import { describe, expect, it } from 'vitest';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
@@ -82,15 +81,13 @@ async function completeSession(
 function createWorkoutIdForTest(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 
 function makeUseCase() {
-  const program = makeProgram();
-  const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
-  const uc = new GetProgramEnrollmentUseCase(programRepo, enrollmentRepo, sessionRepo);
+  const uc = new GetProgramEnrollmentUseCase(enrollmentRepo, sessionRepo);
   return { sessionRepo, enrollmentRepo, uc };
 }
 
-const INPUT = { programSlug: 'prog-1' } as const;
+const INPUT = { program: makeProgram() } as const;
 
 describe('GetProgramEnrollmentUseCase', () => {
   it('reports not-enrolled when the user has no enrollment', async () => {
@@ -99,6 +96,25 @@ describe('GetProgramEnrollmentUseCase', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data).toEqual({ status: 'not-enrolled' });
+  });
+
+  it('resolves the view entirely from the caller-supplied aggregate (no catalog re-query)', async () => {
+    const { sessionRepo, enrollmentRepo, uc } = makeUseCase();
+    await enroll(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    await completeSession(sessionRepo, 's-1', 'user-a', enid('enr-a'), 'sched-w1', 'wo-1');
+
+    // This aggregate was never persisted to any repository the use case
+    // holds, so a correct result proves no second program lookup happens.
+    const orphanAggregate = makeProgram();
+
+    const r = await uc.execute({ userId: 'user-a', program: orphanAggregate });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    if (r.data.status !== 'enrolled') throw Error('expected enrolled');
+    expect(r.data.progress).toEqual({ totalWorkouts: 2, completedWorkouts: 1, percentage: 50 });
+    expect(r.data.nextWorkout).toEqual({ weekNumber: 1, workoutOrder: 2 });
+    expect(r.data.completedScheduledWorkoutIds).toEqual(['sched-w1']);
   });
 
   it('reports zero progress and the first workout as next for a fresh enrollment', async () => {
@@ -204,14 +220,5 @@ describe('GetProgramEnrollmentUseCase', () => {
     if (r.data.status !== 'enrolled') throw Error('expected enrolled');
     expect(r.data.progress.completedWorkouts).toBe(0);
     expect(r.data.nextWorkout).toEqual({ weekNumber: 1, workoutOrder: 1 });
-  });
-
-  it('returns PROGRAM_NOT_FOUND for an unknown program slug', async () => {
-    const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
-    const uc = new GetProgramEnrollmentUseCase(programRepo, new InMemoryProgramEnrollmentRepository(), new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ userId: 'user-a', programSlug: 'missing' });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error.code).toBe('PROGRAM_NOT_FOUND');
   });
 });

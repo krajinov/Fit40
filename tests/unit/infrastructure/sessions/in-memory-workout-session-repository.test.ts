@@ -12,13 +12,13 @@ function wid(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error()
 function uid(v: string) { const r = createUserId(v); if (!r.ok) throw Error(); return r.data; }
 function enid(v: string) { const r = createEnrollmentId(v); if (!r.ok) throw Error(); return r.data; }
 
-function createTestSession(override?: Partial<{ id: string; swId: string; userId: string; enrollmentId: string | null }>) {
+function createTestSession(override?: Partial<{ id: string; swId: string; userId: string; enrollmentId: string | null; startedAt: string }>) {
   const r = createWorkoutSession({
     id: override?.id ?? 's-1',
     userId: uid(override?.userId ?? 'user-1'),
     enrollmentId: override?.enrollmentId === null ? null : enid(override?.enrollmentId ?? 'enr-1'),
     scheduledWorkoutId: sid(override?.swId ?? 'sw-1'), workoutId: wid('w-1'),
-    startedAt: new Date('2025-01-01T10:00:00Z'),
+    startedAt: new Date(override?.startedAt ?? '2025-01-01T10:00:00Z'),
     exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!r.ok) throw Error();
@@ -137,24 +137,31 @@ describe('InMemoryWorkoutSessionRepository', () => {
     expect(reloaded).not.toBeNull();
   });
 
-  it('listCompletedByEnrollmentId returns only that enrollment\'s completed sessions', async () => {
+  it('listCompletedScheduledWorkoutIds returns only that enrollment\'s completed ids', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(completed(createTestSession({ id: 's-c1', swId: 'sw-c1', enrollmentId: 'enr-1' })));
     await repo.save(createTestSession({ id: 's-ip', swId: 'sw-ip', enrollmentId: 'enr-1' }));
     await repo.save(completed(createTestSession({ id: 's-c2', swId: 'sw-c2', enrollmentId: 'enr-2' })));
 
-    const completedForEnr1 = await repo.listCompletedByEnrollmentId(enid('enr-1'));
-    expect(completedForEnr1).toHaveLength(1);
-    expect(completedForEnr1[0]?.id).toBe('s-c1');
+    const completedForEnr1 = await repo.listCompletedScheduledWorkoutIds(enid('enr-1'));
+    expect(completedForEnr1).toEqual(['sw-c1']);
 
-    const completedForEnr2 = await repo.listCompletedByEnrollmentId(enid('enr-2'));
-    expect(completedForEnr2).toHaveLength(1);
-    expect(completedForEnr2[0]?.id).toBe('s-c2');
+    const completedForEnr2 = await repo.listCompletedScheduledWorkoutIds(enid('enr-2'));
+    expect(completedForEnr2).toEqual(['sw-c2']);
+  });
+
+  it('listCompletedScheduledWorkoutIds orders ids by start time ascending', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Saved out of order on purpose: the projection must sort by startedAt.
+    await repo.save(completed(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' })));
+    await repo.save(completed(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' })));
+
+    expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
   });
 
   it('repository starts empty', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    expect(await repo.listCompletedByEnrollmentId(enid('enr-1'))).toHaveLength(0);
+    expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
     expect(await repo.findByEnrollmentAndScheduledWorkout(enid('enr-1'), sid('x'))).toBeNull();
   });
 });

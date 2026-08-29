@@ -80,7 +80,8 @@ function createMockRepository(): ProgramRepository {
 describe('GetProgramBySlugUseCase', () => {
   it('returns a detail DTO with schedule when found', async () => {
     const repo = createMockRepository();
-    vi.mocked(repo.findBySlug).mockResolvedValue(makeProgram('test-program'));
+    const program = makeProgram('test-program');
+    vi.mocked(repo.findBySlug).mockResolvedValue(program);
 
     const useCase = new GetProgramBySlugUseCase(repo);
     const result = await useCase.execute('test-program');
@@ -88,9 +89,12 @@ describe('GetProgramBySlugUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data.name).toBe('Test Program');
-    expect(result.data.weeks).toHaveLength(1);
-    expect(result.data.weeks[0]?.scheduledWorkouts[0]?.workoutName).toBe('Workout wo-1');
+    expect(result.data.detail.name).toBe('Test Program');
+    expect(result.data.detail.weeks).toHaveLength(1);
+    expect(result.data.detail.weeks[0]?.scheduledWorkouts[0]?.workoutName).toBe('Workout wo-1');
+    // The loaded aggregate is returned alongside the DTO so one request can
+    // reuse the hydration (page + enrollment view) without a second lookup.
+    expect(result.data.program).toBe(program);
   });
 
   it('returns PROGRAM_NOT_FOUND when the program does not exist', async () => {

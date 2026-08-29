@@ -60,14 +60,21 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     this.sessionsById.set(session.id, structuredClone(session));
   }
 
-  async listCompletedByEnrollmentId(
+  async listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
-  ): Promise<ReadonlyArray<WorkoutSession>> {
-    return [...this.sessionsById.values()]
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>> {
+    // Mirrors the SQL projection: completed sessions only, ordered by start
+    // time, deduplicated (save() already enforces one session per occurrence;
+    // the Set documents that contract explicitly).
+    const ids = new Set<ScheduledWorkoutId>();
+    const completed = [...this.sessionsById.values()]
       .filter(
         (session) => session.enrollmentId === enrollmentId && session.completedAt !== null,
       )
-      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
-      .map((session) => structuredClone(session));
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    for (const session of completed) {
+      ids.add(session.scheduledWorkoutId);
+    }
+    return [...ids];
   }
 }

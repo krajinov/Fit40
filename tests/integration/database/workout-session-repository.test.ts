@@ -99,6 +99,7 @@ function makeSession(
     enrollmentId?: string | null;
     scheduledWorkoutId?: string;
     workoutId?: string;
+    startedAt?: string;
   } = {},
 ): WorkoutSession {
   const result = createWorkoutSession({
@@ -114,7 +115,7 @@ function makeSession(
       overrides.scheduledWorkoutId ?? 'fit40-beginner-strength-w1-1',
     ),
     workoutId: workoutId(overrides.workoutId ?? 'wo-beginner-strength-a'),
-    startedAt: new Date('2025-01-01T10:00:00Z'),
+    startedAt: new Date(overrides.startedAt ?? '2025-01-01T10:00:00Z'),
     exerciseLogs: [
       { exerciseId: exerciseId('ex-002'), order: 1, prescription: reps(), restSeconds: 90 },
       { exerciseId: exerciseId('ex-015'), order: 2, prescription: duration(), restSeconds: 60 },
@@ -296,7 +297,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     expect(loaded).toBeNull();
   });
 
-  it('listCompletedByEnrollmentId() returns only that enrollment\'s completed sessions', async () => {
+  it('listCompletedScheduledWorkoutIds() returns only that enrollment\'s completed ids', async () => {
     const own = completed(makeSession('session-own'));
     const otherUser = completed(makeSession('session-other', { userId: 'user-test-b', enrollmentId: 'enrollment-test-b' }));
     const inProgress = makeSession('session-progress', {
@@ -307,19 +308,36 @@ describe('DrizzleWorkoutSessionRepository', () => {
     await workoutSessionRepository.save(otherUser);
     await workoutSessionRepository.save(inProgress);
 
-    const listed = await workoutSessionRepository.listCompletedByEnrollmentId(
+    const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
     );
 
-    expect(listed.map((session) => session.id)).toEqual(['session-own']);
-    expect(listed[0]?.userId).toBe(userId('user-test-a'));
+    expect(listed).toEqual([own.scheduledWorkoutId]);
   });
 
-  it('listCompletedByEnrollmentId() excludes detached sessions after rejoin', async () => {
+  it('listCompletedScheduledWorkoutIds() orders ids by start time ascending', async () => {
+    // Saved out of order on purpose: the SQL projection must ORDER BY started_at.
+    const late = completed(makeSession('session-late', {
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+      workoutId: 'wo-beginner-strength-b',
+      startedAt: '2025-01-02T10:00:00Z',
+    }));
+    const early = completed(makeSession('session-early', { startedAt: '2025-01-01T09:00:00Z' }));
+    await workoutSessionRepository.save(late);
+    await workoutSessionRepository.save(early);
+
+    const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    expect(listed).toEqual([early.scheduledWorkoutId, late.scheduledWorkoutId]);
+  });
+
+  it('listCompletedScheduledWorkoutIds() excludes detached sessions after rejoin', async () => {
     const detached = completed(makeSession('session-detached', { enrollmentId: null }));
     await workoutSessionRepository.save(detached);
 
-    const listed = await workoutSessionRepository.listCompletedByEnrollmentId(
+    const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
     );
 
@@ -341,7 +359,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     expect(reloaded?.completedAt).not.toBeNull();
 
     // A rejoin (new enrollment identity) starts with zero progress.
-    const listed = await workoutSessionRepository.listCompletedByEnrollmentId(
+    const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
     );
     expect(listed).toEqual([]);

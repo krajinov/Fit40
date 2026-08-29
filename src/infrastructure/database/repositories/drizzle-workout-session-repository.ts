@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
@@ -74,46 +74,26 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return session === undefined ? null : this.hydrate(session);
   }
 
-  async listCompletedByEnrollmentId(
+  async listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
-  ): Promise<ReadonlyArray<WorkoutSession>> {
-    const sessionRows = await this.db
-      .select()
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>> {
+    // Lightweight projection for progress reads: a single one-column query —
+    // no session aggregates, exercise logs, or set logs are hydrated.
+    const rows = await this.db
+      .select({ scheduledWorkoutId: workoutSessions.scheduledWorkoutId })
       .from(workoutSessions)
       .where(
         and(
           eq(workoutSessions.enrollmentId, enrollmentId),
           isNotNull(workoutSessions.completedAt),
         ),
-      );
+      )
+      .orderBy(asc(workoutSessions.startedAt));
 
-    if (sessionRows.length === 0) {
-      return [];
-    }
-
-    const sessionIds = sessionRows.map((row) => row.id);
-    const logRows = await this.db
-      .select()
-      .from(exerciseLogs)
-      .where(inArray(exerciseLogs.sessionId, sessionIds))
-      .orderBy(asc(exerciseLogs.sessionId), asc(exerciseLogs.exerciseOrder));
-    const setRows = await this.db
-      .select()
-      .from(setLogs)
-      .where(inArray(setLogs.sessionId, sessionIds))
-      .orderBy(
-        asc(setLogs.sessionId),
-        asc(setLogs.exerciseOrder),
-        asc(setLogs.setNumber),
-      );
-
-    return sessionRows.map((session) =>
-      mapSessionRows({
-        session,
-        exerciseLogs: logRows.filter((row) => row.sessionId === session.id),
-        setLogs: setRows.filter((row) => row.sessionId === session.id),
-      }),
-    );
+    // Trusted DB values: the column is a FK into scheduled_workouts, so each
+    // id is valid by schema constraint (database records are trusted at the
+    // repository boundary).
+    return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
   }
 
   async save(session: WorkoutSession): Promise<void> {

@@ -27,7 +27,7 @@ export async function generateMetadata({
     return { title: 'Program not found' };
   }
 
-  return { title: result.data.name };
+  return { title: result.data.detail.name };
 }
 
 export default async function ProgramDetailPage({
@@ -52,13 +52,13 @@ export default async function ProgramDetailPage({
   if (user !== null) {
     const enrollmentResult = await getProgramEnrollmentUseCase.execute({
       userId: user.id,
-      programSlug: result.data.slug,
+      program: result.data.program,
     });
     if (!enrollmentResult.ok) {
-      // Unreachable in practice (the program was just loaded and the user id
-      // comes from the trusted session): treat as an unexpected failure.
+      // Unreachable in practice (the user id comes from the trusted session
+      // and only INVALID_INPUT can fail): treat as an unexpected failure.
       throw new Error(
-        `Failed to resolve enrollment for program "${result.data.slug}": ${enrollmentResult.error.message}`,
+        `Failed to resolve enrollment for program "${result.data.program.slug}": ${enrollmentResult.error.message}`,
       );
     }
     enrollment = enrollmentResult.data;
@@ -66,7 +66,7 @@ export default async function ProgramDetailPage({
 
   return (
     <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      <ProgramDetail program={result.data} enrollment={enrollment} />
+      <ProgramDetail program={result.data.detail} enrollment={enrollment} />
     </main>
   );
 }

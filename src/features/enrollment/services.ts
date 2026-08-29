@@ -31,7 +31,6 @@ export const leaveProgramUseCase = new LeaveProgramUseCase(
 );
 
 export const getProgramEnrollmentUseCase = new GetProgramEnrollmentUseCase(
-  programRepository,
   programEnrollmentRepository,
   workoutSessionRepository,
 );

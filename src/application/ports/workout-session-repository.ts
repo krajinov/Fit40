@@ -77,13 +77,17 @@ export interface WorkoutSessionRepository {
   save(session: WorkoutSession): Promise<void>;
 
   /**
-   * Returns all completed sessions belonging to the given enrollment.
+   * Returns the IDs of the scheduled workouts the enrollment has completed
+   * sessions for, ordered by session start time ascending.
    *
-   * This is the completion source for per-user program progress: sessions
-   * detached from their enrollment (after leaving a program) are excluded,
-   * so a rejoined program correctly starts with zero progress.
+   * This is the completion source for per-user program progress. It is a
+   * lightweight projection: no full session aggregates, exercise logs, or set
+   * logs are hydrated. Sessions detached from their enrollment (after leaving
+   * a program) are excluded, so a rejoined program correctly starts with zero
+   * progress. IDs are unique — the (enrollment, scheduled workout) constraint
+   * admits at most one session per occurrence.
    */
-  listCompletedByEnrollmentId(
+  listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
-  ): Promise<ReadonlyArray<WorkoutSession>>;
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
 }

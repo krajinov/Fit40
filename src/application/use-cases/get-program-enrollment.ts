@@ -2,9 +2,10 @@
  * Use case: resolve the authenticated user's enrollment view of a program.
  *
  * Read-only. Progress and the next workout are derived per enrollment from
- * the enrollment's completed sessions using the pure program-progress domain
- * services — nothing derived is persisted, and one user's completions never
- * affect another user's view.
+ * the enrollment's completed scheduled workouts (a lightweight projection —
+ * no full session aggregates are hydrated) using the pure program-progress
+ * domain services — nothing derived is persisted, and one user's completions
+ * never affect another user's view.
  */
 
 import type {
@@ -12,29 +13,30 @@ import type {
   ProgramEnrollmentViewDto,
 } from '@/application/dto/enrollment';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import {
   calculateProgramProgress,
   getNextWorkout,
 } from '@/domain/services/program-progress';
-import { getCompletedScheduledWorkoutIds } from '@/domain/services/session-progress';
 import { createUserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/lib/result';
 
 export type GetProgramEnrollmentError =
-  | { readonly code: 'PROGRAM_NOT_FOUND'; readonly slug: string; readonly message: string }
   | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string };
 
 export interface GetProgramEnrollmentInput {
   readonly userId: string;
-  readonly programSlug: string;
+  /**
+   * The program aggregate the caller already loaded (e.g. the program detail
+   * page's GetProgramBySlugUseCase result). The use case never re-queries the
+   * catalog, so one request hydrates the program exactly once.
+   */
+  readonly program: TrainingProgram;
 }
 
 export class GetProgramEnrollmentUseCase {
   constructor(
-    private readonly programRepository: ProgramRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
   ) {}
@@ -42,15 +44,6 @@ export class GetProgramEnrollmentUseCase {
   async execute(
     input: GetProgramEnrollmentInput,
   ): Promise<Result<ProgramEnrollmentViewDto, GetProgramEnrollmentError>> {
-    const program = await this.programRepository.findBySlug(input.programSlug);
-    if (program === null) {
-      return err({
-        code: 'PROGRAM_NOT_FOUND',
-        slug: input.programSlug,
-        message: `Program "${input.programSlug}" not found`,
-      });
-    }
-
     const userIdResult = createUserId(input.userId);
     if (!userIdResult.ok) {
       return err({
@@ -62,18 +55,19 @@ export class GetProgramEnrollmentUseCase {
 
     const enrollment = await this.enrollmentRepository.findByUserAndProgram(
       userIdResult.data,
-      program.id,
+      input.program.id,
     );
     if (enrollment === null) {
       return ok({ status: 'not-enrolled' });
     }
 
-    const completedSessions = await this.sessionRepository.listCompletedByEnrollmentId(
+    // Lightweight projection: only the completed scheduled-workout ids are
+    // read — never full session aggregates with exercise/set logs.
+    const completedIds = await this.sessionRepository.listCompletedScheduledWorkoutIds(
       enrollment.id,
     );
-    const completedIds = getCompletedScheduledWorkoutIds(completedSessions);
-    const progress = calculateProgramProgress(program, completedIds);
-    const nextWorkout = resolveNextWorkout(program, completedIds);
+    const progress = calculateProgramProgress(input.program, completedIds);
+    const nextWorkout = resolveNextWorkout(input.program, completedIds);
 
     return ok({
       status: 'enrolled',

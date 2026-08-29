@@ -7,6 +7,7 @@
 
 import type { ProgramRepository, SessionRoute } from '@/application/ports/program-repository';
 import {
+  SessionEnrollmentChangedError,
   SessionStaleVersionError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
@@ -103,6 +104,16 @@ export class CompleteWorkoutSessionUseCase {
         return err({
           code: 'SESSION_MODIFIED',
           message: `Session "${input.sessionId}" was modified concurrently; reload and retry`,
+        });
+      }
+      if (error instanceof SessionEnrollmentChangedError) {
+        // The write itself observed the enrollment vanish or change after the
+        // snapshot was loaded: the session is detached history now, and the
+        // mutation did not commit.
+        return err({
+          code: 'NOT_ENROLLED',
+          message:
+            'You are no longer enrolled in this program, so this session can no longer be modified.',
         });
       }
       throw error;

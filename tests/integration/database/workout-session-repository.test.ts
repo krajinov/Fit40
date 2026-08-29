@@ -20,10 +20,12 @@ import { createDurationScheme, createRepScheme } from '@/domain/value-objects/re
 
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentChangedError,
   SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
 } from '@/application/ports/workout-session-repository';
 import { users, workoutSessions } from '@/infrastructure/database/schema';
+import { eq } from 'drizzle-orm';
 
 import {
   closeDatabase,
@@ -433,6 +435,56 @@ describe('DrizzleWorkoutSessionRepository', () => {
     const reloaded = await workoutSessionRepository.findById(session.id);
     expect(reloaded?.version).toBe(1);
     expect(reloaded?.exerciseLogs[0]?.sets).toHaveLength(1);
+  });
+
+  it('rejects a save whose enrollment detached between load and save (leave race)', async () => {
+    const session = makeSession(); // version 0, enrollment-test-a
+    await workoutSessionRepository.save(session);
+    const loaded = await workoutSessionRepository.findById(session.id);
+    if (!loaded) throw new Error('session not found');
+
+    // The user leaves: the enrollment FK detaches the persisted session
+    // (ON DELETE SET NULL) after the snapshot above was loaded.
+    await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
+
+    // Saving the pre-leave snapshot must not commit detached-history changes.
+    const completed = completeWorkoutSession(withOneRepSet(loaded), new Date());
+    if (!completed.ok) throw new Error(completed.error.message);
+    await expect(workoutSessionRepository.save(completed.data)).rejects.toBeInstanceOf(
+      SessionEnrollmentChangedError,
+    );
+
+    // The detached history is unchanged: not completed, still detached.
+    const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(reloaded?.completedAt).toBeNull();
+    expect(reloaded?.enrollmentId).toBeNull();
+    expect(reloaded?.version).toBe(loaded.version);
+    expect(reloaded?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('rejects a save when the row was re-pointed to a different enrollment', async () => {
+    const session = makeSession();
+    await workoutSessionRepository.save(session);
+    const loaded = await workoutSessionRepository.findById(session.id);
+    if (!loaded) throw new Error('session not found');
+
+    // Artificial re-point (no production path reattaches a session): the row
+    // now belongs to another enrollment identity. The write condition must
+    // still refuse a snapshot-based mutation.
+    await db
+      .update(workoutSessions)
+      .set({ enrollmentId: enrollmentId('enrollment-test-b') })
+      .where(eq(workoutSessions.id, session.id));
+
+    const completed = completeWorkoutSession(withOneRepSet(loaded), new Date());
+    if (!completed.ok) throw new Error(completed.error.message);
+    await expect(workoutSessionRepository.save(completed.data)).rejects.toBeInstanceOf(
+      SessionEnrollmentChangedError,
+    );
+
+    const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(reloaded?.enrollmentId).toBe('enrollment-test-b');
+    expect(reloaded?.completedAt).toBeNull();
   });
 
   it('persists and returns the session version', async () => {

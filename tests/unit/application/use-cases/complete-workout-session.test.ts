@@ -44,6 +44,15 @@ async function seedSession(ownerId: string = OWNER_ID, enrollmentId: string | nu
   return { repo, sessionId: sr.data.id };
 }
 
+/** Builds an unsaved one-set session snapshot (the shape a use case loads). */
+function sessionSnapshot(enrollmentId: string | null) {
+  const sr = createWorkoutSession({ id: 's-1', userId: uid(OWNER_ID), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+  if (!sr.ok) throw Error();
+  const rs = logSessionSet(sr.data, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+  if (!rs.ok) throw Error();
+  return rs.data;
+}
+
 describe('CompleteWorkoutSessionUseCase', () => {
   it('completes an in-progress session with sets', async () => {
     const { repo, sessionId } = await seedSession();
@@ -106,6 +115,28 @@ describe('CompleteWorkoutSessionUseCase', () => {
     expect(r.error.code).toBe('NOT_ENROLLED');
     const still = await repo.findById(sessionId);
     expect(still?.enrollmentId).toBeNull();
+  });
+
+  it('maps an enrollment detached between load and save to NOT_ENROLLED (write-boundary race)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Persisted state AFTER the leave: the row is detached (enrollment nulled).
+    await repo.save(sessionSnapshot(null));
+    // The use case's snapshot was loaded BEFORE the leave: still enrolled.
+    const preLeave = sessionSnapshot('enr-1');
+    const findByIdSpy = vi.spyOn(repo, 'findById').mockResolvedValue(preLeave);
+
+    const uc = new CompleteWorkoutSessionUseCase(repo, programRepo(null));
+    const r = await uc.execute({ sessionId: preLeave.id as string, userId: OWNER_ID });
+
+    findByIdSpy.mockRestore();
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('NOT_ENROLLED');
+    // The write boundary refused the mutation: the detached history is
+    // unchanged (not completed, still detached).
+    const stored = await repo.findById(preLeave.id);
+    expect(stored?.completedAt).toBeNull();
+    expect(stored?.enrollmentId).toBeNull();
   });
 
   it('derives the trusted owning occurrence route from session data', async () => {

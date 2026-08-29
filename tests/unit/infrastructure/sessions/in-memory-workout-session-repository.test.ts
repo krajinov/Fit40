@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SessionAlreadyExistsError } from '@/application/ports/workout-session-repository';
+import { SessionAlreadyExistsError, SessionEnrollmentChangedError } from '@/application/ports/workout-session-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { createWorkoutSession, logSessionSet, completeWorkoutSession } from '@/domain/entities/workout-session';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
@@ -157,6 +157,29 @@ describe('InMemoryWorkoutSessionRepository', () => {
     await repo.save(completed(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' })));
 
     expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
+  });
+
+  it('rejects saving over a row whose enrollment changed since the snapshot', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Persisted state AFTER a concurrent leave: the row is detached (null).
+    await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: null })));
+
+    // The caller's snapshot was loaded BEFORE the leave: still enrolled
+    // (enr-1). The write must not commit against detached history.
+    await expect(
+      repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }))),
+    ).rejects.toBeInstanceOf(SessionEnrollmentChangedError);
+
+    // A snapshot expecting a different enrollment identity is refused too.
+    await expect(
+      repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-2' }))),
+    ).rejects.toBeInstanceOf(SessionEnrollmentChangedError);
+
+    // The stored row is untouched by both refused writes.
+    const id = createWorkoutSessionId('s-1');
+    if (!id.ok) throw Error();
+    const stored = await repo.findById(id.data);
+    expect(stored?.enrollmentId).toBeNull();
   });
 
   it('repository starts empty', async () => {

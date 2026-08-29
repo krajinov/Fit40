@@ -2,6 +2,7 @@ import { and, asc, eq, isNotNull } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentChangedError,
   SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
   type WorkoutSessionRepository,
@@ -34,9 +35,11 @@ type SessionRow = typeof workoutSessions.$inferSelect;
  *
  * `save` persists the whole aggregate in one transaction using delete-and-
  * reinsert for children. The session row upsert is guarded by an optimistic-
- * concurrency version check, so a stale snapshot is rejected instead of
- * silently overwriting concurrent changes. Unique-constraint races on the
- * one-session-per-(enrollment, occurrence) rule surface as
+ * concurrency version check plus an enrollment-identity condition, so a stale
+ * snapshot is rejected instead of silently overwriting concurrent changes,
+ * and a session whose enrollment was detached or changed between load and
+ * write can never commit (detached history is read-only). Unique-constraint
+ * races on the one-session-per-(enrollment, occurrence) rule surface as
  * `SessionAlreadyExistsError`; a concurrently deleted enrollment (a leave
  * racing the insert) surfaces as `SessionEnrollmentNotFoundError`. Any other
  * constraint violation propagates untouched.
@@ -111,11 +114,45 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
               completedAt: session.completedAt,
               version: session.version + 1,
             },
-            where: eq(workoutSessions.version, session.version),
+            // The write must match BOTH the snapshot's version (optimistic
+            // concurrency) and its enrollment identity: if a concurrent leave
+            // detached the row (ON DELETE SET NULL) or re-pointed it, the
+            // predicate misses and the mutation does not commit — detached
+            // history stays read-only. Detached snapshots (null enrollment)
+            // keep the version-only predicate; no production flow writes them.
+            where:
+              session.enrollmentId !== null
+                ? and(
+                    eq(workoutSessions.version, session.version),
+                    eq(workoutSessions.enrollmentId, session.enrollmentId),
+                  )
+                : eq(workoutSessions.version, session.version),
           })
           .returning({ id: workoutSessions.id });
 
         if (affected.length === 0) {
+          // Failure-path classification only (never a pre-save recheck): a
+          // version mismatch is the existing optimistic-concurrency outcome;
+          // a version match with a changed/NULL enrollment is the detached-
+          // history conflict. A missing row cannot occur (sessions are never
+          // hard-deleted) and conservatively reports stale.
+          const rows = await tx
+            .select({
+              version: workoutSessions.version,
+              enrollmentId: workoutSessions.enrollmentId,
+            })
+            .from(workoutSessions)
+            .where(eq(workoutSessions.id, session.id))
+            .limit(1);
+          const current = rows[0];
+          if (
+            current !== undefined &&
+            current.version === session.version &&
+            session.enrollmentId !== null &&
+            current.enrollmentId !== session.enrollmentId
+          ) {
+            throw new SessionEnrollmentChangedError(session.id);
+          }
           throw new SessionStaleVersionError(session.id);
         }
 

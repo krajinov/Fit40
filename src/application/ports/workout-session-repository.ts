@@ -49,6 +49,23 @@ export class SessionStaleVersionError extends Error {
   }
 }
 
+/**
+ * Thrown by `save` when the session's enrollment changed between the caller's
+ * snapshot load and the write: the persisted row's enrollment_id no longer
+ * matches the snapshot — a concurrent leave detached it via ON DELETE SET
+ * NULL, or it was re-pointed. The mutation did not commit, so detached
+ * history stays read-only. The caller should map this to the `NOT_ENROLLED`
+ * business outcome.
+ */
+export class SessionEnrollmentChangedError extends Error {
+  constructor(readonly sessionId: string) {
+    super(
+      `Workout session "${sessionId}" is no longer attached to the enrollment it was loaded under`,
+    );
+    this.name = 'SessionEnrollmentChangedError';
+  }
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -71,8 +88,14 @@ export interface WorkoutSessionRepository {
   /**
    * Saves a session (insert or update by session ID).
    *
+   * Updates of enrollment-owned sessions are conditional on the snapshot's
+   * version AND its enrollment identity, so a leave (or any enrollment
+   * change) between load and write makes the mutation a no-op instead of
+   * mutating detached history.
+   *
    * May throw {@link SessionAlreadyExistsError},
-   * {@link SessionEnrollmentNotFoundError}, or {@link SessionStaleVersionError}.
+   * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
+   * or {@link SessionEnrollmentChangedError}.
    */
   save(session: WorkoutSession): Promise<void>;
 

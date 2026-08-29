@@ -15,6 +15,7 @@
 
 import {
   SessionAlreadyExistsError,
+  SessionEnrollmentChangedError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -44,15 +45,28 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
   }
 
   async save(session: WorkoutSession): Promise<void> {
+    // Mirror the database's write protection: an update of an existing row
+    // whose enrollment no longer matches the caller's snapshot (detached by
+    // a concurrent leave, or re-pointed) must not commit, so use-case tests
+    // observe the same detached-history race outcome as PostgreSQL.
+    const existing = this.sessionsById.get(session.id);
+    if (
+      existing !== undefined &&
+      session.enrollmentId !== null &&
+      existing.enrollmentId !== session.enrollmentId
+    ) {
+      throw new SessionEnrollmentChangedError(session.id);
+    }
+
     // Mirror the database's one-session-per-(enrollment, occurrence) unique
     // constraint so use-case tests observe the same race outcome. Detached
     // sessions (null enrollment) never collide, matching PostgreSQL.
-    for (const existing of this.sessionsById.values()) {
+    for (const other of this.sessionsById.values()) {
       if (
-        existing.id !== session.id &&
+        other.id !== session.id &&
         session.enrollmentId !== null &&
-        existing.enrollmentId === session.enrollmentId &&
-        existing.scheduledWorkoutId === session.scheduledWorkoutId
+        other.enrollmentId === session.enrollmentId &&
+        other.scheduledWorkoutId === session.scheduledWorkoutId
       ) {
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
       }

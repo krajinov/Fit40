@@ -69,6 +69,7 @@ function performance(
 // ─── Shared Fixtures ──────────────────────────────────────────────────────────
 
 const threeByEightToTen = scheme(3, 8, 10);
+const threeByEightToTwelve = scheme(3, 8, 12);
 const threeByTenToTwelve = scheme(3, 10, 12);
 const twoByTenToTwelve = scheme(2, 10, 12);
 const threeBySixToEight = scheme(3, 6, 8);
@@ -227,11 +228,11 @@ const SCENARIOS: Scenario[] = [
     expected: { basis: 'increase', previousLoadKg: 20, nextLoadKg: 22.5, incrementKg: 2.5 },
   },
   {
-    name: 'applies the same rules when fewer sets than prescribed were logged',
+    name: 'holds when 12/12 was logged for a required 3 sets — incomplete performance never increases',
     equipment: EquipmentType.Barbell,
-    prescription: threeByEightToTen,
-    previous: performance(threeByEightToTen, [repSet(1, 10, 20), repSet(2, 10, 20)]),
-    expected: { basis: 'increase', previousLoadKg: 20, nextLoadKg: 22.5, incrementKg: 2.5 },
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [repSet(1, 12, 50), repSet(2, 12, 50)]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
   },
   {
     name: 'holds the load when reps land inside the range',
@@ -267,13 +268,78 @@ const SCENARIOS: Scenario[] = [
     expected: { basis: 'hold', previousLoadKg: 20, nextLoadKg: 20 },
   },
   {
-    name: 'regresses the kettlebell load by 4 kg when a set falls below minReps',
+    name: 'holds on mixed performance 10/10/7 in 3x8-12 — one failed set never regresses',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [
+      repSet(1, 10, 50),
+      repSet(2, 10, 50),
+      repSet(3, 7, 50),
+    ]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'holds on mixed performance 12/12/7 in 3x8-12 — maxReps sets do not increase past a failed set',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [
+      repSet(1, 12, 50),
+      repSet(2, 12, 50),
+      repSet(3, 7, 50),
+    ]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'holds on mixed performance 8/8/7 in 3x8-12 — minReps sets do not regress past a failed set',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [
+      repSet(1, 8, 50),
+      repSet(2, 8, 50),
+      repSet(3, 7, 50),
+    ]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'regresses when every prescribed set is below minReps: 7/7/7 in 3x8-12',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [
+      repSet(1, 7, 50),
+      repSet(2, 7, 50),
+      repSet(3, 7, 50),
+    ]),
+    expected: { basis: 'regress', previousLoadKg: 50, nextLoadKg: 47.5, incrementKg: 2.5 },
+  },
+  {
+    name: 'holds on incomplete performance 10/9 of required 3 sets',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [repSet(1, 10, 50), repSet(2, 9, 50)]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'holds on incomplete performance 7/7 of required 3 sets — below-min sets never regress an incomplete log',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [repSet(1, 7, 50), repSet(2, 7, 50)]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'holds on a single logged set below minReps when 3 sets were prescribed',
+    equipment: EquipmentType.Barbell,
+    prescription: threeByEightToTwelve,
+    previous: performance(threeByEightToTwelve, [repSet(1, 7, 50)]),
+    expected: { basis: 'hold', previousLoadKg: 50, nextLoadKg: 50 },
+  },
+  {
+    name: 'regresses the kettlebell load by 4 kg when every set falls below minReps',
     equipment: EquipmentType.Kettlebell,
     prescription: threeBySixToEight,
     previous: performance(threeBySixToEight, [
       repSet(1, 5, 12),
-      repSet(2, 8, 12),
-      repSet(3, 8, 12),
+      repSet(2, 5, 12),
+      repSet(3, 5, 12),
     ]),
     expected: { basis: 'regress', previousLoadKg: 12, nextLoadKg: 8, incrementKg: 4 },
   },
@@ -283,8 +349,8 @@ const SCENARIOS: Scenario[] = [
     prescription: threeByEightToTen,
     previous: performance(threeByEightToTen, [
       repSet(1, 7, 2),
-      repSet(2, 8, 2),
-      repSet(3, 8, 2),
+      repSet(2, 7, 2),
+      repSet(3, 7, 2),
     ]),
     expected: { basis: 'regress', previousLoadKg: 2, nextLoadKg: null, incrementKg: 2 },
   },
@@ -294,19 +360,19 @@ const SCENARIOS: Scenario[] = [
     prescription: threeByEightToTen,
     previous: performance(threeByEightToTen, [
       repSet(1, 7, 2.6),
-      repSet(2, 8, 2.6),
-      repSet(3, 8, 2.6),
+      repSet(2, 7, 2.6),
+      repSet(3, 7, 2.6),
     ]),
     expected: { basis: 'regress', previousLoadKg: 2.6, nextLoadKg: 0.1, incrementKg: 2.5 },
   },
   {
-    name: 'regresses the lowest working load when mixed loads accompany a failed set',
+    name: 'regresses the lowest working load when every set failed on mixed loads',
     equipment: EquipmentType.Barbell,
     prescription: threeByEightToTen,
     previous: performance(threeByEightToTen, [
       repSet(1, 7, 20),
-      repSet(2, 10, 22.5),
-      repSet(3, 10, 22.5),
+      repSet(2, 7, 22.5),
+      repSet(3, 7, 22.5),
     ]),
     expected: { basis: 'regress', previousLoadKg: 20, nextLoadKg: 17.5, incrementKg: 2.5 },
   },

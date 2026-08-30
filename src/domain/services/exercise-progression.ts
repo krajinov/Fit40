@@ -13,16 +13,21 @@
  *   3. Current prescription is duration-based        → duration
  *   4. No considered sets (defensive, see below)     → first-exposure
  *   5. Any considered set logged without load         → bodyweight
- *   6. All sets ≥ maxReps on one uniform load         → increase
- *   7. Any set < minReps                             → regress (floored)
- *   8. Anything else                                 → hold
+ *   6. Fewer sets logged than prescribed              → hold
+ *   7. All prescribed sets ≥ maxReps on one uniform load → increase
+ *   8. All prescribed sets < minReps                  → regress (floored)
+ *   9. Anything else (mixed performance)              → hold
  *
  * Load semantics:
  * - Considered sets are the FIRST `prescription.sets` logged sets of the
  *   previous performance. Sets beyond the prescribed count are ignored;
- *   when fewer sets were logged, the rules apply to the ones that exist.
+ *   when fewer sets were logged than prescribed, the load holds — increase
+ *   and regress are only decided over a complete prescription, regardless
+ *   of how the logged sets performed.
  * - The working load is the MINIMUM load across the considered sets:
  *   progression starts from the weakest set, never the strongest.
+ * - Regression requires EVERY prescribed set below minReps. Mixed
+ *   performance (any set at or above minReps) holds.
  * - `0 kg` is a real external load. Only `weightKg === null` marks an
  *   unweighted (bodyweight) set.
  * - Increasing requires a UNIFORM working load — mixed loads cannot be
@@ -104,10 +109,13 @@ export type NextExerciseTarget =
       readonly nextLoadKg: number;
       readonly incrementKg: number;
     }
-  /** Keep the working load: performance sits between minReps and maxReps. */
+  /**
+   * Keep the working load: mixed or incomplete performance, or reps between
+   * minReps and maxReps.
+   */
   | { readonly basis: 'hold'; readonly previousLoadKg: number; readonly nextLoadKg: number }
   /**
-   * A considered set fell below minReps: remove the equipment increment.
+   * Every prescribed set fell below minReps: remove the equipment increment.
    * `nextLoadKg` is null when the reduction floors at or below zero —
    * perform the exercise without added load.
    */
@@ -148,10 +156,14 @@ function prescriptionsCompatible(previous: RepPrescription, current: RepPrescrip
 /**
  * Load decision for a reps prescription over its considered sets.
  *
- * `consideredSets` must be non-empty (the caller guards). A logged set whose
- * type contradicts the prescription can neither confirm target reps nor a
- * failed minimum, so it can only lead to a hold — the session entity never
- * produces such sets; this is purely defensive.
+ * `consideredSets` must be non-empty (the caller guards). Decision order:
+ * bodyweight (any unweighted set) → hold (fewer sets than prescribed) →
+ * increase (all sets ≥ maxReps on one uniform load) → regress (all sets
+ * < minReps) → hold (mixed performance).
+ *
+ * A logged set whose type contradicts the prescription can neither confirm
+ * target reps nor a failed minimum, so it can only lead to a hold — the
+ * session entity never produces such sets; this is purely defensive.
  */
 function decideRepLoadTarget(
   prescription: RepScheme,
@@ -167,10 +179,18 @@ function decideRepLoadTarget(
   }
 
   const workingLoadKg = Math.min(...loads);
+
+  // Incomplete performance never changes the load: increase and regress are
+  // only decided when every prescribed set was logged, regardless of how the
+  // logged sets performed.
+  if (consideredSets.length < prescription.sets) {
+    return { basis: 'hold', previousLoadKg: workingLoadKg, nextLoadKg: workingLoadKg };
+  }
+
   const reachedTarget = consideredSets.every(
     (set) => set.type === 'reps' && set.reps >= prescription.maxReps,
   );
-  const fellBelowMinimum = consideredSets.some(
+  const allSetsBelowMinimum = consideredSets.every(
     (set) => set.type === 'reps' && set.reps < prescription.minReps,
   );
   const uniformLoad = loads.every((load) => load === workingLoadKg);
@@ -184,7 +204,7 @@ function decideRepLoadTarget(
     };
   }
 
-  if (fellBelowMinimum) {
+  if (allSetsBelowMinimum) {
     const reducedLoadKg = roundToTwoDecimals(workingLoadKg - incrementKg);
     return {
       basis: 'regress',

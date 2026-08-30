@@ -9,8 +9,15 @@
  * can map them to business outcomes without seeing database details.
  */
 
-import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type { SetLog, WorkoutSession } from '@/domain/entities/workout-session';
+import type {
+  EnrollmentId,
+  ExerciseId,
+  ScheduledWorkoutId,
+  UserId,
+  WorkoutSessionId,
+} from '@/domain/types/ids';
+import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
 /**
  * Thrown by `save` when a second session for the same enrollment and
@@ -66,6 +73,32 @@ export class SessionEnrollmentChangedError extends Error {
   }
 }
 
+/**
+ * Read-side projection of the most recent completed performance of one
+ * exercise by one user — the history input of the deterministic progressive
+ * overload rules.
+ *
+ * It is a flat snapshot copied from the winning exercise log and its session:
+ * the prescription the exercise was performed under, and the sets actually
+ * logged. It deliberately carries no session coordinates (scheduled workout,
+ * workout template, enrollment): overload decisions depend only on what the
+ * user last did for the exercise, not on where in a program it happened.
+ */
+export interface LatestCompletedExercisePerformance {
+  /** The exercise this performance is history for. */
+  readonly exerciseId: ExerciseId;
+  /** The completed session the winning exercise log belongs to. */
+  readonly sessionId: WorkoutSessionId;
+  /** Position of the exercise within that session's log list. */
+  readonly exerciseOrder: number;
+  /** When the winning session was completed. */
+  readonly completedAt: Date;
+  /** Prescription snapshot the exercise was performed under. */
+  readonly prescription: RepPrescription;
+  /** Sets logged for the exercise, ordered by set number. */
+  readonly sets: ReadonlyArray<SetLog>;
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -113,4 +146,30 @@ export interface WorkoutSessionRepository {
   listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
   ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
+
+  /**
+   * Returns the latest completed performance for each of the given exercises
+   * that the user has performed in a completed session.
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached history (sessions left behind after leaving a
+   *   program) is still the user's training past and therefore included.
+   * - Only completed sessions contribute; in-progress sessions are ignored
+   *   even when started more recently.
+   * - At most one projection per exercise id. When several completed logs
+   *   compete, the winner is the most recent by the deterministic ladder:
+   *   `completed_at` desc, then `started_at` desc, then session id desc, then
+   *   `exercise_order` desc (a repeated exercise inside one session resolves
+   *   to its later position).
+   * - Requested exercises with no completed performance are absent from the
+   *   result; callers treat absence as "no overload history".
+   * - An empty `exerciseIds` returns an empty result without querying.
+   * - The result is ordered by exercise id ascending, and each projection is
+   *   an isolated snapshot: mutating it never affects stored sessions.
+   */
+  listLatestCompletedExercisePerformances(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+  ): Promise<ReadonlyArray<LatestCompletedExercisePerformance>>;
 }

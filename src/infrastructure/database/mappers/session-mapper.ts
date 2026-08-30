@@ -10,11 +10,13 @@ import {
   createScheduledWorkoutId,
   createUserId,
   createWorkoutId,
+  createWorkoutSessionId,
   type EnrollmentId,
   type ExerciseId,
   type ScheduledWorkoutId,
   type UserId,
   type WorkoutId,
+  type WorkoutSessionId,
 } from '@/domain/types/ids';
 
 import type { exerciseLogs, setLogs, workoutSessions } from '../schema/sessions';
@@ -22,9 +24,13 @@ import { prescriptionFromColumns, prescriptionToColumns } from './prescription-m
 
 type SessionRow = typeof workoutSessions.$inferSelect;
 type ExerciseLogRow = typeof exerciseLogs.$inferSelect;
-type SetLogRow = typeof setLogs.$inferSelect;
+export type SetLogRow = typeof setLogs.$inferSelect;
 
-function parseExerciseId(value: string, context: string): ExerciseId {
+/**
+ * Parses a persisted exercise id, throwing on corrupt data (unreachable
+ * through normal writes — the column is a FK into `exercises`).
+ */
+export function parseExerciseId(value: string, context: string): ExerciseId {
   const result = createExerciseId(value);
   if (!result.ok) {
     throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
@@ -42,6 +48,17 @@ function parseScheduledWorkoutId(value: string, context: string): ScheduledWorko
 
 function parseWorkoutId(value: string, context: string): WorkoutId {
   const result = createWorkoutId(value);
+  if (!result.ok) {
+    throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+/**
+ * Parses a persisted workout session id, throwing on corrupt data.
+ */
+export function parseWorkoutSessionId(value: string, context: string): WorkoutSessionId {
+  const result = createWorkoutSessionId(value);
   if (!result.ok) {
     throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
   }
@@ -67,7 +84,12 @@ function parseOptionalEnrollmentId(value: string | null, context: string): Enrol
   return result.data;
 }
 
-function mapSet(row: SetLogRow, context: string): SetLog {
+/**
+ * Reconstructs one logged set from its `set_logs` row, throwing on corrupt
+ * rows (impossible through normal writes — DB CHECK constraints enforce the
+ * shape).
+ */
+export function mapSet(row: SetLogRow, context: string): SetLog {
   if (row.type === 'reps') {
     if (row.reps === null) {
       throw new Error(`Corrupt data in ${context}: reps set missing reps`);

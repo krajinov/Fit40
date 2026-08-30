@@ -1,16 +1,25 @@
-import { and, asc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
   SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
+  type LatestCompletedExercisePerformance,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { EnrollmentId, ScheduledWorkoutId, WorkoutSessionId } from '@/domain/types/ids';
+import type {
+  EnrollmentId,
+  ExerciseId,
+  ScheduledWorkoutId,
+  UserId,
+  WorkoutSessionId,
+} from '@/domain/types/ids';
 
 import type { Database } from '../client';
+import type { LatestPerformanceRow } from '../mappers/exercise-performance-mapper';
+import { mapLatestCompletedExercisePerformances } from '../mappers/exercise-performance-mapper';
 import {
   mapExerciseLogToRow,
   mapSessionRows,
@@ -97,6 +106,90 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     // id is valid by schema constraint (database records are trusted at the
     // repository boundary).
     return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
+  }
+
+  async listLatestCompletedExercisePerformances(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+  ): Promise<ReadonlyArray<LatestCompletedExercisePerformance>> {
+    if (exerciseIds.length === 0) {
+      return [];
+    }
+
+    const performanceRows = await this.selectLatestPerformanceRows(userId, exerciseIds);
+    if (performanceRows.length === 0) {
+      return [];
+    }
+
+    // Batched second query: sets of every winning session in one round trip
+    // (no per-exercise N+1). Set rows of non-winning exercises in those
+    // sessions are ignored by the mapper's (session, order) keying.
+    const sessionIds = [...new Set(performanceRows.map((row) => row.sessionId))];
+    const setRows = await this.db
+      .select()
+      .from(setLogs)
+      .where(inArray(setLogs.sessionId, sessionIds))
+      .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+
+    return mapLatestCompletedExercisePerformances(performanceRows, setRows);
+  }
+
+  /**
+   * One winning exercise log per exercise: DISTINCT ON keeps the first row of
+   * each exercise group in ORDER BY order, i.e. the deterministic recency
+   * ladder completed_at → started_at → session id → exercise_order, all
+   * descending. Scopes to the user's OWNED sessions (detached history is
+   * included; in-progress sessions are excluded by the completed filter).
+   * Candidate logs must have at least one set log: a skipped exercise never
+   * outranks an older real performance.
+   */
+  private async selectLatestPerformanceRows(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+  ): Promise<ReadonlyArray<LatestPerformanceRow>> {
+    return this.db
+      .selectDistinctOn([exerciseLogs.exerciseId], {
+        exerciseId: exerciseLogs.exerciseId,
+        sessionId: workoutSessions.id,
+        exerciseOrder: exerciseLogs.exerciseOrder,
+        completedAt: workoutSessions.completedAt,
+        prescriptionType: exerciseLogs.prescriptionType,
+        prescribedSets: exerciseLogs.sets,
+        minReps: exerciseLogs.minReps,
+        maxReps: exerciseLogs.maxReps,
+        durationSeconds: exerciseLogs.durationSeconds,
+      })
+      .from(exerciseLogs)
+      .innerJoin(workoutSessions, eq(exerciseLogs.sessionId, workoutSessions.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          inArray(exerciseLogs.exerciseId, [...exerciseIds]),
+          // A performance requires at least one set: skipped exercises (zero
+          // set logs) are filtered out of candidacy by an EXISTS subquery —
+          // no join, so no duplicate candidate rows and the deterministic
+          // DISTINCT ON ordering is untouched.
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(setLogs)
+              .where(
+                and(
+                  eq(setLogs.sessionId, exerciseLogs.sessionId),
+                  eq(setLogs.exerciseOrder, exerciseLogs.exerciseOrder),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(
+        exerciseLogs.exerciseId,
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+        desc(exerciseLogs.exerciseOrder),
+      );
   }
 
   async save(session: WorkoutSession): Promise<void> {

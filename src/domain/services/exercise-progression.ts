@@ -1,5 +1,5 @@
 /**
- * Progressive overload v1 — pure domain progression engine.
+ * Progressive overload v1 — pure domain progression engine (orchestration).
  *
  * `calculateNextExerciseTarget` recommends the load for an exercise's next
  * workout from the current prescription and the latest previous performance.
@@ -39,6 +39,9 @@
  *   `workingLoad − increment` rounds to ≤ 0, the target is `null` — train
  *   the exercise without added load.
  *
+ * Steps 5–9 live in `rep-load-decision.ts`; compatibility, result shape, and
+ * equipment increments each live in their own domain module.
+ *
  * `PreviousExercisePerformance` mirrors the load-relevant slice of the
  * application port's `LatestCompletedExercisePerformance` projection
  * (prescription + sets): that projection is structurally assignable to this
@@ -46,182 +49,15 @@
  */
 
 import type { Exercise } from '@/domain/entities/exercise';
-import type { SetLog } from '@/domain/entities/workout-session';
-import { EquipmentType } from '@/domain/types/exercise';
-import type { RepPrescription, RepScheme } from '@/domain/value-objects/rep-prescription';
+import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
+import { EQUIPMENT_LOAD_INCREMENT_KG } from '@/domain/services/equipment-load-increments';
+import type { NextExerciseTarget } from '@/domain/services/next-exercise-target';
+import type { PreviousExercisePerformance } from '@/domain/services/previous-exercise-performance';
+import { prescriptionsCompatible } from '@/domain/services/prescription-compatibility';
+import { decideRepLoadTarget } from '@/domain/services/rep-load-decision';
 
-// ─── Equipment Load Increments ───────────────────────────────────────────────
-
-/**
- * Load increment (kg) applied per equipment type.
- *
- * Barbell, dumbbell, kettlebell, and machine use their standard plate/stack
- * steps; every other equipment falls back to the default 2.5 kg step. Total
- * over `EquipmentType` on purpose: adding an equipment type becomes a compile
- * error until a step is chosen for it.
- */
-export const EQUIPMENT_LOAD_INCREMENT_KG: Record<EquipmentType, number> = {
-  [EquipmentType.Barbell]: 2.5,
-  [EquipmentType.Dumbbell]: 2,
-  [EquipmentType.Kettlebell]: 4,
-  [EquipmentType.Machine]: 2.5,
-  [EquipmentType.Bodyweight]: 2.5,
-  [EquipmentType.ResistanceBand]: 2.5,
-  [EquipmentType.Bench]: 2.5,
-  [EquipmentType.PullUpBar]: 2.5,
-};
-
-// ─── Input ───────────────────────────────────────────────────────────────────
-
-/**
- * The latest previous performance of one exercise.
- *
- * Reuses the domain's own prescription and set-log shapes — no parallel
- * history types. Set logs are expected ordered by set number, as produced by
- * the history port.
- */
-export interface PreviousExercisePerformance {
-  readonly prescription: RepPrescription;
-  readonly sets: ReadonlyArray<SetLog>;
-}
-
-// ─── Result ──────────────────────────────────────────────────────────────────
-
-/**
- * Discriminated recommendation for an exercise's next workout load.
- */
-export type NextExerciseTarget =
-  /** No history: the exercise has not been performed under any scheme yet. */
-  | { readonly basis: 'first-exposure' }
-  /** The prescription changed: history earned under the old scheme cannot drive load. */
-  | { readonly basis: 'scheme-change' }
-  /** Duration-based prescription: v1 progresses timed work via the scheme, not load. */
-  | { readonly basis: 'duration' }
-  /** A considered set was logged without load: no external load to progress. */
-  | { readonly basis: 'bodyweight' }
-  /**
-   * Every considered set reached maxReps on one uniform load: add the
-   * equipment increment.
-   */
-  | {
-      readonly basis: 'increase';
-      readonly previousLoadKg: number;
-      readonly nextLoadKg: number;
-      readonly incrementKg: number;
-    }
-  /**
-   * Keep the working load: mixed or incomplete performance, or reps between
-   * minReps and maxReps.
-   */
-  | { readonly basis: 'hold'; readonly previousLoadKg: number; readonly nextLoadKg: number }
-  /**
-   * Every prescribed set fell below minReps: remove the equipment increment.
-   * `nextLoadKg` is null when the reduction floors at or below zero —
-   * perform the exercise without added load.
-   */
-  | {
-      readonly basis: 'regress';
-      readonly previousLoadKg: number;
-      readonly nextLoadKg: number | null;
-      readonly incrementKg: number;
-    };
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function roundToTwoDecimals(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-/**
- * Exact scheme compatibility: same set type, same set count, and the same
- * per-type targets (min/max reps, or seconds). Any difference means the
- * history was earned under a different scheme.
- */
-function prescriptionsCompatible(previous: RepPrescription, current: RepPrescription): boolean {
-  if (previous.type === 'reps' && current.type === 'reps') {
-    return (
-      previous.sets === current.sets &&
-      previous.minReps === current.minReps &&
-      previous.maxReps === current.maxReps
-    );
-  }
-
-  if (previous.type === 'duration' && current.type === 'duration') {
-    return previous.sets === current.sets && previous.seconds === current.seconds;
-  }
-
-  return false;
-}
-
-/**
- * Load decision for a reps prescription over its considered sets.
- *
- * `consideredSets` must be non-empty (the caller guards). Decision order:
- * bodyweight (any unweighted set) → hold (fewer sets than prescribed) →
- * increase (all sets ≥ maxReps on one uniform load) → regress (all sets
- * < minReps) → hold (mixed performance).
- *
- * A logged set whose type contradicts the prescription can neither confirm
- * target reps nor a failed minimum, so it can only lead to a hold — the
- * session entity never produces such sets; this is purely defensive.
- */
-function decideRepLoadTarget(
-  prescription: RepScheme,
-  consideredSets: ReadonlyArray<SetLog>,
-  incrementKg: number,
-): NextExerciseTarget {
-  const loads: number[] = [];
-  for (const set of consideredSets) {
-    if (set.weightKg === null) {
-      return { basis: 'bodyweight' };
-    }
-    loads.push(set.weightKg);
-  }
-
-  const workingLoadKg = Math.min(...loads);
-
-  // Incomplete performance never changes the load: increase and regress are
-  // only decided when every prescribed set was logged, regardless of how the
-  // logged sets performed.
-  if (consideredSets.length < prescription.sets) {
-    return { basis: 'hold', previousLoadKg: workingLoadKg, nextLoadKg: workingLoadKg };
-  }
-
-  const reachedTarget = consideredSets.every(
-    (set) => set.type === 'reps' && set.reps >= prescription.maxReps,
-  );
-  const allSetsBelowMinimum = consideredSets.every(
-    (set) => set.type === 'reps' && set.reps < prescription.minReps,
-  );
-  const uniformLoad = loads.every((load) => load === workingLoadKg);
-
-  if (reachedTarget && uniformLoad) {
-    return {
-      basis: 'increase',
-      previousLoadKg: workingLoadKg,
-      nextLoadKg: roundToTwoDecimals(workingLoadKg + incrementKg),
-      incrementKg,
-    };
-  }
-
-  if (allSetsBelowMinimum) {
-    const reducedLoadKg = roundToTwoDecimals(workingLoadKg - incrementKg);
-    return {
-      basis: 'regress',
-      previousLoadKg: workingLoadKg,
-      nextLoadKg: reducedLoadKg <= 0 ? null : reducedLoadKg,
-      incrementKg,
-    };
-  }
-
-  return {
-    basis: 'hold',
-    previousLoadKg: workingLoadKg,
-    nextLoadKg: workingLoadKg,
-  };
-}
-
-// ─── Engine ───────────────────────────────────────────────────────────────────
+export type { NextExerciseTarget, PreviousExercisePerformance };
+export { EQUIPMENT_LOAD_INCREMENT_KG };
 
 /**
  * Calculates the next load recommendation for one exercise.
@@ -261,4 +97,3 @@ export function calculateNextExerciseTarget(
     EQUIPMENT_LOAD_INCREMENT_KG[exercise.equipment],
   );
 }
-

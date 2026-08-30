@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import {
   SessionAlreadyExistsError,
@@ -140,6 +140,8 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
    * ladder completed_at → started_at → session id → exercise_order, all
    * descending. Scopes to the user's OWNED sessions (detached history is
    * included; in-progress sessions are excluded by the completed filter).
+   * Candidate logs must have at least one set log: a skipped exercise never
+   * outranks an older real performance.
    */
   private async selectLatestPerformanceRows(
     userId: UserId,
@@ -164,6 +166,21 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
           eq(workoutSessions.userId, userId),
           isNotNull(workoutSessions.completedAt),
           inArray(exerciseLogs.exerciseId, [...exerciseIds]),
+          // A performance requires at least one set: skipped exercises (zero
+          // set logs) are filtered out of candidacy by an EXISTS subquery —
+          // no join, so no duplicate candidate rows and the deterministic
+          // DISTINCT ON ordering is untouched.
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(setLogs)
+              .where(
+                and(
+                  eq(setLogs.sessionId, exerciseLogs.sessionId),
+                  eq(setLogs.exerciseOrder, exerciseLogs.exerciseOrder),
+                ),
+              ),
+          ),
         ),
       )
       .orderBy(

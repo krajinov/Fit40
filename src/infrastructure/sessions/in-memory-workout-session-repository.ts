@@ -160,7 +160,9 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
   /**
    * Reduces every completed exercise log the user owns to one winner per
    * requested exercise, using the deterministic recency ladder. Completed
-   * sessions only — in-progress sessions never contribute.
+   * sessions only — in-progress sessions never contribute. Logs with zero
+   * sets (skipped exercises) never contribute either, mirroring the SQL
+   * projection's EXISTS filter.
    */
   private reduceToLatestPerExercise(
     userId: UserId,
@@ -178,6 +180,12 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
       }
       for (const log of session.exerciseLogs) {
         if (!wanted.has(log.exerciseId)) {
+          continue;
+        }
+        // Mirrors the SQL EXISTS filter: a log with zero sets is a skipped
+        // exercise, not a performance — it never enters the recency ladder,
+        // so an older real performance still wins.
+        if (log.sets.length === 0) {
           continue;
         }
         const current = winners.get(log.exerciseId);

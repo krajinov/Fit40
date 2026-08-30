@@ -230,6 +230,139 @@ describe('InMemoryWorkoutSessionRepository.listLatestCompletedExercisePerformanc
     expect(repsOf(result[0]?.sets[0])).toBe(12);
   });
 
+  it('falls back to an older real performance when the newest session skipped the exercise', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(perfSession({
+      id: 's-p-skip-old',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+    }));
+    await repo.save(perfSession({
+      id: 's-p-skip-new',
+      startedAt: '2025-03-01T10:00:00Z',
+      completedAt: '2025-03-01T11:00:00Z',
+      logs: [
+        // ex-001 skipped; ex-002 has a set so the session completes legally.
+        { exerciseId: 'ex-001', type: 'reps', sets: [] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [eid('ex-001')]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.sessionId).toBe('s-p-skip-old');
+    expect(result[0]?.sets[0]?.weightKg).toBe(40);
+  });
+
+  it('returns an empty result when the only history for an exercise is a skipped log', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Completable because ex-002 has a set; ex-005 is skipped (zero-set log).
+    await repo.save(perfSession({
+      id: 's-p-skip-only',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [eid('ex-005')]);
+    expect(result).toEqual([]);
+  });
+
+
+  it('returns the performed exercise but not the skipped one from the same completed session', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Completable because ex-002 has a set; ex-005 is skipped (zero-set log).
+    await repo.save(perfSession({
+      id: 's-p-skip-mixed',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [eid('ex-002'), eid('ex-005')]);
+    expect(result.map((p) => p.exerciseId)).toEqual(['ex-002']);
+    expect(result[0]?.sessionId).toBe('s-p-skip-mixed');
+  });
+
+
+  it('keeps the performed occurrence when a repeated exercise is skipped later in the same session', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(perfSession({
+      id: 's-p-skip-repeat-tail',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+        { exerciseId: 'ex-001', type: 'reps', sets: [] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [eid('ex-001')]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.exerciseOrder).toBe(1);
+    expect(repsOf(result[0]?.sets[0])).toBe(8);
+  });
+
+  it('resolves to the performed occurrence when an earlier repeat of the exercise was skipped', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(perfSession({
+      id: 's-p-skip-repeat-head',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-001', type: 'reps', sets: [] },
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 12 }] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [eid('ex-001')]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.exerciseOrder).toBe(2);
+    expect(repsOf(result[0]?.sets[0])).toBe(12);
+  });
+
+  it('falls back per exercise in a batch when the newest session skipped one of them', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(perfSession({
+      id: 's-p-skip-batch-old',
+      startedAt: '2025-01-01T10:00:00Z',
+      completedAt: '2025-01-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+    await repo.save(perfSession({
+      id: 's-p-skip-batch-new',
+      startedAt: '2025-02-01T10:00:00Z',
+      completedAt: '2025-02-01T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 50 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+        { exerciseId: 'ex-009', type: 'reps', sets: [{ reps: 12 }] },
+      ],
+    }));
+
+    const result = await repo.listLatestCompletedExercisePerformances(uid('user-1'), [
+      eid('ex-005'),
+      eid('ex-009'),
+      eid('ex-002'),
+    ]);
+    expect(result.map((p) => p.exerciseId)).toEqual(['ex-002', 'ex-005', 'ex-009']);
+    expect(result[0]?.sessionId).toBe('s-p-skip-batch-new');
+    expect(result[1]?.sessionId).toBe('s-p-skip-batch-old');
+    expect(result[2]?.sessionId).toBe('s-p-skip-batch-new');
+  });
+
+
   it('scopes to the owning user', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(perfSession({

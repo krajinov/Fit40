@@ -351,6 +351,164 @@ describe('DrizzleWorkoutSessionRepository.listLatestCompletedExercisePerformance
     expect(repsOf(result[0]?.sets[0])).toBe(12);
   });
 
+  it('falls back to an older real performance when the newest session skipped the exercise', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-old',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+    }));
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-new',
+      occurrence: 2,
+      startedAt: '2025-02-03T10:00:00Z',
+      completedAt: '2025-02-03T11:00:00Z',
+      logs: [
+        // ex-002 skipped; ex-005 has a set so the session completes legally.
+        { exerciseId: 'ex-002', type: 'reps', sets: [] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-002')],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.sessionId).toBe('session-hist-skip-old');
+    expect(result[0]?.sets[0]?.weightKg).toBe(40);
+  });
+
+
+  it('returns an empty result when the only history for an exercise is a skipped log', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-only',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-005')],
+    );
+    expect(result).toEqual([]);
+  });
+
+
+  it('returns the performed exercise but not the skipped one from the same completed session', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-mixed',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-002'), exerciseId('ex-005')],
+    );
+    expect(result.map((p) => p.exerciseId)).toEqual(['ex-002']);
+    expect(result[0]?.sessionId).toBe('session-hist-skip-mixed');
+  });
+
+
+  it('keeps the performed occurrence when a repeated exercise is skipped later in the same session', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-repeat-tail',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8 }] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-002')],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.exerciseOrder).toBe(1);
+    expect(repsOf(result[0]?.sets[0])).toBe(8);
+  });
+
+  it('resolves to the performed occurrence when an earlier repeat of the exercise was skipped', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-repeat-head',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 12 }] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-002')],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.exerciseOrder).toBe(2);
+    expect(repsOf(result[0]?.sets[0])).toBe(12);
+  });
+
+
+  it('falls back per exercise in a batch when the newest session skipped one of them', async () => {
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-batch-old',
+      occurrence: 0,
+      startedAt: '2025-01-06T10:00:00Z',
+      completedAt: '2025-01-06T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [{ reps: 10 }] },
+      ],
+    }));
+    await workoutSessionRepository.save(historySession({
+      id: 'session-hist-skip-batch-new',
+      occurrence: 2,
+      startedAt: '2025-02-03T10:00:00Z',
+      completedAt: '2025-02-03T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 50 }] },
+        { exerciseId: 'ex-005', type: 'reps', sets: [] },
+        { exerciseId: 'ex-009', type: 'reps', sets: [{ reps: 12 }] },
+      ],
+    }));
+
+    const result = await workoutSessionRepository.listLatestCompletedExercisePerformances(
+      userId('user-test-a'),
+      [exerciseId('ex-005'), exerciseId('ex-009'), exerciseId('ex-002')],
+    );
+    expect(result.map((p) => p.exerciseId)).toEqual(['ex-002', 'ex-005', 'ex-009']);
+
+    const squat = result.find((p) => p.exerciseId === 'ex-002');
+    expect(squat?.sessionId).toBe('session-hist-skip-batch-new');
+    expect(squat?.sets[0]?.weightKg).toBe(50);
+
+    const press = result.find((p) => p.exerciseId === 'ex-005');
+    expect(press?.sessionId).toBe('session-hist-skip-batch-old');
+    expect(repsOf(press?.sets[0])).toBe(10);
+
+    const row = result.find((p) => p.exerciseId === 'ex-009');
+    expect(row?.sessionId).toBe('session-hist-skip-batch-new');
+    expect(repsOf(row?.sets[0])).toBe(12);
+  });
+
+
   it('scopes to the owning user, not to the enrollment', async () => {
     await workoutSessionRepository.save(historySession({
       id: 'session-hist-ua',

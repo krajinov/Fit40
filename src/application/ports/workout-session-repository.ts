@@ -162,6 +162,10 @@ export interface WorkoutSessionRepository {
    *   `completed_at` desc, then `started_at` desc, then session id desc, then
    *   `exercise_order` desc (a repeated exercise inside one session resolves
    *   to its later position).
+   * - A performance requires at least one set log: an exercise log with zero
+   *   sets (the exercise was skipped) never wins, even though its session
+   *   may be completed because other exercises have sets — it never shadows
+   *   an older real performance.
    * - Requested exercises with no completed performance are absent from the
    *   result; callers treat absence as "no overload history".
    * - An empty `exerciseIds` returns an empty result without querying.

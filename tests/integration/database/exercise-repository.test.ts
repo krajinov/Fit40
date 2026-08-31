@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { createExerciseId } from '@/domain/types/ids';
 import { exercises } from '@/infrastructure/database/schema';
 
 import { closeDatabase, db, exerciseRepository, resetAndSeed } from './setup';
@@ -140,6 +141,44 @@ describe('DrizzleExerciseRepository', () => {
     await expect(
       db.insert(exercises).values(exerciseRow({ secondaryMuscles: ['banana'] })),
     ).rejects.toThrow();
+  });
+});
+
+describe('DrizzleExerciseRepository.findByIds', () => {
+  beforeEach(async () => {
+    await resetAndSeed();
+  });
+
+  function eid(value: string) {
+    const result = createExerciseId(value);
+    if (!result.ok) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  it('returns only the seeded exercises matching the requested ids', async () => {
+    const result = await exerciseRepository.findByIds([eid('ex-001'), eid('ex-002')]);
+
+    expect(result.map((exercise) => exercise.id).sort()).toEqual(['ex-001', 'ex-002']);
+
+    const squat = result.find((exercise) => exercise.id === 'ex-001');
+    expect(squat?.name).toBe('Bodyweight Squat');
+  });
+
+  it('returns an empty array for an empty id list', async () => {
+    const result = await exerciseRepository.findByIds([]);
+
+    expect(result).toEqual([]);
+  });
+
+  it('omits unknown ids and collapses duplicate ids to a single result', async () => {
+    const result = await exerciseRepository.findByIds([
+      eid('ex-001'),
+      eid('ex-001'),
+      eid('ex-unknown'),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('ex-001');
   });
 });
 

@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+import { buttonVariants } from '@/components/ui/button';
+import { PageContainer } from '@/components/shared/PageContainer';
 import { LogoutButton } from '@/features/auth/components/LogoutButton';
 import { requireUser } from '@/features/auth/current-user';
 import { getUserProfileUseCase } from '@/features/profile/services';
@@ -22,23 +24,22 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
+    <PageContainer>
       <div className="mb-8 space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <h1 className="font-display text-3xl font-bold tracking-tight text-foreground md:text-[36px]">
+          Dashboard
+        </h1>
         <p className="text-muted-foreground">
           Signed in as <span className="font-medium text-foreground">{user.email}</span>.
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
-        <Link
-          href="/profile"
-          className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
-        >
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href="/profile" className={buttonVariants({ variant: 'secondary' })}>
           Edit profile
         </Link>
-        <LogoutButton className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" />
+        <LogoutButton className={buttonVariants({ variant: 'ghost', size: 'sm' })} />
       </div>
-    </main>
+    </PageContainer>
   );
 }

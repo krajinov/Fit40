@@ -40,6 +40,7 @@ function createMockRepository(): ExerciseRepository {
   return {
     list: vi.fn(),
     findBySlug: vi.fn(),
+    findByIds: vi.fn(),
   };
 }
 

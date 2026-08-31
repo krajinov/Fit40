@@ -17,11 +17,11 @@ import { WEIGHT_UNITS } from '@/features/profile/schemas/profile-schemas';
  * as the `weightUnit` form field and the server action performs the
  * canonical lb->kg conversion, exactly as before the redesign.
  *
- * The design places the segmented unit control inline next to the field on
- * mobile and in its own "Unit" column on desktop. Both segments are the same
- * radio group (name="weightUnit") driven by one piece of selection state;
- * the hidden breakpoint's radios submit the identical checked value, and the
- * action reads a single value with FormData.get.
+ * There is exactly ONE weightUnit radio group in the DOM. The parent renders
+ * this component's two cells into a responsive grid: on mobile the unit
+ * segment sits inline next to the field (bottom-aligned with the input); on
+ * desktop it becomes the dedicated "Unit" column (top-aligned label, like
+ * Height/Current weight). No duplicated controls at either breakpoint.
  */
 export interface ProfileWeightFieldProps {
   readonly weightValue: string;
@@ -39,15 +39,14 @@ const OPTION_CLASSES = cn(
 interface UnitSegmentProps {
   readonly unit: 'kg' | 'lb';
   readonly onSelect: (unit: 'kg' | 'lb') => void;
-  readonly className?: string;
 }
 
-function UnitSegment({ unit, onSelect, className }: UnitSegmentProps) {
+function UnitSegment({ unit, onSelect }: UnitSegmentProps) {
   return (
     <div
       role="radiogroup"
       aria-label="Weight unit"
-      className={cn('flex gap-1 rounded-control bg-surface-2 p-1', className)}
+      className="flex h-[52px] w-full gap-1 rounded-control bg-surface-2 p-1"
     >
       {WEIGHT_UNITS.map((u) => (
         <label key={u} className={OPTION_CLASSES}>
@@ -73,37 +72,32 @@ export function ProfileWeightField({ weightValue, weightUnit, errors }: ProfileW
 
   return (
     <>
-      <div className="space-y-2 md:w-[280px]">
+      <div className="space-y-2">
         <Label htmlFor="weightValue">Current weight</Label>
-        <div className="flex items-stretch gap-2.5">
-          <div className="relative flex-1">
-            <Input
-              id="weightValue"
-              name="weightValue"
-              type="text"
-              inputMode="decimal"
-              placeholder={unit === 'lb' ? 'e.g. 176' : 'e.g. 80'}
-              defaultValue={weightValue}
-              aria-invalid={hasErrors || undefined}
-              aria-describedby={hasErrors ? errorId : undefined}
-              className="md:pr-14"
-            />
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-4 hidden -translate-y-1/2 text-[15px] font-medium text-ink-3 md:block"
-            >
-              {unit}
-            </span>
-          </div>
-          {/* Mobile: unit segment sits inline next to the field. */}
-          <UnitSegment unit={unit} onSelect={setUnit} className="w-[120px] shrink-0 md:hidden" />
+        <div className="relative">
+          <Input
+            id="weightValue"
+            name="weightValue"
+            type="text"
+            inputMode="decimal"
+            placeholder={unit === 'lb' ? 'e.g. 176' : 'e.g. 80'}
+            defaultValue={weightValue}
+            aria-invalid={hasErrors || undefined}
+            aria-describedby={hasErrors ? errorId : undefined}
+            className="md:pr-14"
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 right-4 hidden -translate-y-1/2 text-[15px] font-medium text-ink-3 md:block"
+          >
+            {unit}
+          </span>
         </div>
         <ProfileFieldErrors id={errorId} messages={errors} />
       </div>
 
-      {/* Desktop: dedicated "Unit" column aligned with the field row. */}
-      <div className="hidden space-y-2 md:block md:w-[180px]">
-        <span className="block text-sm font-medium text-foreground">Unit</span>
+      <div>
+        <span className="hidden text-sm font-medium text-foreground md:block">Unit</span>
         <UnitSegment unit={unit} onSelect={setUnit} />
       </div>
     </>

@@ -62,17 +62,24 @@ export function ProfileFormSections({ values, fieldErrors }: ProfileFormSections
         title="Body metrics"
         className={CARD_CLASS}
       >
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:gap-6">
+        {/*
+          Responsive body-metrics grid: mobile stacks Height above a
+          field+unit row (unit bottom-aligned with the input); desktop uses
+          the locked 280/280/180 columns with top-aligned labels. The unit
+          cell is the single weightUnit radio group from ProfileWeightField.
+        */}
+        <div className="grid grid-cols-[1fr_120px] items-end gap-4 md:grid-cols-[minmax(0,280px)_minmax(0,280px)_minmax(0,180px)] md:items-start md:gap-6">
           <ProfileUnitInput
             id="heightCm"
             name="heightCm"
             label="Height"
+            optional
             unit="cm"
             defaultValue={values.heightCm}
             placeholder="e.g. 178"
             inputMode="numeric"
             errors={fieldErrors.heightCm}
-            className="md:w-[280px]"
+            className="col-span-2 md:col-span-1"
           />
           <ProfileWeightField
             weightValue={values.weightValue}

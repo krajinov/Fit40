@@ -17,6 +17,8 @@ export interface ProfileUnitInputProps {
   readonly inputMode?: 'numeric' | 'decimal';
   readonly autoComplete?: string;
   readonly unit?: string;
+  /** Renders a subtle "(optional)" marker after the label. Presentation only. */
+  readonly optional?: boolean;
   readonly errors?: ReadonlyArray<string>;
   readonly className?: string;
 }
@@ -30,6 +32,7 @@ export function ProfileUnitInput({
   inputMode,
   autoComplete,
   unit,
+  optional = false,
   errors,
   className,
 }: ProfileUnitInputProps) {
@@ -38,7 +41,10 @@ export function ProfileUnitInput({
 
   return (
     <div className={cn('space-y-2', className)}>
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {optional && <span className="font-normal text-ink-3"> (optional)</span>}
+      </Label>
       <div className="relative">
         <Input
           id={id}

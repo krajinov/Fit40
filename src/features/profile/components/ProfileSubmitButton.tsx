@@ -2,18 +2,22 @@
 
 import { useFormStatus } from 'react-dom';
 
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
 interface ProfileSubmitButtonProps {
   readonly label: string;
   readonly pendingLabel: string;
+  readonly className?: string;
 }
 
-export function ProfileSubmitButton({ label, pendingLabel }: ProfileSubmitButtonProps) {
+export function ProfileSubmitButton({ label, pendingLabel, className }: ProfileSubmitButtonProps) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
-      className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 sm:w-auto"
+      className={cn(buttonVariants(), className)}
     >
       {pending ? pendingLabel : label}
     </button>

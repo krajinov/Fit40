@@ -25,7 +25,7 @@ export function SelectableRadioCard({
   return (
     <label
       className={cn(
-        'group/radio flex h-14 cursor-pointer items-center gap-3 rounded-control border border-border-strong bg-card px-[18px] text-[15px] text-foreground transition-colors select-none',
+        'group/radio flex min-h-14 cursor-pointer items-center gap-3 rounded-control border border-border-strong bg-card px-[18px] py-2 text-[15px] text-foreground transition-colors select-none',
         'hover:border-ink-3',
         'has-checked:border-primary has-checked:bg-accent-tint',
         'has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50',

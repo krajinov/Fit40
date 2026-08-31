@@ -119,6 +119,8 @@ data and pass route-specific `?next=` deep links. The shell calls
   tab bar; the design's bottom action bar (Complete workout) lands with the
   Active Workout slice.
 - **Segmented control.** Not present in the locked design; not built.
-- **Screen migration.** Profile, Program detail, Workout detail and Active
-  Workout pages still use pre-redesign markup; each migrates in its own
-  slice using these primitives.
+- **Screen migration.** Profile and Onboarding are migrated to the locked
+  design (section cards 01-05, desktop section index, radio cards, chips,
+  segmented day/session/unit controls). Program detail, Workout detail and
+  Active Workout pages still use pre-redesign markup; each migrates in its
+  own slice using these primitives.

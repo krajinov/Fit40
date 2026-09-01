@@ -1,4 +1,5 @@
 import type { ProgramSummaryDto } from '@/application/dto/program';
+import { EmptyState } from '@/components/shared/EmptyState';
 import { ProgramCard } from '@/features/programs/components/ProgramCard';
 
 interface ProgramListProps {
@@ -13,9 +14,10 @@ interface ProgramListProps {
 export function ProgramList({ programs, enrolledProgramIds }: ProgramListProps) {
   if (programs.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border p-8 text-center">
-        <p className="text-muted-foreground">No programs available.</p>
-      </div>
+      <EmptyState
+        title="No programs available"
+        body="The program catalog is empty right now. Check back soon."
+      />
     );
   }
 

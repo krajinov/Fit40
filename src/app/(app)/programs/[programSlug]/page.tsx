@@ -2,12 +2,14 @@ import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
+import { PageContainer } from '@/components/shared/PageContainer';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import { getCurrentUser } from '@/features/auth/current-user';
 import { getProgramEnrollmentUseCase } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
 import { ProgramDetail } from '@/features/programs/components/ProgramDetail';
 import { programSlugSchema } from '@/features/programs/schemas/program-routes-schema';
+import { buildNextWorkoutView } from '@/features/sessions/next-workout-view';
 
 interface ProgramDetailPageProps {
   readonly params: Promise<{ readonly programSlug: string }>;
@@ -49,6 +51,7 @@ export default async function ProgramDetailPage({
   // authenticated visitors, scoped to their user id from the session.
   const user = await getCurrentUser();
   let enrollment: ProgramEnrollmentViewDto | null = null;
+  let nextWorkout: Awaited<ReturnType<typeof buildNextWorkoutView>> = null;
   if (user !== null) {
     const enrollmentResult = await getProgramEnrollmentUseCase.execute({
       userId: user.id,
@@ -62,11 +65,26 @@ export default async function ProgramDetailPage({
       );
     }
     enrollment = enrollmentResult.data;
+
+    // Resolve the next workout's session state only for enrolled users;
+    // anonymous and not-enrolled visitors get no up-next data.
+    if (enrollment.status === 'enrolled' && enrollment.nextWorkout !== null) {
+      nextWorkout = await buildNextWorkoutView({
+        userId: user.id,
+        programSlug: result.data.program.slug,
+        weekNumber: enrollment.nextWorkout.weekNumber,
+        workoutOrder: enrollment.nextWorkout.workoutOrder,
+      });
+    }
   }
 
   return (
-    <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      <ProgramDetail program={result.data.detail} enrollment={enrollment} />
-    </main>
+    <PageContainer className="pt-10 md:pt-10">
+      <ProgramDetail
+        program={result.data.detail}
+        enrollment={enrollment}
+        nextWorkout={nextWorkout}
+      />
+    </PageContainer>
   );
 }

@@ -121,6 +121,66 @@ data and pass route-specific `?next=` deep links. The shell calls
 - **Segmented control.** Not present in the locked design; not built.
 - **Screen migration.** Profile and Onboarding are migrated to the locked
   design (section cards 01-05, desktop section index, radio cards, chips,
-  segmented day/session/unit controls). Program detail, Workout detail and
-  Active Workout pages still use pre-redesign markup; each migrates in its
-  own slice using these primitives.
+  segmented day/session/unit controls). Dashboard and Program screens are
+  migrated to the locked design (see below). Workout detail, Active Workout
+  and the Exercises screens still use pre-redesign markup; each migrates in
+  its own slice using these primitives.
+
+## Screen notes: Dashboard & Program (Slice 3)
+
+### Data truthfulness (Pencil field classes)
+
+- **A (in DTOs):** next-workout name/coordinates, exercise prescriptions,
+  estimated duration, program metadata, enrollment progress
+  (completed/total/percentage), completed-scheduled-workout ids, profile
+  fields, equipment.
+- **B (derived presentation-only):** current program week (first uncompleted
+  workout's week), week lifecycle badges (completed / in progress /
+  upcoming), per-week completion counts, Start vs. Resume CTA labels
+  (session status), date eyebrow, age from birth year.
+- **C (no source — omitted, not fabricated):** calendar day dots
+  (Mon–Sun) — programs schedule per program-week, not per weekday, and no
+  completion timestamps are exposed to presentation; session history rows
+  (date · sets · volume) and "View history" — no session-history use case
+  exists; "Mon · Wed · Fri" cadence; mobile "unlocks after Week N" — the
+  domain enforces no week locking (`start-workout-session` allows any
+  occurrence), so every scheduled workout stays a working link with a
+  truthful "Scheduled" state. When more than 3 workouts are completed, the
+  Recent training card links to the program page ("View program progress")
+  instead of a nonexistent history screen.
+
+### Dashboard structure
+
+- Header: date eyebrow (UTC, deterministic), "Your training" title,
+  Edit profile ghost button, and the sign-out link (quiet text link — not
+  in the locked design, kept as the app's only in-session sign-out).
+- Two-column desktop layout (main 736px / side 360px within the 1120px
+  container); mobile stacks Header → Up next → This week → Current program,
+  hiding Recent training and the profile card (locked mobile design).
+- "Current program" = most recently joined enrollment (repository orders
+  enrollments by joined time ascending; documented simplification while
+  the domain has no explicit current-program concept).
+- Empty states: no enrollment → `NoProgramCard` (EmptyState + Browse
+  programs CTA); program fully completed → `ProgramCompletedCard`.
+
+### Program detail structure
+
+- Public page; breadcrumb (Programs / name), header badges (goal accent;
+  difficulty/duration/frequency neutral), Sora title, description.
+- Visitor-specific enrollment area, three states:
+  1. anonymous → `AnonymousVisitorCard` (Sign in with `?next=` deep link
+     back to this program + Create account); no enrollment data resolved;
+  2. signed-in not enrolled → Join card with `JoinProgramButton`;
+  3. enrolled → `EnrolledProgramPanel`: desktop shows eyebrow + Sora
+     progress title + Leave (ghost), progress track, and the accent-tint
+     Up next row with Start/Resume workout (links to the session page,
+     whose panels own the start/resume semantics); mobile shows the
+     compact eyebrow/track/count variant and keeps Leave reachable.
+- Weekly schedule: one card per week; in-progress weeks get the
+  accent-tint-border card treatment. Workout cards: completed (accent
+  check circle, "Completed"), up next (accent-tint card, accent border,
+  "Up next"), scheduled (bordered order circle, "Scheduled") — all links.
+- Catalog page and cards were restyled onto the same primitives; the
+  fabricated "Time: 45 min" card column was removed (no per-program
+  duration estimate exists).
+

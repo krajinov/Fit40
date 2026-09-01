@@ -1,9 +1,10 @@
-import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
-import { getScheduledWorkoutUseCase } from '@/features/programs/services';
-import { ScheduledWorkoutDetail } from '@/features/programs/components/ScheduledWorkoutDetail';
+import { PageContainer } from '@/components/shared/PageContainer';
+import { getCurrentUser } from '@/features/auth/current-user';
+import { buildWorkoutDetailView } from '@/features/sessions/workout-detail-view';
+import { WorkoutDetail } from '@/features/sessions/components/WorkoutDetail';
 import {
   programSlugSchema,
   weekNumberSchema,
@@ -18,16 +19,6 @@ interface ScheduledWorkoutPageProps {
   }>;
 }
 
-const getWorkout = cache(
-  async (programSlug: string, weekNumber: number, workoutOrder: number) => {
-    return getScheduledWorkoutUseCase.execute({
-      programSlug,
-      weekNumber,
-      workoutOrder,
-    });
-  },
-);
-
 export async function generateMetadata({
   params,
 }: ScheduledWorkoutPageProps): Promise<Metadata> {
@@ -39,13 +30,27 @@ export async function generateMetadata({
     return { title: 'Workout not found' };
   }
 
-  const result = await getWorkout(programSlug, weekResult.data, orderResult.data);
-
-  if (!result.ok) {
+  const slugResult = programSlugSchema.safeParse(programSlug);
+  if (!slugResult.success) {
     return { title: 'Workout not found' };
   }
 
-  return { title: result.data.workout.name };
+  const view = await buildWorkoutDetailView(
+    {
+      programSlug: slugResult.data,
+      weekNumber: weekResult.data,
+      workoutOrder: orderResult.data,
+    },
+    // Metadata needs no personalization — recommendations are user-specific
+    // and never belong in the document title.
+    null,
+  );
+
+  if (view === null) {
+    return { title: 'Workout not found' };
+  }
+
+  return { title: view.workout.workout.name };
 }
 
 export default async function ScheduledWorkoutPage({
@@ -61,19 +66,28 @@ export default async function ScheduledWorkoutPage({
     notFound();
   }
 
-  const result = await getWorkout(
-    slugResult.data,
-    weekResult.data,
-    orderResult.data,
+  // The workout detail page is intentionally public: anonymous visitors can
+  // browse name, exercises, prescriptions, equipment and rest. Progressive
+  // overload recommendations are user-specific and only resolved for an
+  // authenticated visitor (never another user's history).
+  const user = await getCurrentUser();
+
+  const view = await buildWorkoutDetailView(
+    {
+      programSlug: slugResult.data,
+      weekNumber: weekResult.data,
+      workoutOrder: orderResult.data,
+    },
+    user,
   );
 
-  if (!result.ok) {
+  if (view === null) {
     notFound();
   }
 
   return (
-    <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      <ScheduledWorkoutDetail workout={result.data} />
-    </main>
+    <PageContainer className="pt-5 pb-6 md:pt-10 md:pb-20">
+      <WorkoutDetail view={view} />
+    </PageContainer>
   );
 }

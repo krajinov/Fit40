@@ -4,7 +4,7 @@
  * DTOs are plain, serializable shapes. Branded IDs are stripped to plain strings.
  */
 
-import type { Difficulty } from '@/domain/types/exercise';
+import type { Difficulty, EquipmentType } from '@/domain/types/exercise';
 import type { ProgramGoal } from '@/domain/types/program';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
@@ -65,6 +65,8 @@ export interface ScheduledWorkoutExerciseDto {
   readonly exerciseId: string;
   readonly exerciseName: string;
   readonly exerciseSlug: string;
+  /** Catalog equipment of the exercise (e.g. dumbbell, bodyweight). */
+  readonly equipment: EquipmentType;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
   readonly notes: string | null;

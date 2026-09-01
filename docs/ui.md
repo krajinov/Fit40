@@ -121,10 +121,10 @@ data and pass route-specific `?next=` deep links. The shell calls
 - **Segmented control.** Not present in the locked design; not built.
 - **Screen migration.** Profile and Onboarding are migrated to the locked
   design (section cards 01-05, desktop section index, radio cards, chips,
-  segmented day/session/unit controls). Dashboard and Program screens are
-  migrated to the locked design (see below). Workout detail, Active Workout
-  and the Exercises screens still use pre-redesign markup; each migrates in
-  its own slice using these primitives.
+  segmented day/session/unit controls). Dashboard, Program and Workout
+  Detail screens are migrated to the locked design (see below). Active
+  Workout and the Exercises screens still use pre-redesign markup; each
+  migrates in its own slice using these primitives.
 
 ## Screen notes: Dashboard & Program (Slice 3)
 
@@ -183,4 +183,57 @@ data and pass route-specific `?next=` deep links. The shell calls
 - Catalog page and cards were restyled onto the same primitives; the
   fabricated "Time: 45 min" card column was removed (no per-program
   duration estimate exists).
+
+## Screen notes: Workout Detail (Slice 4)
+
+Migrated `/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]`
+onto the locked "Workout — Desktop/Mobile" frames. The page stays public:
+anonymous visitors browse the full workout (breadcrumb, Sora title, meta
+badges, exercise list, CTA band) with **no** personalized recommendations.
+
+### Progressive overload wiring
+
+- `buildWorkoutDetailView` (features/sessions) resolves the workout via the
+  existing use case, then — only for authenticated users — calls
+  `GetNextExerciseTargetsUseCase` **once** with one batched request carrying
+  every exercise `{exerciseId, prescription}` from the CURRENT scheduled
+  workout/template (intentionally different from Active Workout, which will
+  use the session snapshot). One target per request position; duplicate ids
+  deduplicate inside the use case (no N+1, no aggregate hydration).
+- Typed target failures are recoverable personalization: recommendations
+  are omitted and the public workout content stays intact (the error
+  contract does not require failing the page).
+- `workout-target-views.ts` is the deferred `ExerciseTargetDto → view`
+  presentation mapper: formats kg (trims float dust), scheme labels and
+  per-basis copy; owns zero progression logic (domain decisions arrive
+  complete). bodyweight/duration/first-exposure render **no** chip;
+  regress with a floored `nextLoadKg: null` renders "No added load",
+  never a fake "0 kg"; scheme-change shows `NEW REP TARGET` + the current
+  scheme, never the historical load.
+- **DTO gap (reported, not papered over):** `ExerciseTargetDto` carries no
+  previous reps / previous scheme / lastPerformedAt, so the locked row copy
+  "Last time · 50 kg × 10" is rendered truthfully as "Last time · 50 kg"
+  (previous LOAD only, from `previousLoadKg`). No Application contract was
+  changed for this.
+
+### Basis → chip treatments (locked design)
+
+- increase → accent-tint chip `TRY TODAY {next} kg` (+2/2.5 kg per equipment)
+- hold → surface-2/border-strong chip `REPEAT {load} kg`
+- regress → amber-tint chip `TRY TODAY {lower} kg` / `No added load`
+- scheme-change → neutral chip `NEW REP TARGET {scheme}`
+- bodyweight / duration / first-exposure → no chip (normal prescription row)
+- Chips are compact inline elements, not `RecommendationCallout`s (the big
+  callout component stays for the Active Workout slice); mobile uses the
+  smaller `TRY`/`NEW TARGET` label variants from the locked mobile frame.
+
+### CTA band
+
+Accent-tint "Ready when you are" band; primary CTA targets the session page,
+which owns the start/resume/join semantics (no session is created or
+mutated on this screen). Label reflects the resolved session state:
+anonymous → "Sign in to start" (login deep link to the session page),
+not-enrolled → "Join program to start", none → "Start workout",
+in-progress → "Resume workout", completed → "View session". The secondary
+"View program" CTA is desktop-only (locked mobile frame omits it).
 

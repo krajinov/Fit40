@@ -30,7 +30,7 @@ export function AppHeader({ userEmail }: AppHeaderProps) {
           {userEmail === null ? (
             <Link
               href="/login"
-              className="rounded-sm text-[15px] font-medium text-ink-2 outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="rounded-sm py-2 text-[15px] font-medium text-ink-2 outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               Sign in
             </Link>

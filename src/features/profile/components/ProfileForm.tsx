@@ -14,6 +14,7 @@ import {
   resolveFormValues,
 } from '@/features/profile/profile-form-values';
 import type { ProfileActionState } from '@/features/profile/types/profile-action-state';
+import { cn } from '@/lib/utils';
 
 const initialState: ProfileActionState = { ok: true };
 
@@ -56,7 +57,7 @@ export function ProfileForm({ profile }: ProfileFormProps) {
           />
           <Link
             href="/dashboard"
-            className={`${buttonVariants({ variant: 'ghost', size: 'sm' })} hidden md:inline-flex`}
+            className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'hidden md:inline-flex')}
           >
             Cancel
           </Link>

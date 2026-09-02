@@ -4,8 +4,6 @@ import { useActionState, useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Pencil, Trash2 } from 'lucide-react';
 
-import { cn } from '@/lib/utils';
-
 import { EditField } from '@/features/sessions/components/LoggedSetEditField';
 import type { WorkoutSessionSetDto } from '@/application/dto/workout-session';
 

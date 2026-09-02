@@ -234,7 +234,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
     expect(cards[2]?.name).toBe('Exercise 3');
   });
 
-  it('renders set rows with weight and RPE labels', () => {
+  it('appends the captured RPE to the set value label', () => {
     const logs = [log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 52.5, 7)])];
     const cards = buildSessionExerciseCardViews({
       logs,
@@ -243,7 +243,35 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       sessionStatus: 'in-progress',
     });
 
+    expect(cards[0]?.setRows[0]).toEqual({ setNumber: 1, valueLabel: '52.5 kg × 10 @ RPE 7' });
+  });
+
+  it('omits the RPE suffix when no RPE was captured', () => {
+    const logs = [log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 52.5, null)])];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null],
+      catalogByExerciseId: catalog,
+      sessionStatus: 'in-progress',
+    });
+
     expect(cards[0]?.setRows[0]).toEqual({ setNumber: 1, valueLabel: '52.5 kg × 10' });
+  });
+
+  it('appends the RPE suffix to duration sets too', () => {
+    const logs = [
+      log(1, 'ex-plank', threeByFortySeconds, [
+        { setNumber: 1, type: 'duration', durationSeconds: 40, weightKg: null, rpe: 8 },
+      ]),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null],
+      catalogByExerciseId: new Map(),
+      sessionStatus: 'in-progress',
+    });
+
+    expect(cards[0]?.setRows[0]?.valueLabel).toBe('40s @ RPE 8');
   });
 
   it('duration sets render seconds, with weight when present', () => {

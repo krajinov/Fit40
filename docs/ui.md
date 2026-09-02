@@ -112,9 +112,11 @@ data and pass route-specific `?next=` deep links. The shell calls
 
 ## Follow-up notes (deferred by design)
 
-- **RPE reconciliation.** The locked Active Workout design has no RPE field.
-  The existing `SetLoggerForm` RPE behavior must be reconciled in the Active
-  Workout screen slice — not silently carried into the redesigned screen.
+- **RPE (deliberate deviation).** The locked Active Workout design has no RPE
+  field; Fit40 restores one deliberately: an optional "RPE (optional)" input
+  (1–10) in the set logger, an optional prefilled RPE editor in each
+  logged-set row, and an "@ RPE n" suffix on rows where an RPE was captured.
+  Leaving it empty keeps the locked look — no RPE is shown or stored.
 - **Active Workout bottom bar.** The session page currently shows the shell
   tab bar; the design's bottom action bar (Complete workout) lands with the
   Active Workout slice.

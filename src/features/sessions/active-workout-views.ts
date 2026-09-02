@@ -32,7 +32,8 @@ export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming';
 
 export interface SessionSetRowView {
   readonly setNumber: number;
-  /** e.g. "52.5 kg × 10", "10 reps", "40s", "10 kg × 40s". */
+  /** e.g. "52.5 kg × 10 @ RPE 7", "40s", "10 kg × 40s @ RPE 8". The RPE
+   * suffix is appended only when the set captured an RPE. */
   readonly valueLabel: string;
 }
 
@@ -91,7 +92,8 @@ function formatSetRowView(set: WorkoutSessionSetDto): SessionSetRowView {
 
   return {
     setNumber: set.setNumber,
-    valueLabel,
+    // Surface a captured RPE on the row; omit the suffix entirely when unset.
+    valueLabel: set.rpe === null ? valueLabel : `${valueLabel} @ RPE ${set.rpe}`,
   };
 }
 

@@ -29,6 +29,32 @@ describe('logSetSchema', () => {
     expect(r.data.weightKg).toBeNull();
     expect(r.data.rpe).toBeNull();
   });
+
+  it('coerces numeric-string weight and rpe the way FormData delivers them', () => {
+    const r = logSetSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, type: 'reps', reps: '10', weightKg: '52.5', rpe: '7' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.weightKg).toBe(52.5);
+    expect(r.data.rpe).toBe(7);
+    expect(r.data.type === 'reps' && r.data.reps === 10).toBe(true);
+  });
+
+  it('treats an absent rpe field as null', () => {
+    const r = logSetSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, type: 'reps', reps: '10', weightKg: null });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.rpe).toBeNull();
+  });
+
+  it('rejects an out-of-range numeric-string rpe', () => {
+    const r = logSetSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, type: 'reps', reps: '10', weightKg: null, rpe: '11' });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a non-numeric weight string instead of NaN-passing it', () => {
+    const r = logSetSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, type: 'reps', reps: '10', weightKg: 'not-a-number', rpe: null });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe('deleteSetSchema', () => {

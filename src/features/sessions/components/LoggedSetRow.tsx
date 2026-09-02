@@ -30,11 +30,12 @@ interface LoggedSetRowProps {
 /**
  * One logged set row of the Active Workout screen (locked design): accent
  * check circle, "Set N" and the value line, with Edit/Delete actions.
- * Editing swaps in a small inline form (weight, reps/seconds); the CONTRACT
- * of update/delete (ownership, optimistic version handling, revalidation) is
- * unchanged from the pre-redesign row. The locked design has no RPE editor;
- * the set's persisted RPE is passed through on update so editing never
- * silently wipes it.
+ * Editing swaps in a small inline form (weight, reps/seconds, optional
+ * prefilled RPE); the CONTRACT of update/delete (ownership, optimistic
+ * version handling, revalidation) is unchanged from the pre-redesign row.
+ * The optional RPE editor is prefilled from the persisted set, so editing
+ * never silently wipes stored RPE, and clearing the field clears it
+ * deliberately (empty normalizes to null).
  *
  * The edit inputs are CONTROLLED (initialized from the set's own values) for
  * the same reason as the logger: React 19 resets form DOM after the action
@@ -53,6 +54,7 @@ export function LoggedSetRow({
   const router = useRouter();
   const weightId = useId();
   const countId = useId();
+  const rpeId = useId();
 
   const [editing, setEditing] = useState(false);
   // Controlled edit values (initialized from the set's persisted values):
@@ -62,6 +64,7 @@ export function LoggedSetRow({
   const [editCount, setEditCount] = useState(
     set.type === 'reps' ? String(set.reps) : String(set.durationSeconds),
   );
+  const [editRpe, setEditRpe] = useState(set.rpe === null ? '' : String(set.rpe));
 
   async function updateAction(
     prev: SessionActionState,
@@ -74,9 +77,11 @@ export function LoggedSetRow({
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
-    // No RPE editor in the locked design; pass the persisted value through
-    // (empty string normalizes to null) so an edit never wipes stored RPE.
-    formData.set('rpe', set.rpe === null ? '' : String(set.rpe));
+    // Optional RPE editor: submit the entered value; an empty field
+    // normalizes to null so clearing RPE is a deliberate user action.
+    if (editRpe !== '') {
+      formData.set('rpe', editRpe);
+    }
     const state = await updateSetAction(formData);
     if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
       router.refresh();
@@ -128,6 +133,17 @@ export function LoggedSetRow({
               required
               value={editCount}
               onChange={setEditCount}
+            />
+            <EditField
+              id={rpeId}
+              label="RPE (optional)"
+              name="rpe"
+              type="number"
+              min={1}
+              max={10}
+              step={1}
+              value={editRpe}
+              onChange={setEditRpe}
             />
           </div>
           <div className="flex items-center gap-3">

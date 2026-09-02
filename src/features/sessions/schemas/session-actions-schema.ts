@@ -9,15 +9,21 @@ export const sessionIdSchema = z.string().min(1);
 export const exerciseOrderSchema = z.coerce.number().int().min(1);
 export const setNumberSchema = z.coerce.number().int().min(1);
 
-const weightKgSchema = z.preprocess(
-  (v) => (v === '' ? null : v),
-  z.number().finite().min(0).nullable(),
-);
+/**
+ * Optional decimal load. Browser FormData delivers numeric strings ("52.5"),
+ * so coerce before validating; '' or an absent field normalizes to null (no
+ * load), and a non-numeric string fails validation.
+ */
+const toNullableNumber = (v: unknown): unknown =>
+  v === '' || v === null || v === undefined ? null : typeof v === 'string' ? Number(v) : v;
 
-const rpeSchema = z.preprocess(
-  (v) => (v === '' ? null : v),
-  z.number().int().min(1).max(10).nullable(),
-);
+const weightKgSchema = z.preprocess(toNullableNumber, z.number().finite().min(0).nullable());
+
+/**
+ * Optional RPE (1–10). Same FormData coercion as weight; an out-of-range or
+ * non-numeric value fails validation rather than being silently dropped.
+ */
+const rpeSchema = z.preprocess(toNullableNumber, z.number().int().min(1).max(10).nullable());
 
 export const repSetInputSchema = z.object({
   sessionId: sessionIdSchema,

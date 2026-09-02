@@ -22,9 +22,17 @@ const TABS: ReadonlyArray<{
  * four tabs (icon 22 + Inter 12 label), active tab in accent. Fixed to the
  * viewport bottom with safe-area padding; hidden at md and up. Client-only
  * because active state needs usePathname.
+ *
+ * The Active Workout screen (any `/session` route) hides the tab bar and
+ * shows the screen's own finish action bar in the same position instead —
+ * the locked mobile frame for that screen carries only the finish bar.
  */
 export function MobileTabBar() {
   const pathname = usePathname();
+
+  if (pathname.endsWith('/session')) {
+    return null;
+  }
 
   return (
     <nav

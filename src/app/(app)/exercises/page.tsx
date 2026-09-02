@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import type { Metadata } from 'next';
 
+import { PageContainer } from '@/components/shared/PageContainer';
 import { listExercisesUseCase } from '@/features/exercises/services';
 import { ExerciseFilters } from '@/features/exercises/components/ExerciseFilters';
 import { ExerciseList } from '@/features/exercises/components/ExerciseList';
@@ -20,25 +21,32 @@ export default async function ExercisesPage({ searchParams }: ExercisesPageProps
   const exercises = await listExercisesUseCase.execute(criteria);
 
   return (
-    <main className="container mx-auto flex-1 px-4 py-8 sm:py-12">
-      <div className="mb-8 space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Exercise Catalog
+    <PageContainer className="pt-10 md:pt-10">
+      <header className="mb-8 space-y-2">
+        <h1 className="font-display text-[26px] font-bold tracking-tight text-foreground md:text-4xl">
+          Exercises
         </h1>
-        <p className="max-w-2xl text-muted-foreground">
-          Browse exercises by equipment, muscle group, or difficulty. Filter
-          using the controls below; the URL updates automatically so you can
-          share your selections.
+        <p className="max-w-2xl text-sm text-ink-2 md:text-base">
+          Browse the exercise library and filter by equipment, muscle group, or
+          difficulty. Filters are reflected in the URL, so any view can be
+          bookmarked or shared.
         </p>
-      </div>
+      </header>
 
       <div className="mb-8">
-        <Suspense fallback={<div className="h-40 rounded-xl border border-dashed border-border" />}>
+        <Suspense
+          fallback={
+            <div
+              aria-hidden="true"
+              className="h-40 rounded-card border border-border bg-surface-2/50"
+            />
+          }
+        >
           <ExerciseFilters />
         </Suspense>
       </div>
 
       <ExerciseList exercises={exercises} />
-    </main>
+    </PageContainer>
   );
 }

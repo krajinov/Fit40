@@ -9,12 +9,16 @@ import type {
   EquipmentType,
   MovementPattern,
   MuscleGroup,
+  PhysicalConsideration,
+  SuitabilityLevel,
 } from '@/domain/types/exercise';
 import {
   Difficulty as DifficultyType,
   EquipmentType as EquipmentTypeEnum,
   MovementPattern as MovementPatternType,
   MuscleGroup as MuscleGroupType,
+  PhysicalConsideration as PhysicalConsiderationType,
+  SuitabilityLevel as SuitabilityLevelType,
 } from '@/domain/types/exercise';
 
 export const MUSCLE_GROUP_LABELS: Record<MuscleGroup, string> = {
@@ -83,3 +87,16 @@ export const DIFFICULTY_OPTIONS: FilterOption<Difficulty>[] =
     value: value as Difficulty,
     label,
   }));
+
+export const PHYSICAL_CONSIDERATION_LABELS: Record<PhysicalConsideration, string> = {
+  [PhysicalConsiderationType.KneeSensitive]: 'Knee sensitivity',
+  [PhysicalConsiderationType.LowerBackSensitive]: 'Lower back sensitivity',
+  [PhysicalConsiderationType.ShoulderSensitive]: 'Shoulder sensitivity',
+  [PhysicalConsiderationType.LimitedMobility]: 'Limited mobility',
+};
+
+export const SUITABILITY_LABELS: Record<SuitabilityLevel, string> = {
+  [SuitabilityLevelType.Suitable]: 'Suitable',
+  [SuitabilityLevelType.Caution]: 'Use caution',
+  [SuitabilityLevelType.Unsuitable]: 'May be unsuitable',
+};

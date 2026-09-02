@@ -123,8 +123,8 @@ data and pass route-specific `?next=` deep links. The shell calls
   design (section cards 01-05, desktop section index, radio cards, chips,
   segmented day/session/unit controls). Dashboard, Program and Workout
   Detail screens are migrated to the locked design (see below). Active
-  Workout and the Exercises screens still use pre-redesign markup; each
-  migrates in its own slice using these primitives.
+  Workout and the Exercises screens have since migrated in their own
+  slices using these primitives.
 
 ## Screen notes: Dashboard & Program (Slice 3)
 
@@ -236,4 +236,38 @@ anonymous → "Sign in to start" (login deep link to the session page),
 not-enrolled → "Join program to start", none → "Start workout",
 in-progress → "Resume workout", completed → "View session". The secondary
 "View program" CTA is desktop-only (locked mobile frame omits it).
+
+## Screen notes: Exercises (Slice 6)
+
+Restyled onto the locked foundation; public access, route URLs, and the
+URL-driven filter contract are unchanged.
+
+- **Catalog `/exercises`:** PageContainer shell + Sora page header (same
+  pattern as the programs page). Filters render as locked `Chip`s inside a
+  single card section: three fieldsets (Equipment / Muscle group /
+  Difficulty) that stack on mobile and form a 3-column grid from `md`.
+  Filtering behavior is byte-identical to the previous screen — instant
+  `router.replace` on the `equipment` / `muscle` / `difficulty` params
+  (multi-value), Clear-filters button only when a filter is active.
+  `ExerciseFilters` remains the only client component on the screen.
+- **Exercise card:** mirrors ProgramCard — accent primary-muscle badge +
+  neutral difficulty badge, Sora title link, footer grid with equipment and
+  movement pattern. Shows exactly the `ExerciseSummaryDto` fields (name,
+  primary muscle, equipment, difficulty, movement pattern); nothing
+  invented. 1/2/3-column grid; `aria-live` result count preserved;
+  empty results use the shared `EmptyState`.
+- **Detail `/exercises/[slug]`:** breadcrumb nav (Exercises / name)
+  replaces the duplicated "← Back to catalog" links; name + description
+  header, then "Muscles worked" and "At a glance" `SectionCard`s rendered
+  as definition lists (deliberately not a badge wall), and a conditional
+  "Training guidance" card listing consideration/suitability pairs as
+  neutral badges with icon + text (level never conveyed by color alone).
+  No image/video field exists on the DTO, so no media is rendered.
+- **Shared `Chip`:** gained an optional controlled variant (`checked` +
+  `onCheckedChange`) so URL-driven filters can reuse the locked chip; the
+  profile's uncontrolled form usage is unchanged.
+- `exercise-labels.ts` adds `PHYSICAL_CONSIDERATION_LABELS` and
+  `SUITABILITY_LABELS` (label-coverage unit tested). No Domain/Application/
+  Infrastructure changes were needed: the DTOs already expose every field
+  presented.
 

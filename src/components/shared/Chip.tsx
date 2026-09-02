@@ -1,4 +1,5 @@
 import { Check } from 'lucide-react';
+import type { ChangeEvent } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -8,16 +9,36 @@ import { cn } from '@/lib/utils';
  * Built on a native checkbox so it participates in regular <form> submissions
  * (including GET filter forms), needs zero client JavaScript, and keeps full
  * keyboard/screen-reader support. Selection styling uses :has(:checked).
+ *
+ * Two usage modes:
+ * - Uncontrolled (default): pass `defaultChecked` for form-submission usage.
+ * - Controlled: pass `checked` + `onCheckedChange` for URL-driven filters
+ *   that update state outside the form (e.g. via the router).
  */
 export interface ChipProps {
   readonly name: string;
   readonly value: string;
   readonly label: string;
+  /** Uncontrolled initial state. Ignored when `checked` is provided. */
   readonly defaultChecked?: boolean;
+  /** Controlled checked state (URL-driven filter usage). */
+  readonly checked?: boolean;
+  /** Change handler for controlled usage. */
+  readonly onCheckedChange?: (checked: boolean) => void;
   readonly className?: string;
 }
 
-export function Chip({ name, value, label, defaultChecked, className }: ChipProps) {
+export function Chip({
+  name,
+  value,
+  label,
+  defaultChecked,
+  checked,
+  onCheckedChange,
+  className,
+}: ChipProps) {
+  const isControlled = checked !== undefined;
+
   return (
     <label
       className={cn(
@@ -32,7 +53,14 @@ export function Chip({ name, value, label, defaultChecked, className }: ChipProp
         type="checkbox"
         name={name}
         value={value}
-        defaultChecked={defaultChecked}
+        {...(isControlled
+          ? {
+              checked,
+              onChange: (event: ChangeEvent<HTMLInputElement>) => {
+                onCheckedChange?.(event.target.checked);
+              },
+            }
+          : { defaultChecked })}
         className="sr-only"
       />
       <span

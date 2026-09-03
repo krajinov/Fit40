@@ -112,7 +112,7 @@ src/
 ├── types/                      # Shared TypeScript types
 │
 └── styles/                     # Global styles (minimal)
-    └── globals.css
+    └── globals.css             # NOTE: actually located at src/app/globals.css
 
 docs/                           # Architecture and convention documentation
 tests/                          # Test files (mirrors src/ structure)
@@ -516,6 +516,7 @@ components/ → lib/ (utilities only)
 ## References
 
 - `docs/architecture.md` — Full architecture documentation
+- `docs/ui.md` — Design foundation: tokens, typography, component inventory, shell
 - `docs/domain-modeling.md` — Domain modeling rules
 - `docs/coding-conventions.md` — TypeScript, React, Next.js conventions
 - `docs/database.md` — Database and persistence rules

@@ -1,12 +1,12 @@
-import Link from 'next/link';
-
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
-import { EnrollmentPanel } from '@/features/enrollment/components/EnrollmentPanel';
-import { DIFFICULTY_LABELS } from '@/features/exercises/exercise-labels';
-import {
-  PROGRAM_GOAL_LABELS,
-} from '@/features/programs/program-labels';
+import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
+import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
+import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
+import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
+import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
+import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
+import type { ProgramWeekStatus } from '@/features/programs/components/ProgramWeekSection';
 
 interface ProgramDetailProps {
   readonly program: ProgramDetailDto;
@@ -15,107 +15,136 @@ interface ProgramDetailProps {
    * browsing anonymously (no enrollment controls or progress markers then).
    */
   readonly enrollment: ProgramEnrollmentViewDto | null;
+  /**
+   * Three-valued next-workout state of the enrollment (shared with the
+   * dashboard). Null when anonymous or not enrolled — no enrollment
+   * controls or up-next area then.
+   */
+  readonly nextWorkoutPreview: NextWorkoutPreviewState | null;
 }
 
-function Badge({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-      {children}
-    </span>
-  );
+/**
+ * Derives a week's status from the enrollment: weeks before the next
+ * incomplete workout are completed, its own week is in progress, later ones
+ * upcoming. A null next workout (everything complete) marks all weeks
+ * completed. Anonymous or not-enrolled visitors see every week upcoming.
+ */
+function weekStatus(
+  weekNumber: number,
+  enrollment: ProgramEnrollmentViewDto | null,
+): ProgramWeekStatus {
+  if (enrollment === null || enrollment.status !== 'enrolled') {
+    return 'upcoming';
+  }
+
+  const next = enrollment.nextWorkout;
+  if (next === null) {
+    return 'completed';
+  }
+  if (weekNumber < next.weekNumber) {
+    return 'completed';
+  }
+  if (weekNumber === next.weekNumber) {
+    return 'in-progress';
+  }
+  return 'upcoming';
 }
 
-function WorkoutLink({
-  programSlug,
-  weekNumber,
-  order,
-  name,
-  done,
-}: {
-  readonly programSlug: string;
-  readonly weekNumber: number;
-  readonly order: number;
-  readonly name: string;
-  readonly done: boolean;
-}) {
-  return (
-    <Link
-      href={`/programs/${programSlug}/weeks/${weekNumber}/workouts/${order}`}
-      className="block rounded-lg border border-border p-3 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span className="font-medium">{name}</span>
-      <span className="ml-2 text-xs text-muted-foreground">
-        Workout {order}
-      </span>
-      {done && (
-        <span className="ml-2 inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-          Done
-        </span>
-      )}
-    </Link>
-  );
-}
-
-export function ProgramDetail({ program, enrollment }: ProgramDetailProps) {
+/**
+ * Program detail screen (locked design): header, the visitor-specific
+ * enrollment area, and the weekly schedule. Composition only — all data
+ * arrives as DTOs/props from the page's use cases.
+ */
+export function ProgramDetail({
+  program,
+  enrollment,
+  nextWorkoutPreview,
+}: ProgramDetailProps) {
   const completedIds =
     enrollment !== null && enrollment.status === 'enrolled'
       ? new Set<string>(enrollment.completedScheduledWorkoutIds)
       : new Set<string>();
+  const upNextKey =
+    enrollment !== null &&
+    enrollment.status === 'enrolled' &&
+    enrollment.nextWorkout !== null
+      ? `${enrollment.nextWorkout.weekNumber}-${enrollment.nextWorkout.workoutOrder}`
+      : null;
+
+  const availableWorkout =
+    nextWorkoutPreview !== null && nextWorkoutPreview.status === 'available'
+      ? nextWorkoutPreview.workout
+      : null;
+
+  const metaLabel =
+    availableWorkout === null
+      ? ''
+      : `${availableWorkout.exerciseCount} ${availableWorkout.exerciseCount === 1 ? 'exercise' : 'exercises'} · about ${availableWorkout.estimatedMinutes} minutes`;
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <Badge>{DIFFICULTY_LABELS[program.difficulty]}</Badge>
-          <Badge>{PROGRAM_GOAL_LABELS[program.goal]}</Badge>
-          <Badge>{program.durationWeeks} weeks</Badge>
-          <Badge>{program.workoutsPerWeek} workouts/week</Badge>
-        </div>
+    <div className="flex flex-col gap-8">
+      <ProgramDetailHeader program={program} />
 
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          {program.name}
-        </h1>
-
-        <p className="max-w-3xl text-lg text-muted-foreground">
-          {program.description}
-        </p>
-      </div>
-
-      {enrollment !== null && (
-        <EnrollmentPanel programSlug={program.slug} enrollment={enrollment} />
+      {enrollment === null ? (
+        <AnonymousVisitorCard programPath={`/programs/${program.slug}`} />
+      ) : enrollment.status === 'not-enrolled' ? (
+        <section
+          aria-label="Join this program"
+          className="flex flex-col gap-3 rounded-card border border-border bg-card p-5 md:flex-row md:items-center md:justify-between md:p-8"
+        >
+          <div className="flex flex-col gap-1">
+            <h2 className="font-display text-lg font-semibold text-foreground">
+              Join this program
+            </h2>
+            <p className="max-w-lg text-sm text-ink-2">
+              Your progress, completed workouts and next workout are tracked from the
+              moment you join.
+            </p>
+          </div>
+          <JoinProgramButton
+            programSlug={program.slug}
+            className="w-full md:w-auto md:shrink-0"
+          />
+        </section>
+      ) : (
+        <EnrolledProgramPanel
+          program={program}
+          enrollment={enrollment}
+          nextWorkout={
+            nextWorkoutPreview === null
+              ? null
+              : nextWorkoutPreview.status === 'available'
+                ? {
+                    weekNumber: nextWorkoutPreview.workout.weekNumber,
+                    workoutOrder: nextWorkoutPreview.workout.workoutOrder,
+                    workoutName: nextWorkoutPreview.workout.workoutName,
+                    metaLabel,
+                    sessionState: nextWorkoutPreview.workout.sessionState,
+                  }
+                : nextWorkoutPreview.status === 'unavailable'
+                  ? 'unavailable'
+                  : null
+          }
+        />
       )}
 
-      <div className="space-y-6">
-        <h2 className="text-xl font-semibold tracking-tight">Weekly schedule</h2>
+      <div className="flex flex-col gap-4 md:gap-6">
+        <h2 className="font-display text-[22px] font-bold tracking-tight text-foreground md:text-2xl">
+          Weekly schedule
+        </h2>
 
         {program.weeks.map((week) => (
-          <section
+          <ProgramWeekSection
             key={week.weekNumber}
-            className="space-y-3"
-            aria-labelledby={`week-${week.weekNumber}-heading`}
-          >
-            <h3
-              id={`week-${week.weekNumber}-heading`}
-              className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Week {week.weekNumber}
-            </h3>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {week.scheduledWorkouts.map((scheduled) => (
-                <WorkoutLink
-                  key={scheduled.scheduledWorkoutId}
-                  programSlug={program.slug}
-                  weekNumber={week.weekNumber}
-                  order={scheduled.order}
-                  name={scheduled.workoutName}
-                  done={completedIds.has(scheduled.scheduledWorkoutId)}
-                />
-              ))}
-            </div>
-          </section>
+            programSlug={program.slug}
+            week={week}
+            status={weekStatus(week.weekNumber, enrollment)}
+            completedIds={completedIds}
+            upNextKey={upNextKey}
+          />
         ))}
       </div>
     </div>
   );
 }
+

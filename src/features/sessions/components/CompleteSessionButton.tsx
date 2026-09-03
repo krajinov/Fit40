@@ -3,6 +3,9 @@
 import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
 import { completeSessionAction } from '@/features/sessions/actions/complete-session';
 import { SessionActionError } from '@/features/sessions/components/SessionActionError';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
@@ -14,13 +17,24 @@ interface CompleteSessionButtonProps {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  /** Full-width rendering for the mobile sticky bottom bar. */
+  readonly fullWidth?: boolean;
+  readonly className?: string;
 }
 
+/**
+ * "Finish workout" primary action (locked design). In-progress sessions only;
+ * the completion CONTRACT (validation, optimistic version handling,
+ * revalidation, redirect-free Result) is unchanged from the pre-redesign
+ * button.
+ */
 export function CompleteSessionButton({
   sessionId,
   programSlug,
   weekNumber,
   workoutOrder,
+  fullWidth = false,
+  className,
 }: CompleteSessionButtonProps) {
   const router = useRouter();
 
@@ -42,14 +56,14 @@ export function CompleteSessionButton({
   const [state, formAction, pending] = useActionState(submitAction, initialState);
 
   return (
-    <div className="flex flex-col items-start gap-2">
-      <form action={formAction}>
+    <div className={cn('flex flex-col gap-2', fullWidth && 'w-full', className)}>
+      <form action={formAction} className={fullWidth ? 'w-full' : undefined}>
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center justify-center rounded-md bg-green-600 px-6 py-3 text-sm font-medium text-white hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className={cn(buttonVariants(), fullWidth && 'w-full')}
         >
-          {pending ? 'Completing…' : 'Complete workout'}
+          {pending ? 'Finishing…' : 'Finish workout'}
         </button>
       </form>
       {!state.ok && <SessionActionError error={state.error} />}

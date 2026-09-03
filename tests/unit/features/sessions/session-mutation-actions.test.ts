@@ -214,6 +214,91 @@ mutationActionTests(
   },
 );
 
+describe('set FormData round-trips with optional RPE', () => {
+  beforeEach(() => {
+    vi.mocked(logSessionSetUseCase.execute).mockReset();
+    vi.mocked(updateSessionSetUseCase.execute).mockReset();
+    vi.mocked(revalidatePath).mockClear();
+    requireUserMock.mockReset();
+    requireUserMock.mockResolvedValue(SESSION_USER);
+  });
+
+  it('logSetAction coerces browser numeric strings and normalizes an empty RPE to null', async () => {
+    vi.mocked(logSessionSetUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {} as WorkoutSessionDto,
+    });
+
+    const fd = makeLogSetFormData();
+    fd.set('weightKg', '52.5');
+    fd.set('rpe', '');
+
+    const state = await logSetAction(fd);
+
+    expect(state).toEqual({ ok: true });
+    expect(logSessionSetUseCase.execute).toHaveBeenCalledWith({
+      sessionId: 's-1',
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 52.5,
+      rpe: null,
+      userId: SESSION_USER.id,
+    });
+  });
+
+  it('logSetAction forwards an entered RPE as a number', async () => {
+    vi.mocked(logSessionSetUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {} as WorkoutSessionDto,
+    });
+
+    const fd = makeLogSetFormData();
+    fd.set('weightKg', '52.5');
+    fd.set('rpe', '7');
+
+    await logSetAction(fd);
+
+    expect(logSessionSetUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ weightKg: 52.5, rpe: 7, userId: SESSION_USER.id }),
+    );
+  });
+
+  it('updateSetAction accepts a changed RPE', async () => {
+    vi.mocked(updateSessionSetUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {} as WorkoutSessionDto,
+    });
+
+    const fd = makeUpdateSetFormData();
+    fd.set('weightKg', '50');
+    fd.set('rpe', '8');
+
+    await updateSetAction(fd);
+
+    expect(updateSessionSetUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ setNumber: 1, weightKg: 50, rpe: 8, userId: SESSION_USER.id }),
+    );
+  });
+
+  it('updateSetAction normalizes a cleared RPE to null', async () => {
+    vi.mocked(updateSessionSetUseCase.execute).mockResolvedValue({
+      ok: true,
+      data: {} as WorkoutSessionDto,
+    });
+
+    const fd = makeUpdateSetFormData();
+    fd.set('weightKg', '');
+    fd.set('rpe', '');
+
+    await updateSetAction(fd);
+
+    expect(updateSessionSetUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ setNumber: 1, weightKg: null, rpe: null }),
+    );
+  });
+});
+
 describe('completeSessionAction revalidation target', () => {
   beforeEach(() => {
     vi.mocked(completeWorkoutSessionUseCase.execute).mockReset();

@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import { Chip } from '@/components/shared/Chip';
 import { Button } from '@/components/ui/button';
 import {
   DIFFICULTY_OPTIONS,
@@ -9,9 +10,11 @@ import {
   MUSCLE_GROUP_OPTIONS,
 } from '@/features/exercises/exercise-labels';
 
+type FilterParam = 'equipment' | 'muscle' | 'difficulty';
+
 function buildUpdatedSearchParams(
   current: URLSearchParams,
-  group: 'equipment' | 'muscle' | 'difficulty',
+  group: FilterParam,
   value: string,
   checked: boolean,
 ): URLSearchParams {
@@ -38,15 +41,15 @@ function FilterGroup({
   selected,
 }: {
   readonly title: string;
-  readonly param: 'equipment' | 'muscle' | 'difficulty';
-  readonly options: { readonly value: string; readonly label: string }[];
+  readonly param: FilterParam;
+  readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
   readonly selected: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  function handleChange(value: string, checked: boolean) {
+  function handleCheckedChange(value: string, checked: boolean) {
     const next = buildUpdatedSearchParams(
       new URLSearchParams(searchParams),
       param,
@@ -58,31 +61,19 @@ function FilterGroup({
   }
 
   return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium text-foreground">{title}</legend>
-      <div className="flex flex-col gap-1.5">
-        {options.map((option) => {
-          const inputId = `${param}-${option.value}`;
-          const isChecked = selected.includes(option.value);
-
-          return (
-            <label
-              key={option.value}
-              htmlFor={inputId}
-              className="flex cursor-pointer items-center gap-2 rounded-md py-1 pr-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <input
-                id={inputId}
-                type="checkbox"
-                value={option.value}
-                checked={isChecked}
-                onChange={(event) => handleChange(option.value, event.target.checked)}
-                className="size-4 rounded border-border text-primary accent-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              />
-              <span>{option.label}</span>
-            </label>
-          );
-        })}
+    <fieldset className="min-w-0">
+      <legend className="mb-3 text-sm font-semibold text-foreground">{title}</legend>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <Chip
+            key={option.value}
+            name={param}
+            value={option.value}
+            label={option.label}
+            checked={selected.includes(option.value)}
+            onCheckedChange={(checked) => handleCheckedChange(option.value, checked)}
+          />
+        ))}
       </div>
     </fieldset>
   );
@@ -107,8 +98,11 @@ export function ExerciseFilters() {
   }
 
   return (
-    <section aria-label="Exercise filters" className="space-y-4">
-      <div className="grid gap-6 sm:grid-cols-3">
+    <section
+      aria-label="Exercise filters"
+      className="rounded-card border border-border bg-card p-5 md:p-6"
+    >
+      <div className="flex flex-col gap-5 md:grid md:grid-cols-3 md:gap-6">
         <FilterGroup
           title="Equipment"
           param="equipment"
@@ -129,9 +123,11 @@ export function ExerciseFilters() {
         />
       </div>
       {hasFilters && (
-        <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
-          Clear filters
-        </Button>
+        <div className="mt-5 border-t border-border pt-4 md:mt-6">
+          <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        </div>
       )}
     </section>
   );

@@ -3,6 +3,9 @@
 import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
 import { startSessionAction } from '@/features/sessions/actions/start-session';
 import { SessionActionError } from '@/features/sessions/components/SessionActionError';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
@@ -13,12 +16,19 @@ interface StartSessionButtonProps {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  readonly fullWidth?: boolean;
 }
 
+/**
+ * "Start workout" primary action. The CONTRACT is unchanged: the user id
+ * comes from the trusted session, a concurrent start that wins the race
+ * (SESSION_ALREADY_EXISTS) reloads the page to load the existing session.
+ */
 export function StartSessionButton({
   programSlug,
   weekNumber,
   workoutOrder,
+  fullWidth = false,
 }: StartSessionButtonProps) {
   const router = useRouter();
 
@@ -40,12 +50,12 @@ export function StartSessionButton({
   const [state, formAction, pending] = useActionState(submitAction, initialState);
 
   return (
-    <div className="flex flex-col items-start gap-2">
-      <form action={formAction}>
+    <div className={cn('flex flex-col items-start gap-2', fullWidth && 'w-full')}>
+      <form action={formAction} className={fullWidth ? 'w-full' : undefined}>
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className={cn(buttonVariants(), fullWidth && 'w-full')}
         >
           {pending ? 'Starting…' : 'Start workout'}
         </button>

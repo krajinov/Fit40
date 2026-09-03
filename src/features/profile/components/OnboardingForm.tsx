@@ -4,8 +4,7 @@ import { useActionState } from 'react';
 
 import { completeOnboardingAction } from '@/features/profile/actions/complete-onboarding';
 import { ProfileActionErrorMessage } from '@/features/profile/components/ProfileActionError';
-import { ProfileFormFields } from '@/features/profile/components/ProfileFormFields';
-import { ProfilePreferenceGroups } from '@/features/profile/components/ProfilePreferenceGroups';
+import { ProfileFormSections } from '@/features/profile/components/ProfileFormSections';
 import { ProfileSubmitButton } from '@/features/profile/components/ProfileSubmitButton';
 import {
   EMPTY_PROFILE_FORM_VALUES,
@@ -15,6 +14,11 @@ import type { ProfileActionState } from '@/features/profile/types/profile-action
 
 const initialState: ProfileActionState = { ok: true };
 
+/**
+ * Onboarding shares the exact profile field set with /profile (one schema,
+ * one action contract) but keeps its own submit label, no cancel action and
+ * the completion redirect performed by the server action.
+ */
 export function OnboardingForm() {
   async function submitAction(
     _prev: ProfileActionState,
@@ -28,17 +32,18 @@ export function OnboardingForm() {
   const fieldErrors = state.ok ? {} : (state.error.fieldErrors ?? {});
 
   return (
-    <form action={formAction} className="space-y-6" noValidate>
-      <ProfileFormFields values={values} fieldErrors={fieldErrors} />
-      <ProfilePreferenceGroups
-        availableEquipment={values.availableEquipment}
-        physicalConsiderations={values.physicalConsiderations}
-        fieldErrors={fieldErrors}
-      />
+    <form action={formAction} noValidate>
+      <ProfileFormSections values={values} fieldErrors={fieldErrors} />
 
-      {!state.ok && <ProfileActionErrorMessage error={state.error} />}
+      <div className="pt-6 md:pt-8">
+        {!state.ok && <ProfileActionErrorMessage error={state.error} className="mb-6" />}
 
-      <ProfileSubmitButton label="Finish setup" pendingLabel="Saving…" />
+        <ProfileSubmitButton
+          label="Finish setup"
+          pendingLabel="Saving…"
+          className="w-full md:w-auto"
+        />
+      </div>
     </form>
   );
 }

@@ -2,6 +2,8 @@
 
 import { useActionState, useState } from 'react';
 
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { leaveProgramAction } from '@/features/enrollment/actions/leave-program';
 import { EnrollmentActionError } from '@/features/enrollment/components/EnrollmentActionError';
 import type { EnrollmentActionState } from '@/features/enrollment/types/enrollment-action-state';
@@ -10,6 +12,7 @@ const initialState: EnrollmentActionState = { ok: true };
 
 interface LeaveProgramButtonProps {
   readonly programSlug: string;
+  readonly className?: string;
 }
 
 /**
@@ -18,7 +21,7 @@ interface LeaveProgramButtonProps {
  * cancel controls, the second submits the mutation. No user id ever travels
  * in the form data.
  */
-export function LeaveProgramButton({ programSlug }: LeaveProgramButtonProps) {
+export function LeaveProgramButton({ programSlug, className }: LeaveProgramButtonProps) {
   const [confirming, setConfirming] = useState(false);
 
   async function submitAction(
@@ -36,7 +39,11 @@ export function LeaveProgramButton({ programSlug }: LeaveProgramButtonProps) {
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          buttonVariants({ variant: 'ghost', size: 'sm' }),
+          'text-ink-3 hover:text-destructive',
+          className,
+        )}
       >
         Leave plan
       </button>
@@ -44,7 +51,12 @@ export function LeaveProgramButton({ programSlug }: LeaveProgramButtonProps) {
   }
 
   return (
-    <div className="flex w-full flex-col items-start gap-3 rounded-lg border border-border bg-muted/40 p-4">
+    <div
+      className={cn(
+        'flex w-full flex-col items-start gap-3 rounded-control border border-border bg-surface-2/40 p-4',
+        className,
+      )}
+    >
       <p className="text-sm text-foreground">
         Leave this program? Your progress in this program will be reset. Your logged
         workouts are kept in your history.
@@ -54,7 +66,7 @@ export function LeaveProgramButton({ programSlug }: LeaveProgramButtonProps) {
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center justify-center rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className={buttonVariants({ variant: 'destructive', size: 'sm' })}
           >
             {pending ? 'Leaving…' : 'Confirm leave'}
           </button>
@@ -63,7 +75,7 @@ export function LeaveProgramButton({ programSlug }: LeaveProgramButtonProps) {
           type="button"
           onClick={() => setConfirming(false)}
           disabled={pending}
-          className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className={buttonVariants({ variant: 'ghost', size: 'sm' })}
         >
           Cancel
         </button>

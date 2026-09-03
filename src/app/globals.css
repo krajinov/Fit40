@@ -7,9 +7,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-sora);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,6 +38,21 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* Fit40 design-native color tokens (1:1 with the locked Pencil variables). */
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-border-strong: var(--border-strong);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-border: var(--accent-tint-border);
+  --color-amber-tint: var(--amber-tint);
+  --color-amber-border: var(--amber-border);
+  --color-amber-strong: var(--amber-strong);
+
+  /* shadcn-compatible computed radius scale (base unchanged). */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -46,43 +60,68 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Explicit Fit40 radius tokens (traceable to the locked Pencil system). */
+  --radius-control: 0.75rem;  /* 12px: buttons, inputs, chips, radio cards */
+  --radius-callout: 0.875rem; /* 14px: recommendation callouts */
+  --radius-card: 1.25rem;     /* 20px: section cards, empty states */
+  --radius-pill: 999px;       /* badges, avatars, pills */
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Fit40 palette (locked design). Pencil variable noted per line. */
+  --background: #f7f6f2;            /* $bg */
+  --foreground: #1d1f1a;            /* $ink */
+  --card: #ffffff;                  /* $surface */
+  --card-foreground: #1d1f1a;       /* $ink */
+  --popover: #ffffff;               /* $surface */
+  --popover-foreground: #1d1f1a;   /* $ink */
+  --primary: #2e6b4f;               /* $accent (deep green) */
+  --primary-foreground: #ffffff;
+  --secondary: #f0eee7;             /* $surface-2 */
+  --secondary-foreground: #1d1f1a;  /* $ink */
+  --muted: #f0eee7;                 /* $surface-2 */
+  --muted-foreground: #575b52;      /* $ink-2 */
+  --accent: #e9f1eb;                /* $accent-tint */
+  --accent-foreground: #245640;     /* $accent-strong */
+  --destructive: #b4452f;           /* $danger */
+  --border: #e5e2d9;                /* $border */
+  --input: #d2cfc4;                 /* $border-strong (control borders) */
+  --ring: #2e6b4f;                  /* focus ring = $accent */
+  --chart-1: #2e6b4f;
+  --chart-2: #575b52;
+  --chart-3: #8b8f84;
+  --chart-4: #245640;
+  --chart-5: #d2cfc4;
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1d1f1a;
+  --sidebar-primary: #2e6b4f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e9f1eb;
+  --sidebar-accent-foreground: #245640;
+  --sidebar-border: #e5e2d9;
+  --sidebar-ring: #2e6b4f;
+
+  /* Fit40 design-native tokens not covered by the shadcn semantic set. */
+  --surface-2: #f0eee7;
+  --ink: #1d1f1a;
+  --ink-2: #575b52;
+  --ink-3: #8b8f84;
+  --border-strong: #d2cfc4;
+  --accent-strong: #245640;
+  --accent-tint: #e9f1eb;
+  --accent-tint-border: #cbdfd2;
+  --amber-tint: #f6eee3;
+  --amber-border: #e5d3bc;
+  --amber-strong: #92672f;
 }
 
+/*
+ * Dark mode is NOT part of the locked design. The block below is the stock
+ * shadcn dark palette, intentionally left untouched so nothing breaks if
+ * .dark is ever applied; a Fit40 dark palette is future work.
+ */
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);

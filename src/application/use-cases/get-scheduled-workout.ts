@@ -48,6 +48,7 @@ function toExerciseDto(
     exerciseId: exercise.id,
     exerciseName: exercise.name,
     exerciseSlug: exercise.slug,
+    equipment: exercise.equipment,
     prescription: workoutExercise.prescription,
     restSeconds: workoutExercise.restSeconds,
     notes: workoutExercise.notes,

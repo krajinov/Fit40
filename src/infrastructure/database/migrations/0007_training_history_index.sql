@@ -1,0 +1,1 @@
+CREATE INDEX "workout_sessions_user_completed_idx" ON "workout_sessions" USING btree ("user_id","completed_at" DESC NULLS LAST,"started_at" DESC NULLS LAST,"id" DESC NULLS LAST);

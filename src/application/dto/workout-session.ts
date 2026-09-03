@@ -53,7 +53,12 @@ export interface WorkoutSessionDto {
 
 // ─── Mapper ──────────────────────────────────────────────────────────────────
 
-function serializeSetLog(
+/**
+ * Serializes one logged set to its DTO shape. Exported for the training
+ * history DTO mapper, which composes the same per-set shape into its
+ * entries without duplicating the union handling.
+ */
+export function serializeSetLog(
   set: import('@/domain/entities/workout-session').SetLog,
 ): WorkoutSessionSetDto {
   if (set.type === 'reps') {

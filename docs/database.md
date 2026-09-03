@@ -283,6 +283,7 @@ npx drizzle-kit migrate
 | Table | Column(s) | Reason |
 |-------|-----------|--------|
 | `workout_sessions` | `user_id` | Find sessions by user |
+| `workout_sessions` | `user_id, completed_at DESC, started_at DESC, id DESC` | Training-history keyset pagination (completed sessions, newest first) |
 | `workout_sessions` | `workout_id` | Find sessions by workout |
 | `workout_sessions` | `started_at` | Time-range queries |
 | `exercise_logs` | `session_id` | Load logs for a session |

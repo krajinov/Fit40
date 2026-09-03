@@ -1,21 +1,20 @@
 /**
  * Server-side view assembly for the dashboard screen.
  *
- * Orchestrates existing read-only use cases (profile, enrollments, program
- * details, enrollment progress, next-workout state) into a serializable
- * view passed to presentational components. It derives nothing the
- * application layer does not already expose: Pencil fields with no source
- * data (calendar day dots, session history dates/volume, program cadence)
- * are omitted rather than fabricated.
+ * Current-program selection and hydration live in
+ * GetCurrentProgramDashboardUseCase (application layer); this module maps
+ * the use-case DTO into the serializable view passed to presentational
+ * components. It derives nothing the application layer does not already
+ * expose: Pencil fields with no source data (calendar day dots, session
+ * history dates/volume, program cadence) are omitted rather than fabricated.
  */
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
 import type { UserProfileDto } from '@/application/dto/user-profile';
-import { getProgramEnrollmentUseCase, listUserEnrollmentsUseCase } from '@/features/enrollment/services';
-import { getProgramBySlugUseCase } from '@/features/programs/services';
+import { getCurrentProgramDashboardUseCase } from '@/features/dashboard/services';
 import {
-  buildNextWorkoutView,
+  toNextWorkoutView,
   type NextWorkoutView,
 } from '@/features/sessions/next-workout-view';
 
@@ -124,93 +123,51 @@ function buildCompletedWorkouts(
 }
 
 /**
- * Derives the "current" program view: the user's most recently joined
- * enrollment (the repository lists enrollments by joined time ascending),
- * hydrated with program detail, per-enrollment progress and next-workout
- * state.
- *
- * Returns null when the user is enrolled in nothing (the dashboard renders
- * its empty states) or when the enrolled catalog entry cannot be resolved.
- */
-async function buildCurrentProgramView(
-  userId: string,
-): Promise<DashboardProgramView | null> {
-  const enrollments = await listUserEnrollmentsUseCase.execute(userId);
-  if (enrollments.length === 0) {
-    return null;
-  }
-
-  const latest = enrollments.at(-1);
-  if (latest === undefined) {
-    return null;
-  }
-
-  const programResult = await getProgramBySlugUseCase.execute(latest.programSlug);
-  if (!programResult.ok) {
-    return null;
-  }
-
-  const enrollmentResult = await getProgramEnrollmentUseCase.execute({
-    userId,
-    program: programResult.data.program,
-  });
-  if (!enrollmentResult.ok) {
-    return null;
-  }
-  const enrollment = enrollmentResult.data;
-  if (enrollment.status !== 'enrolled') {
-    return null;
-  }
-
-  let nextWorkout: NextWorkoutView | null = null;
-  if (enrollment.nextWorkout !== null) {
-    nextWorkout = await buildNextWorkoutView({
-      userId,
-      programSlug: programResult.data.program.slug,
-      weekNumber: enrollment.nextWorkout.weekNumber,
-      workoutOrder: enrollment.nextWorkout.workoutOrder,
-    });
-  }
-
-  return {
-    program: programResult.data.detail,
-    enrollment,
-    nextWorkout,
-  };
-}
-
-/**
  * Builds the complete dashboard view for a user with a verified profile.
  *
  * The profile is passed in (the page loads it first to decide the
- * onboarding redirect) so it is fetched exactly once per request.
+ * onboarding redirect) so it is fetched exactly once per request. An
+ * unresolvable current program (e.g. catalog drift) degrades to the
+ * dashboard's empty states: the use case reports the typed failure and this
+ * deliberate presentation choice preserves the pre-refactor behavior
+ * instead of rendering partial data.
  */
 export async function buildDashboardView(
   userId: string,
   profile: UserProfileDto,
 ): Promise<DashboardView> {
-  const currentProgram = await buildCurrentProgramView(userId);
+  const result = await getCurrentProgramDashboardUseCase.execute(userId);
+  const current = result.ok && result.data !== null ? result.data : null;
 
   let completedWorkouts: ReadonlyArray<CompletedWorkoutEntry> = [];
   let weekSummaries: ReadonlyArray<WeekSummary> = [];
-  if (currentProgram !== null) {
-    const completedIds = currentProgram.enrollment.completedScheduledWorkoutIds;
+  let nextWorkout: NextWorkoutView | null = null;
+  if (current !== null) {
+    const completedIds = current.enrollment.completedScheduledWorkoutIds;
     const nextWeekNumber =
-      currentProgram.enrollment.nextWorkout === null
+      current.enrollment.nextWorkout === null
         ? null
-        : currentProgram.enrollment.nextWorkout.weekNumber;
+        : current.enrollment.nextWorkout.weekNumber;
 
-    completedWorkouts = buildCompletedWorkouts(currentProgram.program, completedIds);
+    completedWorkouts = buildCompletedWorkouts(current.program, completedIds);
     weekSummaries = buildWeekSummaries(
-      currentProgram.program,
+      current.program,
       new Set(completedIds),
       nextWeekNumber,
     );
+    nextWorkout = current.nextWorkout === null ? null : toNextWorkoutView(current.nextWorkout);
   }
 
   return {
     profile,
-    currentProgram,
+    currentProgram:
+      current === null
+        ? null
+        : {
+            program: current.program,
+            enrollment: current.enrollment,
+            nextWorkout,
+          },
     completedWorkouts,
     weekSummaries,
   };

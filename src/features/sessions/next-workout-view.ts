@@ -2,15 +2,16 @@
  * Presentation view of the next scheduled workout, shared by the dashboard
  * "Up next" card and the program detail enrollment panel.
  *
- * Assembles DTOs from existing read-only use cases (the scheduled workout
- * detail plus the user's session state for that occurrence). Nothing is
- * derived that the application layer does not already expose; no domain or
- * repository types cross into presentation.
+ * The orchestration (scheduled workout detail + the user's session state)
+ * lives in ResolveNextWorkoutUseCase (application layer); this module only
+ * formats the raw prescription values into display labels. Nothing is
+ * derived that the application layer does not already expose.
  */
 
+import type { NextWorkoutDto } from '@/application/dto/dashboard';
+import { NEXT_WORKOUT_PREVIEW_LIMIT } from '@/application/use-cases/resolve-next-workout';
 import { formatPrescription } from '@/features/programs/program-labels';
-import { getScheduledWorkoutUseCase } from '@/features/programs/services';
-import { getWorkoutSessionUseCase } from '@/features/sessions/services';
+import { resolveNextWorkoutUseCase } from '@/features/sessions/services';
 
 export interface NextWorkoutExercisePreview {
   readonly exerciseName: string;
@@ -18,7 +19,7 @@ export interface NextWorkoutExercisePreview {
 }
 
 /** How many exercise rows the cards preview before the "+ N more" row. */
-export const NEXT_WORKOUT_PREVIEW_COUNT = 3;
+export const NEXT_WORKOUT_PREVIEW_COUNT = NEXT_WORKOUT_PREVIEW_LIMIT;
 
 export type NextWorkoutSessionState = 'not-started' | 'in-progress';
 
@@ -41,6 +42,28 @@ export interface NextWorkoutInput {
 }
 
 /**
+ * Formats the application-layer DTO into the presentation view (raw
+ * prescription value objects → display labels). Shared with the dashboard
+ * view assembly, which receives the DTO from
+ * GetCurrentProgramDashboardUseCase and must not re-query.
+ */
+export function toNextWorkoutView(dto: NextWorkoutDto): NextWorkoutView {
+  return {
+    programSlug: dto.programSlug,
+    weekNumber: dto.weekNumber,
+    workoutOrder: dto.workoutOrder,
+    workoutName: dto.workoutName,
+    exerciseCount: dto.exerciseCount,
+    estimatedMinutes: dto.estimatedMinutes,
+    preview: dto.preview.map((exercise) => ({
+      exerciseName: exercise.exerciseName,
+      prescriptionLabel: formatPrescription(exercise.prescription),
+    })),
+    sessionState: dto.sessionState,
+  };
+}
+
+/**
  * Resolves the presentation view for one scheduled-workout occurrence.
  * Returns null when the occurrence cannot be resolved (only possible when the
  * catalog changes mid-request); callers then render no card rather than
@@ -49,45 +72,7 @@ export interface NextWorkoutInput {
 export async function buildNextWorkoutView(
   input: NextWorkoutInput,
 ): Promise<NextWorkoutView | null> {
-  const workoutResult = await getScheduledWorkoutUseCase.execute({
-    programSlug: input.programSlug,
-    weekNumber: input.weekNumber,
-    workoutOrder: input.workoutOrder,
-  });
-  if (!workoutResult.ok) {
-    return null;
-  }
-
-  const sessionResult = await getWorkoutSessionUseCase.execute({
-    userId: input.userId,
-    programSlug: input.programSlug,
-    weekNumber: input.weekNumber,
-    workoutOrder: input.workoutOrder,
-  });
-  if (!sessionResult.ok) {
-    return null;
-  }
-
-  const workout = workoutResult.data.workout;
-  const sessionState: NextWorkoutSessionState =
-    sessionResult.data.session !== null &&
-    sessionResult.data.session.status === 'in-progress'
-      ? 'in-progress'
-      : 'not-started';
-
-  return {
-    programSlug: input.programSlug,
-    weekNumber: input.weekNumber,
-    workoutOrder: input.workoutOrder,
-    workoutName: workout.name,
-    exerciseCount: workout.exercises.length,
-    estimatedMinutes: workout.estimatedDurationMinutes,
-    preview: workout.exercises
-      .slice(0, NEXT_WORKOUT_PREVIEW_COUNT)
-      .map((exercise) => ({
-        exerciseName: exercise.exerciseName,
-        prescriptionLabel: formatPrescription(exercise.prescription),
-      })),
-    sessionState,
-  };
+  const dto = await resolveNextWorkoutUseCase.execute(input);
+  return dto === null ? null : toNextWorkoutView(dto);
 }
+

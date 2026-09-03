@@ -3,9 +3,11 @@ import { DeleteSessionSetUseCase } from '@/application/use-cases/delete-session-
 import { GetNextExerciseTargetsUseCase } from '@/application/use-cases/get-next-exercise-targets';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
+import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
 import { UpdateSessionSetUseCase } from '@/application/use-cases/update-session-set';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
+import { getScheduledWorkoutUseCase } from '@/features/programs/services';
 import {
   exerciseRepository,
   programEnrollmentRepository,
@@ -39,4 +41,9 @@ export const completeWorkoutSessionUseCase = new CompleteWorkoutSessionUseCase(
 export const getNextExerciseTargetsUseCase = new GetNextExerciseTargetsUseCase(
   exerciseRepository,
   workoutSessionRepository,
+);
+
+export const resolveNextWorkoutUseCase = new ResolveNextWorkoutUseCase(
+  getScheduledWorkoutUseCase,
+  getWorkoutSessionUseCase,
 );

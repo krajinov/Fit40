@@ -48,7 +48,10 @@ const CHIP_STYLES: Record<
  * prescription · rest, notes, previous performance and the recommendation
  * chip. The chip stays visually secondary to name/prescription; bodyweight
  * and duration exercises render no chip at all (decided by the mapper, not
- * here) and leave no blank placeholder space.
+ * here) and leave no blank placeholder space. The chip announces its full
+ * `chip.ariaLabel` recommendation exactly once (role="img" with the visual
+ * fragments hidden from the accessibility tree), so it stays understandable
+ * without color.
  */
 export function WorkoutExerciseRow({ exercise, target }: WorkoutExerciseRowProps) {
   const chip = target.chip;
@@ -93,11 +96,15 @@ export function WorkoutExerciseRow({ exercise, target }: WorkoutExerciseRowProps
               <span className="text-xs text-ink-3">{target.lastTimeCompactLabel}</span>
             )}
             {chip !== null && chipStyle !== null && (
-              <span className={cn('inline-flex items-center gap-1.5 rounded-[7px] px-2 py-0.5', chipStyle.container)}>
-                <span className={cn('text-[10px] font-semibold', chipStyle.label)}>
+              <span
+                role="img"
+                aria-label={chip.ariaLabel}
+                className={cn('inline-flex items-center gap-1.5 rounded-[7px] px-2 py-0.5', chipStyle.container)}
+              >
+                <span aria-hidden="true" className={cn('text-[10px] font-semibold', chipStyle.label)}>
                   {chip.label === 'TRY TODAY' ? 'TRY' : chip.label === 'NEW REP TARGET' ? 'NEW TARGET' : chip.label}
                 </span>
-                <span className={cn('text-xs font-semibold font-display', chipStyle.value)}>
+                <span aria-hidden="true" className={cn('text-xs font-semibold font-display', chipStyle.value)}>
                   {chip.valueLabel}
                 </span>
               </span>
@@ -113,13 +120,20 @@ export function WorkoutExerciseRow({ exercise, target }: WorkoutExerciseRowProps
           )}
           {chip !== null && chipStyle !== null && (
             <span
+              role="img"
+              aria-label={chip.ariaLabel}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1',
                 chipStyle.container,
               )}
             >
-              <span className={cn('text-xs font-semibold', chipStyle.label)}>{chip.label}</span>
-              <span className={cn('font-display text-sm font-semibold', chipStyle.value)}>
+              <span aria-hidden="true" className={cn('text-xs font-semibold', chipStyle.label)}>
+                {chip.label}
+              </span>
+              <span
+                aria-hidden="true"
+                className={cn('font-display text-sm font-semibold', chipStyle.value)}
+              >
                 {chip.valueLabel}
               </span>
             </span>

@@ -69,6 +69,7 @@ export class ResolveNextWorkoutUseCase {
       preview: workout.exercises
         .slice(0, NEXT_WORKOUT_PREVIEW_LIMIT)
         .map((exercise) => ({
+          order: exercise.order,
           exerciseName: exercise.exerciseName,
           prescription: exercise.prescription,
         })),

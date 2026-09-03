@@ -76,7 +76,7 @@ export function NextWorkoutCard({ view, programName, className }: NextWorkoutCar
       {view.preview.length > 0 && (
         <div>
           {view.preview.map((exercise) => (
-            <div key={exercise.exerciseName} className="border-b border-border last:border-b-0">
+            <div key={exercise.order} className="border-b border-border last:border-b-0">
               <div className="flex items-center justify-between gap-3 py-2.5 md:py-3">
                 <span className="text-sm text-foreground md:text-[15px]">
                   {exercise.exerciseName}

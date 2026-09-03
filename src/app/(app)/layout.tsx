@@ -22,6 +22,9 @@ interface AppLayoutProps {
  *
  * getCurrentUser() is cache()-deduplicated per request, so pages that
  * already resolve the user pay no extra session lookup.
+ *
+ * The page content area is the route group's single <main> landmark —
+ * exactly one per page, since no (app) page renders its own.
  */
 export default async function AppLayout({ children }: AppLayoutProps) {
   const user = await getCurrentUser();
@@ -31,10 +34,12 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     <>
       <AppHeader userEmail={userEmail} />
       <MobileHeader userEmail={userEmail} />
-      {/* Bottom clearance for the fixed mobile tab bar (incl. safe area). */}
-      <div className="flex-1 pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0">
+      {/* The route group's single primary-content landmark: exactly one <main>
+          per (app) page — no page renders its own. Bottom clearance for the
+          fixed mobile tab bar (incl. safe area) is preserved. */}
+      <main className="flex-1 pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0">
         {children}
-      </div>
+      </main>
       <MobileTabBar />
     </>
   );

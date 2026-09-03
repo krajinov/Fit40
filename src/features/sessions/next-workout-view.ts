@@ -14,6 +14,9 @@ import { formatPrescription } from '@/features/programs/program-labels';
 import { resolveNextWorkoutUseCase } from '@/features/sessions/services';
 
 export interface NextWorkoutExercisePreview {
+  /** Position in the scheduled workout — stable React key (occurrence
+   * identity), since exercise names are not guaranteed unique. */
+  readonly order: number;
   readonly exerciseName: string;
   readonly prescriptionLabel: string;
 }
@@ -56,6 +59,7 @@ export function toNextWorkoutView(dto: NextWorkoutDto): NextWorkoutView {
     exerciseCount: dto.exerciseCount,
     estimatedMinutes: dto.estimatedMinutes,
     preview: dto.preview.map((exercise) => ({
+      order: exercise.order,
       exerciseName: exercise.exerciseName,
       prescriptionLabel: formatPrescription(exercise.prescription),
     })),

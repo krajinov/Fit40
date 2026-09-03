@@ -15,6 +15,10 @@ export type NextWorkoutSessionState = 'not-started' | 'in-progress';
 
 /** One previewed exercise row of the next scheduled workout. */
 export interface NextWorkoutPreviewExerciseDto {
+  /** Position in the scheduled workout — stable occurrence identity for
+   * React keys (exercise ids/names are not guaranteed unique within a
+   * workout). */
+  readonly order: number;
   readonly exerciseName: string;
   readonly prescription: RepPrescription;
 }

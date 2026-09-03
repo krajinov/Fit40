@@ -221,7 +221,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
       workoutName: 'Workout p1',
       exerciseCount: 1,
       estimatedMinutes: 30,
-      preview: [{ exerciseName: 'Exercise ex-001', prescription: rep() }],
+      preview: [{ order: 1, exerciseName: 'Exercise ex-001', prescription: rep() }],
       sessionState: 'not-started',
     });
   });

@@ -32,7 +32,7 @@ import {
   type SessionExerciseCatalogMeta,
   type SessionProgressView,
 } from '@/features/sessions/active-workout-views';
-import { getScheduledWorkoutUseCase } from '@/features/programs/services';
+import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
 import { getNextExerciseTargetsUseCase, getWorkoutSessionUseCase } from '@/features/sessions/services';
 
 export type ActiveWorkoutScreenState =
@@ -151,7 +151,13 @@ export async function buildActiveWorkoutView(
   },
   user: UserDto,
 ): Promise<ActiveWorkoutView | null> {
-  const workoutResult = await getScheduledWorkoutUseCase.execute(input);
+  // Request-cached: generateMetadata and the page share ONE scheduled-workout
+  // execution per request (see scheduled-workout-lookup).
+  const workoutResult = await lookupScheduledWorkout(
+    input.programSlug,
+    input.weekNumber,
+    input.workoutOrder,
+  );
   if (!workoutResult.ok) {
     return null;
   }

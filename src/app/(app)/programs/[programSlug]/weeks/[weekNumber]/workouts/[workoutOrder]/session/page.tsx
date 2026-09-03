@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 import { PageContainer } from '@/components/shared/PageContainer';
 import { requireUser } from '@/features/auth/current-user';
-import { getScheduledWorkoutUseCase } from '@/features/programs/services';
+import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
 import {
   programSlugSchema,
   weekNumberSchema,
@@ -33,12 +33,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   // Metadata resolution uses the public occurrence only — no session state
-  // or personalization belongs in the document title.
-  const result = await getScheduledWorkoutUseCase.execute({
-    programSlug: slugResult.data,
-    weekNumber: weekResult.data,
-    workoutOrder: orderResult.data,
-  });
+  // or personalization belongs in the document title. The lookup is
+  // request-cached: generateMetadata and the page share ONE scheduled-workout
+  // execution per request (see scheduled-workout-lookup).
+  const result = await lookupScheduledWorkout(slugResult.data, weekResult.data, orderResult.data);
   if (!result.ok) {
     return { title: 'Session not found' };
   }

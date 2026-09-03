@@ -16,7 +16,7 @@ import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type { UserDto } from '@/application/dto/user';
 import { createExerciseId, type ExerciseId } from '@/domain/types/ids';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
-import { getScheduledWorkoutUseCase } from '@/features/programs/services';
+import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
 import { getNextExerciseTargetsUseCase } from '@/features/sessions/services';
 import { getWorkoutSessionUseCase } from '@/features/sessions/services';
 import {
@@ -103,7 +103,13 @@ export async function buildWorkoutDetailView(
   },
   user: UserDto | null,
 ): Promise<WorkoutDetailView | null> {
-  const workoutResult = await getScheduledWorkoutUseCase.execute(input);
+  // Request-cached: generateMetadata and the page share ONE scheduled-workout
+  // execution per request (see scheduled-workout-lookup).
+  const workoutResult = await lookupScheduledWorkout(
+    input.programSlug,
+    input.weekNumber,
+    input.workoutOrder,
+  );
   if (!workoutResult.ok) {
     return null;
   }

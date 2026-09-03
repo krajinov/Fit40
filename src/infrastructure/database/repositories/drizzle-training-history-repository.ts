@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, inArray, isNotNull, lt, or } from 'drizzle-o
 import type { SQL } from 'drizzle-orm';
 
 import type {
+  CompletedSessionContext,
   CompletedWorkoutSession,
   TrainingHistoryCursor,
   TrainingHistoryEntry,
@@ -10,7 +11,7 @@ import type {
   TrainingHistoryRepository,
   TrainingHistoryTotals,
 } from '@/application/ports/training-history-repository';
-import type { UserId } from '@/domain/types/ids';
+import type { UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapSessionRows } from '../mappers/session-mapper';
@@ -221,6 +222,66 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
     const sessionCount = sessionRows[0]?.sessionCount ?? 0;
 
     return { completedSessions: sessionCount, loggedSets: setCount };
+  }
+
+  async findCompletedSessionById(
+    userId: UserId,
+    sessionId: WorkoutSessionId,
+  ): Promise<CompletedSessionContext | null> {
+    // Ownership, existence, and completed-only are all structural filters of
+    // the same WHERE clause: a missing, foreign, or in-progress session is
+    // the single outcome `null`, with no way for a caller to tell them apart.
+    const rows: HistoryRow[] = await this.db
+      .select({
+        session: workoutSessions,
+        workoutName: workouts.name,
+        programName: trainingPrograms.name,
+      })
+      .from(workoutSessions)
+      .innerJoin(workouts, eq(workoutSessions.workoutId, workouts.id))
+      .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
+      .where(
+        and(
+          eq(workoutSessions.id, sessionId),
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+        ),
+      )
+      .limit(1);
+
+    const row = rows[0];
+    if (row === undefined) {
+      return null;
+    }
+
+    // Bounded hydration of exactly this session: the full log/set envelope
+    // (the metrics input), ordered for deterministic rendering.
+    const logRows = await this.db
+      .select()
+      .from(exerciseLogs)
+      .where(eq(exerciseLogs.sessionId, sessionId))
+      .orderBy(asc(exerciseLogs.exerciseOrder));
+
+    const setRows = await this.db
+      .select()
+      .from(setLogs)
+      .where(eq(setLogs.sessionId, sessionId))
+      .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+
+    const session: CompletedWorkoutSession = {
+      ...mapSessionRows({
+        session: row.session,
+        exerciseLogs: logRows,
+        setLogs: setRows,
+      }),
+      completedAt: this.completedAtOf(row.session),
+    };
+
+    return {
+      session,
+      programName: row.programName,
+      workoutName: row.workoutName,
+    };
   }
 }
 

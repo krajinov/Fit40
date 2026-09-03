@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   formatHistoryCount,
   formatHistoryDate,
+  formatHistoryElapsed,
   formatHistoryVolume,
+  formatSessionSetLine,
 } from '@/features/history/history-labels';
+import type { CompletedSessionSetDto } from '@/application/dto/completed-session';
 
 describe('formatHistoryDate', () => {
   it('formats a completion instant as a concise UTC date', () => {
@@ -46,5 +49,44 @@ describe('formatHistoryVolume', () => {
 
   it('rounds fractional volumes to whole kilograms', () => {
     expect(formatHistoryVolume(1234.6)).toBe('1,235 kg');
+  });
+});
+
+describe('formatSessionSetLine', () => {
+  it('renders a loaded set with an RPE suffix', () => {
+    const set: CompletedSessionSetDto = {
+      type: 'reps',
+      setNumber: 2,
+      reps: 10,
+      weightKg: 52.5,
+      rpe: 7,
+    };
+    expect(formatSessionSetLine(set)).toBe('52.5 kg × 10 @ RPE 7');
+  });
+
+  it('renders 0 kg as a real load, distinct from no external load', () => {
+    expect(formatSessionSetLine({ type: 'reps', setNumber: 1, reps: 10, weightKg: 0, rpe: null })).toBe(
+      '0 kg × 10',
+    );
+    expect(formatSessionSetLine({ type: 'reps', setNumber: 1, reps: 10, weightKg: null, rpe: null })).toBe(
+      '10 reps',
+    );
+  });
+
+  it('renders timed work, loaded and bodyweight, with optional RPE', () => {
+    expect(
+      formatSessionSetLine({ type: 'duration', setNumber: 1, durationSeconds: 45, weightKg: null, rpe: null }),
+    ).toBe('45 sec');
+    expect(
+      formatSessionSetLine({ type: 'duration', setNumber: 1, durationSeconds: 30, weightKg: 10, rpe: 8 }),
+    ).toBe('10 kg × 30 sec @ RPE 8');
+  });
+});
+
+describe('formatHistoryElapsed', () => {
+  it('formats sub-hour and hour-plus elapsed times', () => {
+    expect(formatHistoryElapsed(45 * 60)).toBe('45 min');
+    expect(formatHistoryElapsed(65 * 60)).toBe('1 hr 5 min');
+    expect(formatHistoryElapsed(120 * 60)).toBe('2 hr');
   });
 });

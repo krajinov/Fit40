@@ -109,4 +109,29 @@ export interface TrainingHistoryRepository {
    * including detached (left-program) history.
    */
   getTotals(userId: UserId): Promise<TrainingHistoryTotals>;
+
+  /**
+   * Returns one completed session of the user by id with its display
+   * context, or null when the id does not address one of the user's
+   * completed sessions. A missing, foreign, or still-in-progress session
+   * is indistinguishable here (no existence leak): the completed-only and
+   * ownership filters are structural parts of the query.
+   */
+  findCompletedSessionById(
+    userId: UserId,
+    sessionId: WorkoutSessionId,
+  ): Promise<CompletedSessionContext | null>;
+}
+
+/**
+ * One completed session with its display context: the hydrated aggregate
+ * plus the workout-template and program display names resolved by join.
+ * Exercise display metadata (current catalog names/equipment) is resolved
+ * separately through the exercise-catalog port — current catalog state is
+ * display-only and never part of the persisted historical record.
+ */
+export interface CompletedSessionContext {
+  readonly session: CompletedWorkoutSession;
+  readonly programName: string;
+  readonly workoutName: string;
 }

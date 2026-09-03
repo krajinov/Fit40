@@ -17,11 +17,14 @@ import {
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
+import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';
+import type { CompletedSessionDto } from '@/application/dto/completed-session';
 import { users } from '@/infrastructure/database/schema';
 
 import {
   closeDatabase,
   db,
+  exerciseRepository,
   programEnrollmentRepository,
   resetAndSeed,
   trainingHistoryRepository,
@@ -174,6 +177,10 @@ const OWNER_B = 'user-hist-b';
 
 const listUseCase = new ListTrainingHistoryUseCase(trainingHistoryRepository);
 const totalsUseCase = new GetTrainingTotalsUseCase(trainingHistoryRepository);
+const detailUseCase = new GetCompletedSessionUseCase(
+  trainingHistoryRepository,
+  exerciseRepository,
+);
 
 beforeEach(async () => {
   await resetAndSeed();
@@ -627,6 +634,187 @@ describe('training history — hydration and metrics mapping', () => {
     expect(result.data.sessions[0]?.metrics.volume).toBe(10 * 40 + 12 * 42);
   });
 });
+describe('training history — completed-session detail', () => {
+  it('resolves the full display context for one owned completed session', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-1',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 50, rpe: 7 }] },
+          { exerciseId: 'ex-015', type: 'duration', sets: [{ durationSeconds: 45 }] },
+        ],
+      }),
+    );
+
+    const result = await detailUseCase.execute({ userId: OWNER_A, sessionId: 'session-detail-1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const dto: CompletedSessionDto = result.data;
+    expect(dto.sessionId).toBe('session-detail-1');
+    expect(dto.programName.length).toBeGreaterThan(0);
+    expect(dto.workoutName.length).toBeGreaterThan(0);
+    expect(dto.completedAt).toBe('2025-01-06T11:00:00.000Z');
+    // Snapshot prescriptions persist independently of catalog state.
+    expect(dto.entries[0]?.prescription).toEqual({ type: 'reps', sets: 3, minReps: 8, maxReps: 10 });
+    expect(dto.entries[0]?.exerciseName).not.toBeNull();
+    expect(dto.entries[0]?.sets[0]?.rpe).toBe(7);
+    expect(dto.entries[1]?.prescription).toEqual({ type: 'duration', sets: 3, seconds: 30 });
+    const durationSet = dto.entries[1]?.sets[0];
+    if (durationSet === undefined || durationSet.type !== 'duration') {
+      throw new Error('expected a duration set');
+    }
+    expect(durationSet.durationSeconds).toBe(45);
+    expect(dto.metrics.totalSets).toBe(2);
+  });
+
+  it('returns SESSION_NOT_FOUND for a foreign or in-progress session', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-foreign',
+        userId: OWNER_B,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 50 }] }],
+      }),
+      historySession({
+        id: 'session-detail-progress',
+        occurrence: 1,
+        startedAt: '2025-01-07T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 9 }] }],
+      }),
+    );
+
+    const foreign = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-foreign',
+    });
+    expect(foreign.ok).toBe(false);
+    if (!foreign.ok) expect(foreign.error.code).toBe('SESSION_NOT_FOUND');
+
+    // The owner cannot open their own still-in-progress session here either.
+    const inProgress = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-progress',
+    });
+    expect(inProgress.ok).toBe(false);
+    if (!inProgress.ok) expect(inProgress.error.code).toBe('SESSION_NOT_FOUND');
+  });
+
+  it('returns SESSION_NOT_FOUND for a missing or malformed session id', async () => {
+    const missing = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-nope',
+    });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error.code).toBe('SESSION_NOT_FOUND');
+
+    const malformed = await detailUseCase.execute({ userId: OWNER_A, sessionId: '' });
+    expect(malformed.ok).toBe(false);
+    if (!malformed.ok) expect(malformed.error.code).toBe('INVALID_INPUT');
+  });
+
+  it('orders entries by exercise order and sets by set number', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-order',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-001',
+            type: 'reps',
+            sets: [{ reps: 8, weightKg: 40 }, { reps: 10, weightKg: 42 }, { reps: 12, weightKg: 44 }],
+          },
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 50 }] },
+        ],
+      }),
+    );
+
+    const result = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-order',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries.map((entry) => entry.exerciseOrder)).toEqual([1, 2]);
+    expect(result.data.entries[0]?.sets.map((set) => set.setNumber)).toEqual([1, 2, 3]);
+  });
+
+  it('renders duplicate occurrences of one exercise as distinct entries', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-dup',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 40 }] },
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 12, weightKg: 42 }] },
+        ],
+      }),
+    );
+
+    const result = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-dup',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries).toHaveLength(2);
+    expect(result.data.entries[0]?.exerciseOrder).toBe(1);
+    expect(result.data.entries[1]?.exerciseOrder).toBe(2);
+    expect(result.data.entries[0]?.exerciseId).toBe('ex-002');
+    expect(result.data.entries[1]?.exerciseId).toBe('ex-002');
+  });
+
+  it('preserves a logged 0 kg as distinct from no external load', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-zero',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-001',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 0 }, { reps: 10, weightKg: null }],
+          },
+        ],
+      }),
+    );
+
+    const result = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-zero',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries[0]?.sets[0]?.weightKg).toBe(0);
+    expect(result.data.entries[0]?.sets[1]?.weightKg).toBeNull();
+  });
+
+  it('keeps detached sessions addressable by their owner', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-detail-detached',
+        enrollmentId: null,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] }],
+      }),
+    );
+
+    const result = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-detail-detached',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.sessionId).toBe('session-detail-detached');
+  });
+});
+
 describe('training history — totals', () => {
   it('returns zeros for a user with no history', async () => {
     const result = await totalsUseCase.execute(OWNER_A);

@@ -15,16 +15,20 @@ interface EnrolledProgramPanelProps {
   };
   readonly enrollment: Extract<ProgramEnrollmentViewDto, { status: 'enrolled' }>;
   /**
-   * Presentation view of the enrollment's next workout (name, meta,
-   * session state), or null when every workout is completed.
+   * The enrollment's next workout (name, meta, session state), 'unavailable'
+   * when its preview could not be resolved (a degraded state — the program
+   * is NOT complete), or null when every workout is completed.
    */
-  readonly nextWorkout: {
-    readonly weekNumber: number;
-    readonly workoutOrder: number;
-    readonly workoutName: string;
-    readonly metaLabel: string;
-    readonly sessionState: 'not-started' | 'in-progress';
-  } | null;
+  readonly nextWorkout:
+    | {
+        readonly weekNumber: number;
+        readonly workoutOrder: number;
+        readonly workoutName: string;
+        readonly metaLabel: string;
+        readonly sessionState: 'not-started' | 'in-progress';
+      }
+    | 'unavailable'
+    | null;
   readonly className?: string;
 }
 
@@ -42,10 +46,17 @@ export function EnrolledProgramPanel({
   className,
 }: EnrolledProgramPanelProps) {
   const progress = enrollment.progress;
+  // The current week comes from the enrollment's own scheduled next workout
+  // (application truth), so a preview that fails to resolve still shows the
+  // week the user is actually on — never the last week.
   const currentWeekNumber =
-    nextWorkout === null ? program.durationWeeks : nextWorkout.weekNumber;
+    enrollment.nextWorkout === null
+      ? program.durationWeeks
+      : enrollment.nextWorkout.weekNumber;
   const startLabel =
-    nextWorkout !== null && nextWorkout.sessionState === 'in-progress'
+    nextWorkout !== null &&
+    nextWorkout !== 'unavailable' &&
+    nextWorkout.sessionState === 'in-progress'
       ? 'Resume workout'
       : 'Start workout';
 
@@ -90,7 +101,16 @@ export function EnrolledProgramPanel({
         <ProgressBar value={progress.percentage} label="Program progress" />
       </div>
 
-      {nextWorkout !== null ? (
+      {typeof nextWorkout === 'string' ? (
+        <div className="flex flex-col gap-1.5 rounded-callout border border-accent-tint-border bg-accent-tint p-4 md:px-5">
+          <p className="text-sm font-semibold text-accent-strong">
+            Next workout unavailable
+          </p>
+          <p className="text-[13px] text-ink-2">
+            We couldn&apos;t load the next workout right now.
+          </p>
+        </div>
+      ) : nextWorkout !== null ? (
         <div className="flex flex-col gap-3.5 rounded-callout border-[1.5px] border-primary bg-accent-tint p-4 md:flex-row md:items-center md:justify-between md:gap-5 md:px-5 md:py-[18px]">
           <div className="flex flex-col gap-1">
             <p className="text-[11px] font-semibold tracking-wide text-accent-foreground md:text-xs">

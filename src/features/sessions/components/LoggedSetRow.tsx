@@ -14,6 +14,25 @@ import type { SessionActionState } from '@/features/sessions/types/session-actio
 
 const initialState: SessionActionState = { ok: true };
 
+/**
+ * Snapshot of the editor's controlled values derived from the persisted set.
+ * Single source of truth for both initialization and `resetEditorFromSet`,
+ * so the editor always starts from persisted state. `weight` and `rpe` are
+ * '' for a null value (bodyweight sets, cleared RPE) exactly like the form
+ * schemas normalize an empty field to null — nullable semantics unchanged.
+ */
+function editorValuesFromSet(set: WorkoutSessionSetDto): {
+  readonly weight: string;
+  readonly count: string;
+  readonly rpe: string;
+} {
+  return {
+    weight: set.weightKg === null ? '' : String(set.weightKg),
+    count: set.type === 'reps' ? String(set.reps) : String(set.durationSeconds),
+    rpe: set.rpe === null ? '' : String(set.rpe),
+  };
+}
+
 interface LoggedSetRowProps {
   readonly sessionId: string;
   /** The set to display/edit/delete. */
@@ -37,6 +56,12 @@ interface LoggedSetRowProps {
  * never silently wipes stored RPE, and clearing the field clears it
  * deliberately (empty normalizes to null).
  *
+ * Editor lifecycle (resetEditorFromSet): opening Edit, Cancel, and a
+ * confirmed successful update all restore the controls from the persisted
+ * `set` — a reopened editor never shows a discarded draft or a pre-update
+ * snapshot. A failed update keeps the editor open with the user's typed
+ * values; nothing resets while editing.
+ *
  * The edit inputs are CONTROLLED (initialized from the set's own values) for
  * the same reason as the logger: React 19 resets form DOM after the action
  * resolves, and failed edits must preserve the user's corrections.
@@ -57,14 +82,26 @@ export function LoggedSetRow({
   const rpeId = useId();
 
   const [editing, setEditing] = useState(false);
-  // Controlled edit values (initialized from the set's persisted values):
-  // React 19 resets form DOM after the action resolves — including error
-  // resolutions — so uncontrolled edits would be wiped on a failed save.
-  const [editWeight, setEditWeight] = useState(set.weightKg === null ? '' : String(set.weightKg));
-  const [editCount, setEditCount] = useState(
-    set.type === 'reps' ? String(set.reps) : String(set.durationSeconds),
-  );
-  const [editRpe, setEditRpe] = useState(set.rpe === null ? '' : String(set.rpe));
+  // Controlled edit values. React 19 resets form DOM after the action
+  // resolves — including error resolutions — so uncontrolled edits would be
+  // wiped on a failed save; controlled state keeps the user's typing on
+  // validation failures instead.
+  const [editWeight, setEditWeight] = useState(() => editorValuesFromSet(set).weight);
+  const [editCount, setEditCount] = useState(() => editorValuesFromSet(set).count);
+  const [editRpe, setEditRpe] = useState(() => editorValuesFromSet(set).rpe);
+
+  /**
+   * Restores every editable control from the currently persisted `set` prop.
+   * Used when opening the editor, on Cancel, and after a successful update,
+   * so a reopened editor always starts from persisted state — never from a
+   * previously discarded or already-saved draft.
+   */
+  function resetEditorFromSet(): void {
+    const values = editorValuesFromSet(set);
+    setEditWeight(values.weight);
+    setEditCount(values.count);
+    setEditRpe(values.rpe);
+  }
 
   async function updateAction(
     prev: SessionActionState,
@@ -83,7 +120,14 @@ export function LoggedSetRow({
       formData.set('rpe', editRpe);
     }
     const state = await updateSetAction(formData);
-    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+    if (state.ok) {
+      // Confirmed success (revalidation of the session path is already
+      // scheduled by the action): close first, then reseed the editor from
+      // the persisted set. Validation/business errors keep the editor open
+      // with the user's typed values — only a confirmed update closes it.
+      setEditing(false);
+      resetEditorFromSet();
+    } else if (state.error.code === 'SESSION_MODIFIED') {
       router.refresh();
     }
     return state;
@@ -156,7 +200,10 @@ export function LoggedSetRow({
             </button>
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                resetEditorFromSet();
+                setEditing(false);
+              }}
               className="text-xs font-medium text-ink-3 hover:text-ink-2"
             >
               Cancel
@@ -185,7 +232,10 @@ export function LoggedSetRow({
       <span className="flex shrink-0 items-center gap-1">
         <button
           type="button"
-          onClick={() => setEditing(true)}
+          onClick={() => {
+            resetEditorFromSet();
+            setEditing(true);
+          }}
           aria-label={`Edit set ${set.setNumber}`}
           className="rounded-md p-1.5 text-ink-3 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >

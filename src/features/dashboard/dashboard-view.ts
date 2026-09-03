@@ -14,8 +14,9 @@ import type { ProgramDetailDto } from '@/application/dto/program';
 import type { UserProfileDto } from '@/application/dto/user-profile';
 import { getCurrentProgramDashboardUseCase } from '@/features/dashboard/services';
 import {
+  nextWorkoutPreviewState,
   toNextWorkoutView,
-  type NextWorkoutView,
+  type NextWorkoutPreviewState,
 } from '@/features/sessions/next-workout-view';
 
 export type WeekStatus = 'completed' | 'in-progress' | 'upcoming';
@@ -37,7 +38,13 @@ export interface WeekSummary {
 export interface DashboardProgramView {
   readonly program: ProgramDetailDto;
   readonly enrollment: Extract<ProgramEnrollmentViewDto, { status: 'enrolled' }>;
-  readonly nextWorkout: NextWorkoutView | null;
+  /**
+   * Three-valued next-workout state (see NextWorkoutPreviewState): a
+   * preview that fails to resolve (e.g. catalog drift) renders as
+   * "unavailable" — the program is complete only when the enrollment
+   * reports no next workout at all.
+   */
+  readonly nextWorkoutPreview: NextWorkoutPreviewState;
 }
 
 export interface DashboardView {
@@ -141,13 +148,12 @@ export async function buildDashboardView(
 
   let completedWorkouts: ReadonlyArray<CompletedWorkoutEntry> = [];
   let weekSummaries: ReadonlyArray<WeekSummary> = [];
-  let nextWorkout: NextWorkoutView | null = null;
+  let nextWorkoutPreview: NextWorkoutPreviewState = { status: 'complete' };
   if (current !== null) {
-    const completedIds = current.enrollment.completedScheduledWorkoutIds;
+    const enrollment = current.enrollment;
+    const completedIds = enrollment.completedScheduledWorkoutIds;
     const nextWeekNumber =
-      current.enrollment.nextWorkout === null
-        ? null
-        : current.enrollment.nextWorkout.weekNumber;
+      enrollment.nextWorkout === null ? null : enrollment.nextWorkout.weekNumber;
 
     completedWorkouts = buildCompletedWorkouts(current.program, completedIds);
     weekSummaries = buildWeekSummaries(
@@ -155,7 +161,10 @@ export async function buildDashboardView(
       new Set(completedIds),
       nextWeekNumber,
     );
-    nextWorkout = current.nextWorkout === null ? null : toNextWorkoutView(current.nextWorkout);
+    nextWorkoutPreview = nextWorkoutPreviewState(
+      enrollment.nextWorkout,
+      current.nextWorkout === null ? null : toNextWorkoutView(current.nextWorkout),
+    );
   }
 
   return {
@@ -166,7 +175,7 @@ export async function buildDashboardView(
         : {
             program: current.program,
             enrollment: current.enrollment,
-            nextWorkout,
+            nextWorkoutPreview,
           },
     completedWorkouts,
     weekSummaries,

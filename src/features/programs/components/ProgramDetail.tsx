@@ -1,6 +1,6 @@
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
-import type { NextWorkoutView } from '@/features/sessions/next-workout-view';
+import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
@@ -16,10 +16,11 @@ interface ProgramDetailProps {
    */
   readonly enrollment: ProgramEnrollmentViewDto | null;
   /**
-   * Presentation view of the enrollment's next workout (shared with the
-   * dashboard), or null when anonymous / not enrolled / fully completed.
+   * Three-valued next-workout state of the enrollment (shared with the
+   * dashboard). Null when anonymous or not enrolled — no enrollment
+   * controls or up-next area then.
    */
-  readonly nextWorkout: NextWorkoutView | null;
+  readonly nextWorkoutPreview: NextWorkoutPreviewState | null;
 }
 
 /**
@@ -57,7 +58,7 @@ function weekStatus(
 export function ProgramDetail({
   program,
   enrollment,
-  nextWorkout,
+  nextWorkoutPreview,
 }: ProgramDetailProps) {
   const completedIds =
     enrollment !== null && enrollment.status === 'enrolled'
@@ -70,10 +71,15 @@ export function ProgramDetail({
       ? `${enrollment.nextWorkout.weekNumber}-${enrollment.nextWorkout.workoutOrder}`
       : null;
 
+  const availableWorkout =
+    nextWorkoutPreview !== null && nextWorkoutPreview.status === 'available'
+      ? nextWorkoutPreview.workout
+      : null;
+
   const metaLabel =
-    nextWorkout === null
+    availableWorkout === null
       ? ''
-      : `${nextWorkout.exerciseCount} ${nextWorkout.exerciseCount === 1 ? 'exercise' : 'exercises'} · about ${nextWorkout.estimatedMinutes} minutes`;
+      : `${availableWorkout.exerciseCount} ${availableWorkout.exerciseCount === 1 ? 'exercise' : 'exercises'} · about ${availableWorkout.estimatedMinutes} minutes`;
 
   return (
     <div className="flex flex-col gap-8">
@@ -105,15 +111,19 @@ export function ProgramDetail({
           program={program}
           enrollment={enrollment}
           nextWorkout={
-            nextWorkout === null
+            nextWorkoutPreview === null
               ? null
-              : {
-                  weekNumber: nextWorkout.weekNumber,
-                  workoutOrder: nextWorkout.workoutOrder,
-                  workoutName: nextWorkout.workoutName,
-                  metaLabel,
-                  sessionState: nextWorkout.sessionState,
-                }
+              : nextWorkoutPreview.status === 'available'
+                ? {
+                    weekNumber: nextWorkoutPreview.workout.weekNumber,
+                    workoutOrder: nextWorkoutPreview.workout.workoutOrder,
+                    workoutName: nextWorkoutPreview.workout.workoutName,
+                    metaLabel,
+                    sessionState: nextWorkoutPreview.workout.sessionState,
+                  }
+                : nextWorkoutPreview.status === 'unavailable'
+                  ? 'unavailable'
+                  : null
           }
         />
       )}

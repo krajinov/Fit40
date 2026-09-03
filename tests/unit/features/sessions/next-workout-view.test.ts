@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
-import { toNextWorkoutView } from '@/features/sessions/next-workout-view';
+import {
+  nextWorkoutPreviewState,
+  toNextWorkoutView,
+  type NextWorkoutView,
+} from '@/features/sessions/next-workout-view';
 
 // The view module imports the session composition root for
 // buildNextWorkoutView; the pure mapper under test never calls it, and the
@@ -45,5 +49,32 @@ describe('toNextWorkoutView', () => {
     expect(view.sessionState).toBe('in-progress');
     expect(view.preview[0]?.exerciseName).toBe('Bench Press');
     expect(view.preview[0]?.prescriptionLabel).toBe('3 × 8–10');
+  });
+});
+
+describe('nextWorkoutPreviewState', () => {
+  it('reports completion only when the enrollment has no scheduled next workout', () => {
+    const state = nextWorkoutPreviewState(null, null);
+    expect(state).toEqual({ status: 'complete' });
+  });
+
+  it('reports completion keyed on the enrollment, not on the view argument', () => {
+    // Defensive symmetry: a stale resolved view must not flip the state of a
+    // genuinely completed program.
+    const state = nextWorkoutPreviewState(null, toNextWorkoutView(DTO));
+    expect(state).toEqual({ status: 'complete' });
+  });
+
+  it('reports available with the resolved view when preview resolution succeeds', () => {
+    const workout: NextWorkoutView = toNextWorkoutView(DTO);
+    const state = nextWorkoutPreviewState({ weekNumber: 2, workoutOrder: 1 }, workout);
+    expect(state).toEqual({ status: 'available', workout });
+  });
+
+  it('reports unavailable — never complete — when the preview fails to resolve', () => {
+    const state = nextWorkoutPreviewState({ weekNumber: 2, workoutOrder: 1 }, null);
+    expect(state.status).toBe('unavailable');
+    expect(state.status).not.toBe('complete');
+    expect(state).not.toHaveProperty('workout');
   });
 });

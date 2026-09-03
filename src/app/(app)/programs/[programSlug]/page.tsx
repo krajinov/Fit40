@@ -9,7 +9,11 @@ import { getProgramEnrollmentUseCase } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
 import { ProgramDetail } from '@/features/programs/components/ProgramDetail';
 import { programSlugSchema } from '@/features/programs/schemas/program-routes-schema';
-import { buildNextWorkoutView } from '@/features/sessions/next-workout-view';
+import {
+  buildNextWorkoutView,
+  nextWorkoutPreviewState,
+  type NextWorkoutPreviewState,
+} from '@/features/sessions/next-workout-view';
 
 interface ProgramDetailPageProps {
   readonly params: Promise<{ readonly programSlug: string }>;
@@ -51,7 +55,7 @@ export default async function ProgramDetailPage({
   // authenticated visitors, scoped to their user id from the session.
   const user = await getCurrentUser();
   let enrollment: ProgramEnrollmentViewDto | null = null;
-  let nextWorkout: Awaited<ReturnType<typeof buildNextWorkoutView>> = null;
+  let nextWorkoutPreview: NextWorkoutPreviewState | null = null;
   if (user !== null) {
     const enrollmentResult = await getProgramEnrollmentUseCase.execute({
       userId: user.id,
@@ -67,14 +71,21 @@ export default async function ProgramDetailPage({
     enrollment = enrollmentResult.data;
 
     // Resolve the next workout's session state only for enrolled users;
-    // anonymous and not-enrolled visitors get no up-next data.
-    if (enrollment.status === 'enrolled' && enrollment.nextWorkout !== null) {
-      nextWorkout = await buildNextWorkoutView({
-        userId: user.id,
-        programSlug: result.data.program.slug,
-        weekNumber: enrollment.nextWorkout.weekNumber,
-        workoutOrder: enrollment.nextWorkout.workoutOrder,
-      });
+    // anonymous and not-enrolled visitors get no up-next data. An enrolled
+    // user whose scheduled next workout cannot be previewed degrades to the
+    // "unavailable" state — never to "completed" — and no workout data is
+    // fabricated.
+    if (enrollment.status === 'enrolled') {
+      const workout =
+        enrollment.nextWorkout === null
+          ? null
+          : await buildNextWorkoutView({
+              userId: user.id,
+              programSlug: result.data.program.slug,
+              weekNumber: enrollment.nextWorkout.weekNumber,
+              workoutOrder: enrollment.nextWorkout.workoutOrder,
+            });
+      nextWorkoutPreview = nextWorkoutPreviewState(enrollment.nextWorkout, workout);
     }
   }
 
@@ -83,7 +94,7 @@ export default async function ProgramDetailPage({
       <ProgramDetail
         program={result.data.detail}
         enrollment={enrollment}
-        nextWorkout={nextWorkout}
+        nextWorkoutPreview={nextWorkoutPreview}
       />
     </PageContainer>
   );

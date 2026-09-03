@@ -11,6 +11,7 @@ import { formatDashboardDate } from '@/features/dashboard/dashboard-labels';
 import { buildDashboardView, type WeekSummary } from '@/features/dashboard/dashboard-view';
 import { CurrentProgramCard } from '@/features/dashboard/components/CurrentProgramCard';
 import { NextWorkoutCard } from '@/features/dashboard/components/NextWorkoutCard';
+import { NextWorkoutUnavailableCard } from '@/features/dashboard/components/NextWorkoutUnavailableCard';
 import { NoProgramCard } from '@/features/dashboard/components/NoProgramCard';
 import { ProfileSummaryCard } from '@/features/dashboard/components/ProfileSummaryCard';
 import { ProgramCompletedCard } from '@/features/dashboard/components/ProgramCompletedCard';
@@ -72,11 +73,13 @@ export default async function DashboardPage() {
       ) : (
         <div className="mt-5 flex flex-col gap-5 md:mt-8 md:flex-row md:items-start md:gap-6">
           <div className="flex min-w-0 flex-1 flex-col gap-5 md:gap-6">
-            {currentProgram.nextWorkout !== null ? (
+            {currentProgram.nextWorkoutPreview.status === 'available' ? (
               <NextWorkoutCard
-                view={currentProgram.nextWorkout}
+                view={currentProgram.nextWorkoutPreview.workout}
                 programName={currentProgram.program.name}
               />
+            ) : currentProgram.nextWorkoutPreview.status === 'unavailable' ? (
+              <NextWorkoutUnavailableCard />
             ) : (
               <ProgramCompletedCard
                 programName={currentProgram.program.name}

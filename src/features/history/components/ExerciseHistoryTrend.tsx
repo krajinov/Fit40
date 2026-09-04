@@ -18,13 +18,8 @@ interface ExerciseHistoryTrendProps {
   readonly trend: ExerciseHistoryTrendView;
 }
 
-/** viewBox is 100×100; x/y are the view-model's 0–1 fractions of it. */
-const VIEW_SIZE = 100;
+/** Dot radius, in the same viewBox units as the view model's coordinates. */
 const POINT_RADIUS = 3;
-
-function toCoordinate(fraction: number): number {
-  return fraction * VIEW_SIZE;
-}
 
 export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
   const chartPoints = trend.chartPoints;
@@ -39,13 +34,10 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
           className="h-38 w-full max-w-md rounded-card border border-border bg-surface-2"
           role="presentation"
         >
+          {/* The view model's x/y ARE viewBox units (12–88 padding band);
+              they render unchanged — no further scaling here. */}
           <polyline
-            points={chartPoints
-              .map(
-                (point) =>
-                  `${toCoordinate(point.xFraction)},${toCoordinate(point.yFraction)}`,
-              )
-              .join(' ')}
+            points={chartPoints.map((point) => `${point.x},${point.y}`).join(' ')}
             fill="none"
             stroke="var(--chart-1)"
             strokeWidth="2"
@@ -53,9 +45,9 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
           />
           {chartPoints.map((point) => (
             <circle
-              key={`${point.xFraction}-${point.yFraction}`}
-              cx={toCoordinate(point.xFraction)}
-              cy={toCoordinate(point.yFraction)}
+              key={`${point.x}-${point.y}`}
+              cx={point.x}
+              cy={point.y}
               r={POINT_RADIUS}
               fill="var(--chart-1)"
               vectorEffect="non-scaling-stroke"

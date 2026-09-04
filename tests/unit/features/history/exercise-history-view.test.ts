@@ -51,6 +51,7 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
       },
     ],
     trend: [{ completedAt: '2026-01-15T11:00:00Z', workingLoadKg: 50 }],
+    isLimited: false,
     ...overrides,
   };
 }
@@ -180,14 +181,15 @@ describe('toExerciseHistoryView — chart geometry', () => {
     expect(points).not.toBeNull();
     if (points === null || points === undefined) return;
     expect(points).toHaveLength(3);
-    // Pad 12 of 100 on each side; three points at 0%, 50%, 100% of plot.
-    expect(points[0]?.xFraction).toBe(12);
-    expect(points[1]?.xFraction).toBe(50);
-    expect(points[2]?.xFraction).toBe(88);
+    // Points are already viewBox units (12–88 padding band in a 100×100
+    // space) — the component renders them unchanged, never re-scales.
+    expect(points[0]?.x).toBe(12);
+    expect(points[1]?.x).toBe(50);
+    expect(points[2]?.x).toBe(88);
     // min 40 → bottom (88), max 50 → top (12), mid 45 → center (50).
-    expect(points[0]?.yFraction).toBe(88);
-    expect(points[1]?.yFraction).toBe(12);
-    expect(points[2]?.yFraction).toBe(50);
+    expect(points[0]?.y).toBe(88);
+    expect(points[1]?.y).toBe(12);
+    expect(points[2]?.y).toBe(50);
     expect(points[1]?.loadLabel).toBe('50 kg');
   });
 
@@ -203,8 +205,8 @@ describe('toExerciseHistoryView — chart geometry', () => {
     const points = view.trend?.chartPoints;
     expect(points).not.toBeNull();
     if (points === null || points === undefined) return;
-    expect(points[0]?.yFraction).toBe(0.5);
-    expect(points[1]?.yFraction).toBe(0.5);
+    expect(points[0]?.y).toBe(50);
+    expect(points[1]?.y).toBe(50);
   });
 });
 

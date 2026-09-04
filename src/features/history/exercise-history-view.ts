@@ -64,10 +64,13 @@ export interface ExerciseHistoryTrendView {
 }
 
 export interface ExerciseHistoryChartPointView {
-  /** 0–1 fraction along the plot's width. */
-  readonly xFraction: number;
-  /** 0–1 fraction from the plot's bottom (1 = top edge). */
-  readonly yFraction: number;
+  /**
+   * SVG coordinate in viewBox units (the chart's 100×100 space). Values
+   * stay inside the 12–88 padding band so dots never clip the edges.
+   */
+  readonly x: number;
+  /** SVG y in viewBox units — smaller is higher load (y axis grows down). */
+  readonly y: number;
   readonly loadLabel: string;
 }
 
@@ -85,10 +88,11 @@ export interface ExerciseHistoryViewError {
 }
 
 /**
- * Chart geometry for the trend line: each point's 0–1 fractions leave a
- * 12% padding band on every side so dots never clip the plot edges. With
- * a single point the line is centered; an all-flat load history renders a
- * horizontal line — truthful, never fabricated curvature.
+ * Chart geometry for the trend line: points are emitted directly in the
+ * chart's 100×100 viewBox units with a 12-unit padding band on every side,
+ * so dots never clip the plot edges. With a single point the line is
+ * centered; an all-flat load history renders a horizontal line — truthful,
+ * never fabricated curvature.
  */
 function toChartPoints(
   trend: ReadonlyArray<ExerciseHistoryTrendPointDto>,
@@ -101,13 +105,11 @@ function toChartPoints(
   const loadSpan = maxLoad - minLoad;
 
   return trend.map((point, index) => ({
-    xFraction: pad + (trend.length === 1 ? plotSize / 2 : (plotSize * index) / (trend.length - 1)),
+    x: pad + (trend.length === 1 ? plotSize / 2 : (plotSize * index) / (trend.length - 1)),
     // The viewBox y axis grows downward, so the heaviest load maps to the
-    // smallest y (top of the plot) and the lightest to the largest y.
-    yFraction:
-      loadSpan === 0
-        ? 0.5
-        : pad + (1 - (point.workingLoadKg - minLoad) / loadSpan) * plotSize,
+    // smallest y (top of the plot) and the lightest to the largest y. All
+    // values are viewBox units — the component renders them unchanged.
+    y: loadSpan === 0 ? pad + plotSize / 2 : pad + (1 - (point.workingLoadKg - minLoad) / loadSpan) * plotSize,
     loadLabel: formatKg(point.workingLoadKg),
   }));
 }

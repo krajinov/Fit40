@@ -117,7 +117,7 @@ function buildWeekSummaries(
 }
 
 /** Bounded recency window of the Recent Training card (rows shown). */
-export const RECENT_TRAINING_LIMIT = 3;
+const RECENT_TRAINING_LIMIT = 3;
 
 /**
  * Reads one bounded page of the user's completed sessions through the

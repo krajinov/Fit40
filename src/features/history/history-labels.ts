@@ -58,12 +58,16 @@ export function formatSessionSetLine(set: CompletedSessionSetDto): string {
 }
 
 /**
- * Formats the wall-clock time a workout took, e.g. "45 min", "1 hr 5 min",
- * "2 hr". The input must be computed from the persisted startedAt →
- * completedAt gap — never from logged timed work, which is the sum of work
- * sets, not the workout's duration.
+ * Formats the wall-clock time a workout took, e.g. "<1 min", "45 min",
+ * "1 hr 5 min", "2 hr". Sub-minute sessions render truthfully instead of
+ * flooring to "0 min". The input must be computed from the persisted
+ * startedAt → completedAt gap — never from logged timed work, which is the
+ * sum of work sets, not the workout's duration.
  */
 export function formatHistoryElapsed(elapsedSeconds: number): string {
+  if (elapsedSeconds < 60) {
+    return '<1 min';
+  }
   const totalMinutes = Math.floor(elapsedSeconds / 60);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;

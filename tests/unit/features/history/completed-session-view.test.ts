@@ -75,6 +75,24 @@ describe('toCompletedSessionView', () => {
     expect(view.elapsedLabel).toBeNull();
   });
 
+  it('renders sub-minute elapsed time truthfully instead of flooring to 0 min', () => {
+    const oneSecond = toCompletedSessionView(
+      sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:45:01.000Z' }),
+    );
+    const fiftyNineSeconds = toCompletedSessionView(
+      sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:45:59.000Z' }),
+    );
+    expect(oneSecond.elapsedLabel).toBe('<1 min');
+    expect(fiftyNineSeconds.elapsedLabel).toBe('<1 min');
+  });
+
+  it('formats a 60-second session as one minute', () => {
+    const view = toCompletedSessionView(
+      sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:46:00.000Z' }),
+    );
+    expect(view.elapsedLabel).toBe('1 min');
+  });
+
   it('falls back to positional names and omits unresolved equipment', () => {
     const entries: CompletedSessionDto['entries'] = [
       {

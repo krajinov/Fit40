@@ -89,4 +89,13 @@ describe('formatHistoryElapsed', () => {
     expect(formatHistoryElapsed(65 * 60)).toBe('1 hr 5 min');
     expect(formatHistoryElapsed(120 * 60)).toBe('2 hr');
   });
+
+  it('renders sub-minute sessions truthfully instead of flooring to 0 min', () => {
+    expect(formatHistoryElapsed(1)).toBe('<1 min');
+    expect(formatHistoryElapsed(59)).toBe('<1 min');
+  });
+
+  it('keeps whole-minute formatting at the 60-second boundary', () => {
+    expect(formatHistoryElapsed(60)).toBe('1 min');
+  });
 });

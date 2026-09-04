@@ -11,6 +11,7 @@ import { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment
 import { DrizzleProgramRepository } from './drizzle-program-repository';
 import { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 import { DrizzleSessionRepository } from './drizzle-session-repository';
+import { DrizzleTrainingHistoryRepository } from './drizzle-training-history-repository';
 import { DrizzleUserRepository } from './drizzle-user-repository';
 import { DrizzleUserProfileRepository } from './drizzle-user-profile-repository';
 import { DrizzleWorkoutSessionRepository } from './drizzle-workout-session-repository';
@@ -23,12 +24,15 @@ export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
 export const userProfileRepository = new DrizzleUserProfileRepository(db);
 export const programEnrollmentRepository = new DrizzleProgramEnrollmentRepository(db);
+export const trainingHistoryRepository = new DrizzleTrainingHistoryRepository(db);
 
 export { DrizzleExerciseRepository } from './drizzle-exercise-repository';
 export { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment-repository';
 export { DrizzleProgramRepository } from './drizzle-program-repository';
 export { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 export { DrizzleSessionRepository } from './drizzle-session-repository';
+export { DrizzleTrainingHistoryRepository } from './drizzle-training-history-repository';
 export { DrizzleUserRepository } from './drizzle-user-repository';
 export { DrizzleUserProfileRepository } from './drizzle-user-profile-repository';
 export { DrizzleWorkoutSessionRepository } from './drizzle-workout-session-repository';
+

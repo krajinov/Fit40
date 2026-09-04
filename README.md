@@ -22,6 +22,9 @@ history.
 - **Profile & onboarding** — age, weight, goals, equipment, and limitations
   feed exercise suitability.
 - **Dashboard** — next scheduled workout preview and current program progress.
+- **Training history** — completed sessions across programs with per-exercise
+  detail, plus user-global exercise history (`/history/exercises/[slug]`)
+  showing every completed occurrence and a working-load trend.
 
 ## Progressive Overload
 

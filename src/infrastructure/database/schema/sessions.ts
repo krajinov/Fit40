@@ -55,6 +55,16 @@ export const workoutSessions = pgTable(
   (table) => ({
     userIdIdx: index('workout_sessions_user_id_idx').on(table.userId),
     workoutIdIdx: index('workout_sessions_workout_id_idx').on(table.workoutId),
+    // Read-side index for the user's training history: keyset pagination over
+    // completed sessions ordered by (completed_at DESC, started_at DESC,
+    // id DESC). DESC index columns match the history ordering so the scan
+    // walks the index instead of sorting each page.
+    userCompletedIdx: index('workout_sessions_user_completed_idx').on(
+      table.userId,
+      table.completedAt.desc(),
+      table.startedAt.desc(),
+      table.id.desc(),
+    ),
     // Standalone index on the scheduled occurrence: the composite
     // (enrollment_id, scheduled_workout_id) unique leads with enrollment_id,
     // so it cannot serve scheduled_workout_id-only predicates or the FK

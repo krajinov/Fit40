@@ -10,6 +10,7 @@ import { DrizzleRegistrationRepository } from '@/infrastructure/database/reposit
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
 import { DrizzleUserProfileRepository } from '@/infrastructure/database/repositories/drizzle-user-profile-repository';
+import { DrizzleTrainingHistoryRepository } from '@/infrastructure/database/repositories/drizzle-training-history-repository';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import { seedDatabase } from '@/infrastructure/database/seed';
 
@@ -27,6 +28,7 @@ export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
 export const userProfileRepository = new DrizzleUserProfileRepository(db);
+export const trainingHistoryRepository = new DrizzleTrainingHistoryRepository(db);
 
 /**
  * Truncates every table, providing deterministic per-test isolation.

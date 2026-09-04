@@ -67,9 +67,16 @@ export default async function DashboardPage() {
       </header>
 
       {currentProgram === null ? (
-        <div className="mt-6 md:mt-8">
-          <NoProgramCard />
-        </div>
+        <>
+          <div className="mt-6 md:mt-8">
+            <NoProgramCard />
+          </div>
+          {/* No program yet ≠ no history: users finishing ad-hoc or
+              pre-program sessions still see their recent training. */}
+          <div className="mt-5 md:mt-8">
+            <RecentTrainingCard recentTraining={view.recentTraining} />
+          </div>
+        </>
       ) : (
         <div className="mt-5 flex flex-col gap-5 md:mt-8 md:flex-row md:items-start md:gap-6">
           <div className="flex min-w-0 flex-1 flex-col gap-5 md:gap-6">
@@ -92,11 +99,7 @@ export default async function DashboardPage() {
               programName={currentProgram.program.name}
               currentWeek={currentWeek}
             />
-            <RecentTrainingCard
-              programSlug={currentProgram.program.slug}
-              completedWorkouts={view.completedWorkouts}
-              className="hidden md:flex"
-            />
+            <RecentTrainingCard recentTraining={view.recentTraining} />
           </div>
           <aside className="flex w-full flex-col gap-6 md:w-[360px] md:shrink-0">
             <CurrentProgramCard view={currentProgram} />

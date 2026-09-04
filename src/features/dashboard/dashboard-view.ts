@@ -5,14 +5,22 @@
  * GetCurrentProgramDashboardUseCase (application layer); this module maps
  * the use-case DTO into the serializable view passed to presentational
  * components. It derives nothing the application layer does not already
- * expose: Pencil fields with no source data (calendar day dots, session
- * history dates/volume, program cadence) are omitted rather than fabricated.
+ * expose: Pencil fields with no source data (calendar day dots, program
+ * cadence) are omitted rather than fabricated.
+ *
+ * Recent Training is read from the user-global Training History read model
+ * (ListTrainingHistoryUseCase) — the same source of truth as /history — so
+ * the card reflects completed sessions from every enrollment, including
+ * detached ones, instead of the current enrollment's progress ids.
  */
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import type { TrainingHistoryPageDto } from '@/application/dto/training-history';
 import type { UserProfileDto } from '@/application/dto/user-profile';
 import { getCurrentProgramDashboardUseCase } from '@/features/dashboard/services';
+import { formatHistoryCount, formatHistoryDate } from '@/features/history/history-labels';
+import { listTrainingHistoryUseCase } from '@/features/history/services';
 import {
   nextWorkoutPreviewState,
   toNextWorkoutView,
@@ -20,13 +28,6 @@ import {
 } from '@/features/sessions/next-workout-view';
 
 export type WeekStatus = 'completed' | 'in-progress' | 'upcoming';
-
-export interface CompletedWorkoutEntry {
-  readonly programSlug: string;
-  readonly weekNumber: number;
-  readonly workoutOrder: number;
-  readonly workoutName: string;
-}
 
 export interface WeekSummary {
   readonly weekNumber: number;
@@ -47,15 +48,33 @@ export interface DashboardProgramView {
   readonly nextWorkoutPreview: NextWorkoutPreviewState;
 }
 
+/** One recent-completed-session row of the Recent Training card. */
+export interface RecentTrainingSession {
+  readonly sessionId: string;
+  readonly workoutName: string;
+  readonly programName: string;
+  /** Concise UTC date label, e.g. "Feb 15, 2026". */
+  readonly completedAtLabel: string;
+  /** "12 sets" — the session's logged-set count. */
+  readonly setsLabel: string;
+}
+
+/**
+ * Recent Training card state, built from the user-global history read model
+ * (bounded to RECENT_TRAINING_LIMIT sessions, newest first). A discriminated
+ * union so a failed history read cannot be represented as — or conflated
+ * with — the genuine empty history: `loaded` with an empty array is "no
+ * completed training yet", `unavailable` is "the read failed" (rendered as
+ * its own truthful card state, never as empty).
+ */
+export type RecentTrainingState =
+  | { readonly status: 'loaded'; readonly sessions: ReadonlyArray<RecentTrainingSession> }
+  | { readonly status: 'unavailable' };
+
 export interface DashboardView {
   readonly profile: UserProfileDto;
   readonly currentProgram: DashboardProgramView | null;
-  /**
-   * Completed workouts of the current enrollment in completion order (the
-   * repository orders them by session start time ascending). No dates or
-   * volume are included — none are exposed by the application layer.
-   */
-  readonly completedWorkouts: ReadonlyArray<CompletedWorkoutEntry>;
+  readonly recentTraining: RecentTrainingState;
   /**
    * Per-week completion of the current program, aligned with
    * `currentProgram.program.weeks` order.
@@ -97,36 +116,60 @@ function buildWeekSummaries(
   });
 }
 
+/** Bounded recency window of the Recent Training card (rows shown). */
+const RECENT_TRAINING_LIMIT = 3;
+
 /**
- * Lists the enrollment's completed workouts in completion order. The
- * enrollment DTO's completed ids are ordered by session start time
- * ascending (repository contract), so no extra history query is needed —
- * and no dates or volume are fabricated.
+ * Reads one bounded page of the user's completed sessions through the
+ * existing History use case — no dashboard-specific query, no second
+ * recent-training use case. Returns null both for a typed rejection and for
+ * an unexpected infrastructure failure so the caller can render the
+ * truthful `unavailable` state instead of an empty one.
  */
-function buildCompletedWorkouts(
-  program: ProgramDetailDto,
-  completedIds: ReadonlyArray<string>,
-): CompletedWorkoutEntry[] {
-  const byId = new Map<string, CompletedWorkoutEntry>();
-  for (const week of program.weeks) {
-    for (const scheduled of week.scheduledWorkouts) {
-      byId.set(scheduled.scheduledWorkoutId, {
-        programSlug: program.slug,
-        weekNumber: week.weekNumber,
-        workoutOrder: scheduled.order,
-        workoutName: scheduled.workoutName,
-      });
-    }
+async function readRecentTrainingPage(userId: string): Promise<TrainingHistoryPageDto | null> {
+  try {
+    const result = await listTrainingHistoryUseCase.execute({
+      userId,
+      limit: RECENT_TRAINING_LIMIT,
+    });
+    return result.ok ? result.data : null;
+  } catch (error: unknown) {
+    // Unexpected infrastructure failure (e.g. the history read cannot reach
+    // the database). Recorded per docs/error-handling.md §Logging — the
+    // dashboard degrades gracefully, so without this the failure would be
+    // swallowed entirely. The rest of the dashboard stays usable; the card
+    // degrades to `unavailable` — never to "empty", which would claim the
+    // user has no training.
+    console.error(
+      `Unexpected failure reading recent training for user ${userId}`,
+      error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Maps the history page DTO into the card's view rows. The repository's
+ * order (the recency ladder, newest first) is preserved exactly — nothing
+ * is re-sorted, trimmed, or fabricated.
+ */
+function toRecentTraining(page: TrainingHistoryPageDto | null): RecentTrainingState {
+  if (page === null) {
+    return { status: 'unavailable' };
   }
 
-  const entries: CompletedWorkoutEntry[] = [];
-  for (const id of completedIds) {
-    const entry = byId.get(id);
-    if (entry !== undefined) {
-      entries.push(entry);
-    }
-  }
-  return entries;
+  return {
+    status: 'loaded',
+    sessions: page.sessions.map((session) => ({
+      sessionId: session.sessionId,
+      workoutName: session.workoutName,
+      programName: session.programName,
+      completedAtLabel: formatHistoryDate(session.completedAt),
+      setsLabel: `${formatHistoryCount(session.metrics.totalSets)} ${
+        session.metrics.totalSets === 1 ? 'set' : 'sets'
+      }`,
+    })),
+  };
 }
 
 /**
@@ -143,10 +186,12 @@ export async function buildDashboardView(
   userId: string,
   profile: UserProfileDto,
 ): Promise<DashboardView> {
-  const result = await getCurrentProgramDashboardUseCase.execute(userId);
+  const [result, recentTraining] = await Promise.all([
+    getCurrentProgramDashboardUseCase.execute(userId),
+    readRecentTrainingPage(userId).then(toRecentTraining),
+  ]);
   const current = result.ok && result.data !== null ? result.data : null;
 
-  let completedWorkouts: ReadonlyArray<CompletedWorkoutEntry> = [];
   let weekSummaries: ReadonlyArray<WeekSummary> = [];
   let nextWorkoutPreview: NextWorkoutPreviewState = { status: 'complete' };
   if (current !== null) {
@@ -155,7 +200,6 @@ export async function buildDashboardView(
     const nextWeekNumber =
       enrollment.nextWorkout === null ? null : enrollment.nextWorkout.weekNumber;
 
-    completedWorkouts = buildCompletedWorkouts(current.program, completedIds);
     weekSummaries = buildWeekSummaries(
       current.program,
       new Set(completedIds),
@@ -177,7 +221,7 @@ export async function buildDashboardView(
             enrollment: current.enrollment,
             nextWorkoutPreview,
           },
-    completedWorkouts,
+    recentTraining,
     weekSummaries,
   };
 }

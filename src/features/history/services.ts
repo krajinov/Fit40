@@ -6,6 +6,7 @@
  */
 
 import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';
+import { GetExerciseHistoryUseCase } from '@/application/use-cases/get-exercise-history';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import {
@@ -22,6 +23,11 @@ export const getTrainingTotalsUseCase = new GetTrainingTotalsUseCase(
 );
 
 export const getCompletedSessionUseCase = new GetCompletedSessionUseCase(
+  trainingHistoryRepository,
+  exerciseRepository,
+);
+
+export const getExerciseHistoryUseCase = new GetExerciseHistoryUseCase(
   trainingHistoryRepository,
   exerciseRepository,
 );

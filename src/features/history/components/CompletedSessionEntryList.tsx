@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import type { CompletedSessionEntryView } from '@/features/history/completed-session-view';
 
 interface CompletedSessionEntryListProps {
@@ -29,7 +31,16 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
           className="rounded-card border border-border bg-card p-5 md:p-6"
         >
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="text-[15px] font-semibold text-foreground">{entry.name}</h2>
+            {entry.historyHref !== null ? (
+              <Link
+                href={entry.historyHref}
+                className="rounded-control text-[15px] font-semibold text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                {entry.name}
+              </Link>
+            ) : (
+              <h2 className="text-[15px] font-semibold text-foreground">{entry.name}</h2>
+            )}
             <p className="text-sm text-ink-3">{entry.prescriptionLabel}</p>
           </div>
           {entry.equipmentLabel !== null && (

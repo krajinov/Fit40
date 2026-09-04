@@ -68,6 +68,8 @@ export interface CompletedSessionEntryDto {
   readonly exerciseOrder: number;
   /** Current catalog name, or null when the exercise was not resolved. */
   readonly exerciseName: string | null;
+  /** Current catalog slug (links to the exercise's history page), or null when unresolved. */
+  readonly exerciseSlug: string | null;
   /** Current catalog equipment, or null when unresolved. Display-only. */
   readonly equipment: EquipmentType | null;
   readonly restSeconds: number;
@@ -124,6 +126,7 @@ function serializeEntry(
     exerciseId: log.exerciseId,
     exerciseOrder: log.order,
     exerciseName: meta?.name ?? null,
+    exerciseSlug: meta?.slug ?? null,
     equipment: meta?.equipment ?? null,
     restSeconds: log.restSeconds,
     prescription:

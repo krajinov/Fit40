@@ -20,8 +20,9 @@
  *   timestamps.
  */
 
-import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { UserId, WorkoutSessionId } from '@/domain/types/ids';
+import type { SetLog, WorkoutSession } from '@/domain/entities/workout-session';
+import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
+import type { ExerciseId, UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 /**
  * A `WorkoutSession` narrowed to its completed state: `completedAt` is
@@ -89,6 +90,30 @@ export interface TrainingHistoryTotals {
 }
 
 /**
+ * One historical occurrence of one exercise: the (sessionId, exerciseOrder)
+ * position of its exercise log within one of the user's COMPLETED sessions.
+ *
+ * Identity is occurrence-based, so an exercise performed twice in one
+ * session produces two entries — duplicates are never collapsed. The
+ * prescription is the persisted snapshot (historical truth), the sets are
+ * exactly what was logged, and `programName`/`workoutName` are the display
+ * names resolved by join (detached history keeps the names of its origin).
+ */
+export interface CompletedExerciseOccurrence {
+  readonly sessionId: WorkoutSessionId;
+  /** Position of the exercise log within the session — its identity part. */
+  readonly exerciseOrder: number;
+  /** ISO instant of the owning session's completion — history recency. */
+  readonly completedAt: Date;
+  readonly programName: string;
+  readonly workoutName: string;
+  /** The persisted prescription snapshot of this occurrence. */
+  readonly prescription: RepPrescription;
+  /** The logged sets, ordered by set number; at least one by contract. */
+  readonly sets: ReadonlyArray<SetLog>;
+}
+
+/**
  * Read port for the user's training history.
  */
 export interface TrainingHistoryRepository {
@@ -103,6 +128,28 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     query: TrainingHistoryQuery,
   ): Promise<TrainingHistoryPage>;
+
+  /**
+   * Returns the user's completed occurrences of one exercise, newest first
+   * (the same deterministic recency ladder as the session history:
+   * completedAt desc, startedAt desc, session id desc, exerciseOrder desc so
+   * two occurrences in one session order truthfully by position).
+   *
+   * Contract:
+   * - User-scoped (`user_id`) regardless of enrollment: detached history
+   *   stays included.
+   * - Completed sessions only; the exercise log must have at least one
+   *   logged set — an exercise skipped in an otherwise completed session is
+   *   not an occurrence.
+   * - Bounded: `limit` occurrences at most. The bound is a hard ceiling on
+   *   read cost, not pagination — there is deliberately no cursor.
+   * - Implementation must batch set hydration (no per-occurrence queries).
+   */
+  listCompletedExerciseOccurrences(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    limit: number,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
 
   /**
    * Returns the user's lifetime totals across all completed sessions,

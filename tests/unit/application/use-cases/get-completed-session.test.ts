@@ -142,6 +142,7 @@ function makeContext(session: CompletedWorkoutSession): CompletedSessionContext 
 function makeHistoryRepo(context: CompletedSessionContext | null) {
   return {
     listCompletedSessions: vi.fn(),
+    listCompletedExerciseOccurrences: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn().mockResolvedValue(context),
   } satisfies TrainingHistoryRepository;

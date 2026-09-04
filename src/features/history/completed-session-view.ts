@@ -42,6 +42,8 @@ export interface CompletedSessionSetView {
 export interface CompletedSessionEntryView {
   readonly exerciseOrder: number;
   readonly name: string;
+  /** `/history/exercises/<slug>` when a valid slug resolved, else null. */
+  readonly historyHref: string | null;
   readonly equipmentLabel: string | null;
   readonly prescriptionLabel: string;
   readonly restLabel: string | null;
@@ -63,12 +65,22 @@ export interface CompletedSessionViewError {
   readonly message: string;
 }
 
+/** Route pattern a catalog slug must satisfy before it becomes a link. */
+const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 function toEntryView(
   entry: CompletedSessionDto['entries'][number],
 ): CompletedSessionEntryView {
   return {
     exerciseOrder: entry.exerciseOrder,
     name: entry.exerciseName ?? `Exercise ${entry.exerciseOrder}`,
+    // The slug is current catalog data, not the persisted record — only a
+    // structurally valid slug links out; anything else renders as plain
+    // text instead of a broken URL.
+    historyHref:
+      entry.exerciseSlug !== null && SLUG_PATTERN.test(entry.exerciseSlug)
+        ? `/history/exercises/${entry.exerciseSlug}`
+        : null,
     equipmentLabel: entry.equipment === null ? null : EQUIPMENT_LABELS[entry.equipment],
     prescriptionLabel: formatPrescription(entry.prescription),
     restLabel: entry.restSeconds > 0 ? `${entry.restSeconds}s rest` : null,

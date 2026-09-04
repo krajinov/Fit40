@@ -18,6 +18,10 @@ import { createDurationScheme, createRepScheme } from '@/domain/value-objects/re
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
 import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';
+import {
+  EXERCISE_HISTORY_OCCURRENCE_LIMIT,
+  GetExerciseHistoryUseCase,
+} from '@/application/use-cases/get-exercise-history';
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
 import { users } from '@/infrastructure/database/schema';
 
@@ -178,6 +182,10 @@ const OWNER_B = 'user-hist-b';
 const listUseCase = new ListTrainingHistoryUseCase(trainingHistoryRepository);
 const totalsUseCase = new GetTrainingTotalsUseCase(trainingHistoryRepository);
 const detailUseCase = new GetCompletedSessionUseCase(
+  trainingHistoryRepository,
+  exerciseRepository,
+);
+const exerciseHistoryUseCase = new GetExerciseHistoryUseCase(
   trainingHistoryRepository,
   exerciseRepository,
 );
@@ -871,6 +879,244 @@ describe('training history — totals', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toEqual({ completedSessions: 1, loggedSets: 1 });
+  });
+});
+
+describe('training history — per-exercise occurrences', () => {
+  it('returns an empty history for a seeded exercise never performed', async () => {
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'push-up',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries).toEqual([]);
+    expect(result.data.trend).toEqual([]);
+    expect(result.data.exercise.slug).toBe('push-up');
+  });
+
+  it('returns EXERCISE_NOT_FOUND for an unknown slug', async () => {
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'not-a-real-exercise',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('EXERCISE_NOT_FOUND');
+  });
+
+  it('returns only completed occurrences with at least one set, newest first', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-new',
+        startedAt: '2025-02-03T10:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 22.5 }] }],
+      }),
+      // Skipped exercise in an otherwise completed session (the target
+      // exercise has zero set logs) — not an occurrence.
+      historySession({
+        id: 'session-occ-skipped',
+        occurrence: 1,
+        startedAt: '2025-01-20T10:00:00Z',
+        completedAt: '2025-01-20T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+          { exerciseId: 'ex-002', type: 'reps', sets: [] },
+        ],
+      }),
+      // In-progress session — never part of history.
+      historySession({
+        id: 'session-occ-progress',
+        occurrence: 2,
+        startedAt: '2025-03-01T10:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'session-occ-old',
+        occurrence: 3,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+    );
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-occ-new',
+      'session-occ-old',
+    ]);
+    expect(result.data.entries[0]?.workingLoadKg).toBe(22.5);
+    expect(result.data.entries[1]?.workingLoadKg).toBe(20);
+    // Trend is chronological (oldest first) over the loaded occurrences.
+    expect(result.data.trend).toEqual([
+      { completedAt: '2025-01-06T11:00:00.000Z', workingLoadKg: 20 },
+      { completedAt: '2025-02-03T11:00:00.000Z', workingLoadKg: 22.5 },
+    ]);
+  });
+
+  it("never returns another user's occurrences", async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-a',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] }],
+      }),
+      historySession({
+        id: 'session-occ-b',
+        userId: OWNER_B,
+        enrollmentId: null,
+        occurrence: 1,
+        startedAt: '2025-02-06T10:00:00Z',
+        completedAt: '2025-02-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 9 }] }],
+      }),
+    );
+
+    const forA = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'bodyweight-squat' });
+    expect(forA.ok).toBe(true);
+    if (!forA.ok) return;
+    expect(forA.data.entries.map((entry) => entry.sessionId)).toEqual(['session-occ-a']);
+
+    const forB = await exerciseHistoryUseCase.execute({ userId: OWNER_B, slug: 'bodyweight-squat' });
+    expect(forB.ok).toBe(true);
+    if (!forB.ok) return;
+    expect(forB.data.entries.map((entry) => entry.sessionId)).toEqual(['session-occ-b']);
+  });
+
+  it('keeps detached occurrences visible with their display names', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-detached',
+        enrollmentId: null,
+        occurrence: 3,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] }],
+      }),
+    );
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'bodyweight-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries).toHaveLength(1);
+    expect(result.data.entries[0]?.programName).toBe('Strong at Home');
+    expect(result.data.entries[0]?.workoutName).toBe('Home Full Body A');
+  });
+
+  it('keeps two occurrences in one session as two entries ordered by position', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-dup',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 16 }] },
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 12 }] },
+        ],
+      }),
+    );
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'bodyweight-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Same session, orders 1 and 3: two distinct occurrences, never collapsed.
+    expect(result.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-occ-dup', 3],
+      ['session-occ-dup', 1],
+    ]);
+  });
+
+  it('marks bodyweight and duration occurrences unloaded and excludes them from the trend', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-bw',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: null }] },
+        ],
+      }),
+      historySession({
+        id: 'session-occ-duration',
+        occurrence: 1,
+        startedAt: '2025-01-13T10:00:00Z',
+        completedAt: '2025-01-13T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'duration', sets: [{ durationSeconds: 30 }] }],
+      }),
+    );
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries).toHaveLength(2);
+    expect(result.data.entries.every((entry) => entry.workingLoadKg === null)).toBe(true);
+    expect(result.data.trend).toEqual([]);
+  });
+
+  it('preserves a logged 0 kg as a real external load in entries and trend', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-occ-zero',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 0 }] }],
+      }),
+    );
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries[0]?.workingLoadKg).toBe(0);
+    expect(result.data.trend).toEqual([
+      { completedAt: '2025-01-06T11:00:00.000Z', workingLoadKg: 0 },
+    ]);
+  });
+
+  it('bounds the read to the fixed occurrence limit', async () => {
+    // More distinct (session, occurrence) pairs than the limit. All are
+    // detached (NULL enrollment): detached sessions never collide on the
+    // (enrollment, scheduled workout) uniqueness rule, so every row saves.
+    const sessions: WorkoutSession[] = [];
+    for (let i = 0; i < EXERCISE_HISTORY_OCCURRENCE_LIMIT + 5; i++) {
+      sessions.push(
+        historySession({
+          id: `session-occ-limit-${i}`,
+          enrollmentId: null,
+          startedAt: new Date(Date.parse('2025-01-06T10:00:00Z') + i * 86_400_000).toISOString(),
+          completedAt: new Date(Date.parse('2025-01-06T11:00:00Z') + i * 86_400_000).toISOString(),
+          logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] }],
+        }),
+      );
+    }
+    await saveAll(...sessions);
+
+    const result = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'bodyweight-squat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entries).toHaveLength(EXERCISE_HISTORY_OCCURRENCE_LIMIT);
   });
 });
 

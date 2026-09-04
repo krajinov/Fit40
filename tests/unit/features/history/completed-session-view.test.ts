@@ -35,6 +35,7 @@ function sessionDto(overrides?: {
           exerciseId: 'ex-001',
           exerciseOrder: 1,
           exerciseName: 'Goblet Squat',
+          exerciseSlug: 'goblet-squat',
           equipment: 'kettlebell',
           restSeconds: 90,
           prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
@@ -80,6 +81,7 @@ describe('toCompletedSessionView', () => {
         exerciseId: 'ex-404',
         exerciseOrder: 3,
         exerciseName: null,
+        exerciseSlug: null,
         equipment: null,
         restSeconds: 0,
         prescription: { type: 'reps', sets: 2, minReps: 8, maxReps: 10 },
@@ -99,6 +101,7 @@ describe('toCompletedSessionView', () => {
         exerciseId: 'ex-015',
         exerciseOrder: 1,
         exerciseName: 'Plank',
+        exerciseSlug: 'dead-bug',
         equipment: 'bodyweight',
         restSeconds: 60,
         prescription: { type: 'duration', sets: 3, seconds: 45 },
@@ -109,5 +112,46 @@ describe('toCompletedSessionView', () => {
       sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0 } }),
     );
     expect(view.metricsLineLabel).toBe('1 set');
+  });
+
+  it('links a resolved catalog slug to the exercise history page', () => {
+    const view = toCompletedSessionView(sessionDto());
+    expect(view.entries[0]?.historyHref).toBe('/history/exercises/goblet-squat');
+  });
+
+  it('renders no history link when the slug is missing or malformed', () => {
+    const badSlug: CompletedSessionDto['entries'] = [
+      {
+        exerciseId: 'ex-099',
+        exerciseOrder: 1,
+        exerciseName: 'Odd Exercise',
+        exerciseSlug: 'Not_A_Valid_Slug',
+        equipment: null,
+        restSeconds: 60,
+        prescription: { type: 'reps', sets: 2, minReps: 8, maxReps: 10 },
+        sets: [],
+      },
+    ];
+    const noSlugView = toCompletedSessionView(
+      sessionDto({ entries: badSlug }),
+    );
+    expect(noSlugView.entries[0]?.historyHref).toBeNull();
+
+    const unresolved = sessionDto({
+      entries: [
+        {
+          exerciseId: 'ex-404',
+          exerciseOrder: 2,
+          exerciseName: null,
+          exerciseSlug: null,
+          equipment: null,
+          restSeconds: 60,
+          prescription: { type: 'reps', sets: 2, minReps: 8, maxReps: 10 },
+          sets: [],
+        },
+      ],
+    });
+    const unresolvedView = toCompletedSessionView(unresolved);
+    expect(unresolvedView.entries[0]?.historyHref).toBeNull();
   });
 });

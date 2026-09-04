@@ -1,7 +1,8 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, lt, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type {
+  CompletedExerciseOccurrence,
   CompletedSessionContext,
   CompletedWorkoutSession,
   TrainingHistoryCursor,
@@ -11,9 +12,11 @@ import type {
   TrainingHistoryRepository,
   TrainingHistoryTotals,
 } from '@/application/ports/training-history-repository';
-import type { UserId, WorkoutSessionId } from '@/domain/types/ids';
+import type { ExerciseId, UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
+import type { ExerciseOccurrenceRow } from '../mappers/exercise-occurrence-mapper';
+import { mapCompletedExerciseOccurrences } from '../mappers/exercise-occurrence-mapper';
 import { mapSessionRows } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, trainingPrograms, workoutSessions, workouts } from '../schema';
 
@@ -222,6 +225,93 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
     const sessionCount = sessionRows[0]?.sessionCount ?? 0;
 
     return { completedSessions: sessionCount, loggedSets: setCount };
+  }
+
+  /**
+   * Per-exercise occurrences, bounded and occurrence-based:
+   * - Q1 selects up to `limit` matching exercise logs, joined to their
+   *   owning completed session (ownership + completed-only are structural
+   *   filters) and to the workout/program display names. An EXISTS
+   *   subquery — no join — enforces the ≥1-logged-set contract, so
+   *   duplicate rows cannot appear and the DISTINCT ladder ordering is
+   *   untouched. Ordering is the history recency ladder plus
+   *   exercise_order DESC so two occurrences in one session order
+   *   truthfully by position.
+   * - Q2 batch-hydrates the sets of exactly the returned occurrences in
+   *   one query. Drizzle 0.45 has no row-value (tuple) `inArray`, so the
+   *   (session_id, exercise_order) pair filter is a typed OR-of-ANDs —
+   *   the same fully-typed expansion style as the keyset predicate.
+   */
+  async listCompletedExerciseOccurrences(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    limit: number,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
+    const occurrenceRows: ExerciseOccurrenceRow[] = await this.db
+      .select({
+        sessionId: workoutSessions.id,
+        exerciseOrder: exerciseLogs.exerciseOrder,
+        startedAt: workoutSessions.startedAt,
+        completedAt: workoutSessions.completedAt,
+        workoutName: workouts.name,
+        programName: trainingPrograms.name,
+        prescriptionType: exerciseLogs.prescriptionType,
+        prescribedSets: exerciseLogs.sets,
+        minReps: exerciseLogs.minReps,
+        maxReps: exerciseLogs.maxReps,
+        durationSeconds: exerciseLogs.durationSeconds,
+      })
+      .from(exerciseLogs)
+      .innerJoin(workoutSessions, eq(exerciseLogs.sessionId, workoutSessions.id))
+      .innerJoin(workouts, eq(workoutSessions.workoutId, workouts.id))
+      .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          eq(exerciseLogs.exerciseId, exerciseId),
+          isNotNull(workoutSessions.completedAt),
+          // A skipped exercise (zero set logs) is not an occurrence.
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(setLogs)
+              .where(
+                and(
+                  eq(setLogs.sessionId, exerciseLogs.sessionId),
+                  eq(setLogs.exerciseOrder, exerciseLogs.exerciseOrder),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+        desc(exerciseLogs.exerciseOrder),
+      )
+      .limit(limit);
+
+    if (occurrenceRows.length === 0) {
+      return [];
+    }
+
+    const setRows = await this.db
+      .select()
+      .from(setLogs)
+      .where(
+        or(
+          ...occurrenceRows.map((row) =>
+            and(
+              eq(setLogs.sessionId, row.sessionId),
+              eq(setLogs.exerciseOrder, row.exerciseOrder),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+
+    return mapCompletedExerciseOccurrences(occurrenceRows, setRows);
   }
 
   async findCompletedSessionById(

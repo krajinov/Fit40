@@ -78,6 +78,9 @@ export interface ExerciseHistoryEntryDto {
 
 /** One chronological trend point: only externally loaded occurrences. */
 export interface ExerciseHistoryTrendPointDto {
+  /** Occurrence identity — one exercise can occur multiple times per session. */
+  readonly sessionId: string;
+  readonly exerciseOrder: number;
   readonly completedAt: string;
   readonly workingLoadKg: number;
 }
@@ -181,6 +184,8 @@ export function toExerciseHistoryDto(
   const trend: ExerciseHistoryTrendPointDto[] = entries
     .filter(hasExternalLoad)
     .map((entry) => ({
+      sessionId: entry.sessionId,
+      exerciseOrder: entry.exerciseOrder,
       completedAt: entry.completedAt,
       workingLoadKg: entry.workingLoadKg,
     }))

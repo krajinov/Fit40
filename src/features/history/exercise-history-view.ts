@@ -17,6 +17,9 @@
  *   with the line chart drawn above it as pure SVG decoration.
  * - The chart renders only when at least two points exist; fewer points
  *   get an honest explanation instead of a fabricated slope.
+ * - Trend points key on occurrence identity (sessionId, exerciseOrder) —
+ *   never completedAt — because one exercise can occur multiple times in
+ *   one completed session.
  * - No PRs, e1RM, or recommendations are invented here.
  */
 
@@ -50,6 +53,7 @@ export interface ExerciseHistoryEntryView {
 }
 
 export interface ExerciseHistoryTrendPointView {
+  /** (sessionId, exerciseOrder) — unique occurrence identity for keys. */
   readonly key: string;
   readonly completedAtLabel: string;
   readonly loadLabel: string;
@@ -65,6 +69,8 @@ export interface ExerciseHistoryTrendView {
 }
 
 export interface ExerciseHistoryChartPointView {
+  /** (sessionId, exerciseOrder) — unique occurrence identity for keys. */
+  readonly key: string;
   /**
    * SVG coordinate in viewBox units (the chart's 100×100 space). Values
    * stay inside the 12–88 padding band so dots never clip the edges.
@@ -106,6 +112,7 @@ function toChartPoints(
   const loadSpan = maxLoad - minLoad;
 
   return trend.map((point, index) => ({
+    key: `${point.sessionId}#${point.exerciseOrder}`,
     x: pad + (trend.length === 1 ? plotSize / 2 : (plotSize * index) / (trend.length - 1)),
     // The viewBox y axis grows downward, so the heaviest load maps to the
     // smallest y (top of the plot) and the lightest to the largest y. All
@@ -144,7 +151,7 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
       chartPoints:
         dto.trend.length >= MIN_TREND_POINTS_FOR_CHART ? toChartPoints(dto.trend) : null,
       textPoints: dto.trend.map((point) => ({
-        key: point.completedAt,
+        key: `${point.sessionId}#${point.exerciseOrder}`,
         completedAtLabel: formatHistoryDate(point.completedAt),
         loadLabel: formatKg(point.workingLoadKg),
       })),

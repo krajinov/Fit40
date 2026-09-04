@@ -10,6 +10,9 @@
  *   a fabricated slope); all-flat loads render a horizontal line.
  * - Only externally loaded occurrences reach this component; bodyweight,
  *   timed, and 0-point histories are filtered out upstream.
+ * - Chart dots and accessible text entries key on occurrence identity
+ *   (sessionId, exerciseOrder) — never completedAt — because one exercise
+ *   can occur multiple times in one completed session.
  */
 
 import type { ExerciseHistoryTrendView } from '@/features/history/exercise-history-view';
@@ -45,7 +48,7 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
           />
           {chartPoints.map((point) => (
             <circle
-              key={`${point.x}-${point.y}`}
+              key={point.key}
               cx={point.x}
               cy={point.y}
               r={POINT_RADIUS}

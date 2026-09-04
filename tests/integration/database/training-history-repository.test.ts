@@ -953,10 +953,21 @@ describe('training history — per-exercise occurrences', () => {
     ]);
     expect(result.data.entries[0]?.workingLoadKg).toBe(22.5);
     expect(result.data.entries[1]?.workingLoadKg).toBe(20);
-    // Trend is chronological (oldest first) over the loaded occurrences.
+    // Trend is chronological (oldest first) over the loaded occurrences,
+    // each point carrying its (sessionId, exerciseOrder) identity.
     expect(result.data.trend).toEqual([
-      { completedAt: '2025-01-06T11:00:00.000Z', workingLoadKg: 20 },
-      { completedAt: '2025-02-03T11:00:00.000Z', workingLoadKg: 22.5 },
+      {
+        sessionId: 'session-occ-old',
+        exerciseOrder: 1,
+        completedAt: '2025-01-06T11:00:00.000Z',
+        workingLoadKg: 20,
+      },
+      {
+        sessionId: 'session-occ-new',
+        exerciseOrder: 1,
+        completedAt: '2025-02-03T11:00:00.000Z',
+        workingLoadKg: 22.5,
+      },
     ]);
   });
 
@@ -1088,7 +1099,12 @@ describe('training history — per-exercise occurrences', () => {
     if (!result.ok) return;
     expect(result.data.entries[0]?.workingLoadKg).toBe(0);
     expect(result.data.trend).toEqual([
-      { completedAt: '2025-01-06T11:00:00.000Z', workingLoadKg: 0 },
+      {
+        sessionId: 'session-occ-zero',
+        exerciseOrder: 1,
+        completedAt: '2025-01-06T11:00:00.000Z',
+        workingLoadKg: 0,
+      },
     ]);
   });
 

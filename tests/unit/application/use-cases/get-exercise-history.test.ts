@@ -301,8 +301,18 @@ describe('GetExerciseHistoryUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.trend).toEqual([
-      { completedAt: '2026-01-01T10:00:00.000Z', workingLoadKg: 50 },
-      { completedAt: '2026-03-01T10:00:00.000Z', workingLoadKg: 55 },
+      {
+        sessionId: 'session-old',
+        exerciseOrder: 1,
+        completedAt: '2026-01-01T10:00:00.000Z',
+        workingLoadKg: 50,
+      },
+      {
+        sessionId: 'session-new',
+        exerciseOrder: 1,
+        completedAt: '2026-03-01T10:00:00.000Z',
+        workingLoadKg: 55,
+      },
     ]);
   });
 });

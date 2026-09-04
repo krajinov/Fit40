@@ -51,7 +51,14 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
         workingLoadKg: null,
       },
     ],
-    trend: [{ completedAt: '2026-01-15T11:00:00Z', workingLoadKg: 50 }],
+    trend: [
+      {
+        sessionId: 'session-trend',
+        exerciseOrder: 1,
+        completedAt: '2026-01-15T11:00:00Z',
+        workingLoadKg: 50,
+      },
+    ],
     isLimited: false,
     ...overrides,
   };
@@ -179,7 +186,7 @@ describe('toExerciseHistoryView — duplicates and empty states', () => {
     const view = toExerciseHistoryView(historyDto());
     expect(view.trend?.chartPoints).toBeNull();
     expect(view.trend?.textPoints).toEqual([
-      { key: '2026-01-15T11:00:00Z', completedAtLabel: 'Jan 15, 2026', loadLabel: '50 kg' },
+      { key: 'session-trend#1', completedAtLabel: 'Jan 15, 2026', loadLabel: '50 kg' },
     ]);
   });
 });
@@ -188,9 +195,24 @@ describe('toExerciseHistoryView — chart geometry', () => {
   it('maps chronological chart geometry for three points with padding', () => {
     const dto = historyDto({
       trend: [
-        { completedAt: '2026-01-01T11:00:00Z', workingLoadKg: 40 },
-        { completedAt: '2026-02-01T11:00:00Z', workingLoadKg: 50 },
-        { completedAt: '2026-03-01T11:00:00Z', workingLoadKg: 45 },
+        {
+          sessionId: 'session-geo-1',
+          exerciseOrder: 1,
+          completedAt: '2026-01-01T11:00:00Z',
+          workingLoadKg: 40,
+        },
+        {
+          sessionId: 'session-geo-2',
+          exerciseOrder: 1,
+          completedAt: '2026-02-01T11:00:00Z',
+          workingLoadKg: 50,
+        },
+        {
+          sessionId: 'session-geo-3',
+          exerciseOrder: 1,
+          completedAt: '2026-03-01T11:00:00Z',
+          workingLoadKg: 45,
+        },
       ],
     });
 
@@ -214,8 +236,18 @@ describe('toExerciseHistoryView — chart geometry', () => {
   it('renders a flat load history as a horizontal line (never fabricated slope)', () => {
     const dto = historyDto({
       trend: [
-        { completedAt: '2026-01-01T11:00:00Z', workingLoadKg: 50 },
-        { completedAt: '2026-02-01T11:00:00Z', workingLoadKg: 50 },
+        {
+          sessionId: 'session-flat-1',
+          exerciseOrder: 1,
+          completedAt: '2026-01-01T11:00:00Z',
+          workingLoadKg: 50,
+        },
+        {
+          sessionId: 'session-flat-2',
+          exerciseOrder: 1,
+          completedAt: '2026-02-01T11:00:00Z',
+          workingLoadKg: 50,
+        },
       ],
     });
 

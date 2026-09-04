@@ -62,11 +62,19 @@ function dtoWithTrend(
 ): ExerciseHistoryDto {
   // A trend is derived from entries (newest first), so the fixture keeps the
   // same occurrences in both shapes: entries reversed, trend chronological.
-  const entries: ExerciseHistoryDto['entries'] = [...trend]
+  // Each point carries its (sessionId, exerciseOrder) occurrence identity —
+  // one externally loaded occurrence per session here.
+  const trendPoints: ExerciseHistoryDto['trend'] = trend.map((point, i) => ({
+    sessionId: `session-${i}`,
+    exerciseOrder: 1,
+    completedAt: point.completedAt,
+    workingLoadKg: point.workingLoadKg,
+  }));
+  const entries: ExerciseHistoryDto['entries'] = [...trendPoints]
     .reverse()
-    .map((point, i) => ({
-      sessionId: `session-${i}`,
-      exerciseOrder: 1,
+    .map((point) => ({
+      sessionId: point.sessionId,
+      exerciseOrder: point.exerciseOrder,
       completedAt: point.completedAt,
       programName: 'Fit40 Beginner Strength',
       workoutName: 'Full Body A',
@@ -83,7 +91,7 @@ function dtoWithTrend(
       equipment: 'kettlebell',
     },
     entries,
-    trend,
+    trend: trendPoints,
     isLimited: false,
   };
 }
@@ -146,6 +154,87 @@ describe('ExerciseHistoryTrend — viewBox coordinate units', () => {
       expect(x).toBeLessThanOrEqual(100);
       expect(y).toBeGreaterThanOrEqual(0);
       expect(y).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe('ExerciseHistoryTrend — occurrence-unique keys', () => {
+  it('renders two same-session occurrences with distinct keys and no duplicate-key warnings', async () => {
+    // Regression: the same exercise twice in ONE completed session — both
+    // externally loaded with an identical completedAt. Keys must derive from
+    // the (sessionId, exerciseOrder) occurrence identity, never from
+    // completedAt (identical here) or chart geometry.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const dto: ExerciseHistoryDto = {
+        exercise: {
+          id: 'ex-001',
+          name: 'Goblet Squat',
+          slug: 'goblet-squat',
+          equipment: 'kettlebell',
+        },
+        // Entries are newest first; within one session the higher position
+        // is the later occurrence. Both share the same completedAt.
+        entries: [
+          {
+            sessionId: 'session-dup',
+            exerciseOrder: 2,
+            completedAt: '2026-02-15T11:00:00Z',
+            programName: 'Fit40 Beginner Strength',
+            workoutName: 'Full Body A',
+            prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 } as const,
+            sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 44, rpe: null }],
+            workingLoadKg: 44,
+          },
+          {
+            sessionId: 'session-dup',
+            exerciseOrder: 1,
+            completedAt: '2026-02-15T11:00:00Z',
+            programName: 'Fit40 Beginner Strength',
+            workoutName: 'Full Body A',
+            prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 } as const,
+            sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 40, rpe: null }],
+            workingLoadKg: 40,
+          },
+        ],
+        // Chronological trend (oldest first): the same two occurrences.
+        trend: [
+          {
+            sessionId: 'session-dup',
+            exerciseOrder: 1,
+            completedAt: '2026-02-15T11:00:00Z',
+            workingLoadKg: 40,
+          },
+          {
+            sessionId: 'session-dup',
+            exerciseOrder: 2,
+            completedAt: '2026-02-15T11:00:00Z',
+            workingLoadKg: 44,
+          },
+        ],
+        isLimited: false,
+      };
+      const view = toExerciseHistoryView(dto);
+      if (view.trend === null) throw new Error('expected a trend view');
+
+      // Both occurrences are preserved, in chronological occurrence order,
+      // with distinct identity keys in the accessible text points...
+      const textKeys = view.trend.textPoints.map((point) => point.key);
+      expect(textKeys).toEqual(['session-dup#1', 'session-dup#2']);
+      expect(new Set(textKeys).size).toBe(2);
+      // ...and in the chart geometry points.
+      const chartKeys = view.trend.chartPoints?.map((point) => point.key) ?? [];
+      expect(chartKeys).toEqual(['session-dup#1', 'session-dup#2']);
+      expect(new Set(chartKeys).size).toBe(2);
+
+      // React renders both dots and both accessible entries without any
+      // duplicate-key collision warning.
+      const container = await renderTrend(view.trend);
+      expect(container.querySelectorAll('svg circle')).toHaveLength(2);
+      expect(container.querySelectorAll('ol > li')).toHaveLength(2);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
     }
   });
 });

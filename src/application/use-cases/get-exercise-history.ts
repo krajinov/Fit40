@@ -20,6 +20,7 @@
 import {
   toExerciseHistoryDto,
   type ExerciseHistoryDto,
+  EXERCISE_HISTORY_OCCURRENCE_LIMIT,
 } from '@/application/dto/exercise-history';
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type { TrainingHistoryRepository } from '@/application/ports/training-history-repository';
@@ -38,8 +39,12 @@ export type GetExerciseHistoryError =
       readonly message: string;
     };
 
-/** Hard ceiling on the occurrences read per request (no pagination). */
-export const EXERCISE_HISTORY_OCCURRENCE_LIMIT = 50;
+/**
+ * Hard ceiling on the occurrences read per request (no pagination). Owned by
+ * the DTO module (the training-history convention); re-exported here for the
+ * use case's public surface.
+ */
+export { EXERCISE_HISTORY_OCCURRENCE_LIMIT };
 
 export interface GetExerciseHistoryInput {
   readonly userId: string;

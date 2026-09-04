@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExerciseHistoryDto } from '@/application/dto/exercise-history';
+import { EXERCISE_HISTORY_OCCURRENCE_LIMIT } from '@/application/dto/exercise-history';
 
 const { historyExecute } = vi.hoisted(() => ({
   historyExecute: vi.fn(),
@@ -55,6 +56,23 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
     ...overrides,
   };
 }
+
+/** 50 occurrence stubs — the full bounded read, for the capped-label case. */
+const limitedEntries: ExerciseHistoryDto['entries'] = Array.from(
+  { length: EXERCISE_HISTORY_OCCURRENCE_LIMIT },
+  (_, i) => ({
+    sessionId: `session-${i}`,
+    exerciseOrder: 1,
+    completedAt: '2026-02-15T11:00:00Z',
+    programName: 'Fit40 Beginner Strength',
+    workoutName: 'Full Body A',
+    prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 } as const,
+    sets: [
+      { type: 'reps', setNumber: 1, reps: 10, weightKg: 52.5, rpe: 8 },
+    ],
+    workingLoadKg: 52.5,
+  }),
+);
 
 describe('toExerciseHistoryView', () => {
   it('formats the header, occurrence count, and entry labels truthfully', () => {
@@ -207,6 +225,22 @@ describe('toExerciseHistoryView — chart geometry', () => {
     if (points === null || points === undefined) return;
     expect(points[0]?.y).toBe(50);
     expect(points[1]?.y).toBe(50);
+  });
+});
+
+describe('toExerciseHistoryView — occurrence count label', () => {
+  it('labels a full bounded read as the latest N occurrences, not a total', () => {
+    const dto = historyDto({ isLimited: true, entries: limitedEntries });
+
+    const view = toExerciseHistoryView(dto);
+    expect(view.occurrenceCountLabel).toBe('Latest 50 occurrences');
+  });
+
+  it('keeps the exact-count wording below the bound', () => {
+    const dto = historyDto({ isLimited: false });
+
+    const view = toExerciseHistoryView(dto);
+    expect(view.occurrenceCountLabel).toBe('1 occurrence');
   });
 });
 

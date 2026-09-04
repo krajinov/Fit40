@@ -25,6 +25,7 @@ import type {
   ExerciseHistoryEntryDto,
   ExerciseHistoryTrendPointDto,
 } from '@/application/dto/exercise-history';
+import { EXERCISE_HISTORY_OCCURRENCE_LIMIT } from '@/application/dto/exercise-history';
 import { err, ok, type Result } from '@/domain/types/result';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
 import { formatHistoryDate, formatSessionSetLine } from '@/features/history/history-labels';
@@ -154,9 +155,12 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
   return {
     heading: dto.exercise.name,
     equipmentLabel: EQUIPMENT_LABELS[dto.exercise.equipment],
-    occurrenceCountLabel: `${dto.entries.length} ${
-      dto.entries.length === 1 ? 'occurrence' : 'occurrences'
-    }`,
+    // The read is bounded to the latest EXERCISE_HISTORY_OCCURRENCE_LIMIT
+    // occurrences by design (no pagination on this screen): when the cap is
+    // reached, the label says so instead of implying an all-time total.
+    occurrenceCountLabel: dto.isLimited
+      ? `Latest ${EXERCISE_HISTORY_OCCURRENCE_LIMIT} occurrences`
+      : `${dto.entries.length} ${dto.entries.length === 1 ? 'occurrence' : 'occurrences'}`,
     entries,
     trend,
   };

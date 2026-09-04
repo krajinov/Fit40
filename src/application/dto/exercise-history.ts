@@ -90,11 +90,25 @@ export interface ExerciseHistoryExerciseDto {
   readonly equipment: EquipmentType;
 }
 
+/**
+ * Hard ceiling on occurrences read per request. A deliberate display bound
+ * (no pagination on this screen), matching the training-history DTO module's
+ * page-size convention.
+ */
+export const EXERCISE_HISTORY_OCCURRENCE_LIMIT = 50;
+
 /** The assembled per-exercise history, serializable for Server Components. */
 export interface ExerciseHistoryDto {
   readonly exercise: ExerciseHistoryExerciseDto;
   readonly entries: ReadonlyArray<ExerciseHistoryEntryDto>;
   readonly trend: ReadonlyArray<ExerciseHistoryTrendPointDto>;
+  /**
+   * True when the bounded read returned exactly its limit — the screen then
+   * labels the list as the latest N occurrences instead of implying an
+   * all-time total. No COUNT query backs this: reaching the bound is the
+   * signal.
+   */
+  readonly isLimited: boolean;
 }
 
 function serializeSet(set: SetLog): ExerciseHistorySetDto {
@@ -181,6 +195,7 @@ export function toExerciseHistoryDto(
     },
     entries,
     trend,
+    isLimited: occurrences.length >= EXERCISE_HISTORY_OCCURRENCE_LIMIT,
   };
 }
 

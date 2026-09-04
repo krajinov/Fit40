@@ -83,10 +83,15 @@ export const workoutSessions = pgTable('workout_sessions', {
 
 ```
 src/infrastructure/database/repositories/
-├── user-repository.ts
-├── workout-session-repository.ts
-├── training-program-repository.ts
-└── exercise-repository.ts
+├── drizzle-user-repository.ts
+├── drizzle-user-profile-repository.ts
+├── drizzle-registration-repository.ts
+├── drizzle-session-repository.ts
+├── drizzle-workout-session-repository.ts
+├── drizzle-training-history-repository.ts
+├── drizzle-program-repository.ts
+├── drizzle-program-enrollment-repository.ts
+└── drizzle-exercise-repository.ts
 ```
 
 ### Rules

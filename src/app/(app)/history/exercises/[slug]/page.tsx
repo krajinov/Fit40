@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight, Dumbbell } from 'lucide-react';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 import { EmptyState } from '@/components/shared/EmptyState';
 import { PageContainer } from '@/components/shared/PageContainer';
@@ -16,15 +17,14 @@ interface ExerciseHistoryPageProps {
   readonly params: Promise<{ readonly slug: string }>;
 }
 
-async function resolveExerciseName(slug: string): Promise<string | null> {
-  const user = await getCurrentUser();
-  if (user === null) {
-    return null;
-  }
-
-  const viewResult = await buildExerciseHistoryView(user.id, slug);
-  return viewResult.ok ? viewResult.data.heading : null;
-}
+/**
+ * Request-scoped dedup of the exercise-history build: generateMetadata and
+ * the page render both need the same view for the same (userId, slug), and
+ * without cache() the repository read would run twice per request.
+ * React's cache() is per-request only — nothing is cached across requests —
+ * and the key is the full argument pair (authenticated userId + slug).
+ */
+const exerciseHistoryView = cache(buildExerciseHistoryView);
 
 export async function generateMetadata({
   params,
@@ -34,8 +34,15 @@ export async function generateMetadata({
     return { title: 'Exercise history' };
   }
 
-  const name = await resolveExerciseName(parsed.data.slug);
-  return { title: name === null ? 'Exercise history' : `${name} history` };
+  const user = await getCurrentUser();
+  if (user === null) {
+    return { title: 'Exercise history' };
+  }
+
+  const viewResult = await exerciseHistoryView(user.id, parsed.data.slug);
+  return {
+    title: viewResult.ok ? `${viewResult.data.heading} history` : 'Exercise history',
+  };
 }
 
 export default async function ExerciseHistoryPage({ params }: ExerciseHistoryPageProps) {
@@ -51,7 +58,7 @@ export default async function ExerciseHistoryPage({ params }: ExerciseHistoryPag
   // URL — so history can only ever be the viewer's own.
   const user = await requireUser(`/history/exercises/${paramsResult.data.slug}`);
 
-  const viewResult = await buildExerciseHistoryView(user.id, paramsResult.data.slug);
+  const viewResult = await exerciseHistoryView(user.id, paramsResult.data.slug);
   // EXERCISE_NOT_FOUND addresses an unknown slug — a 404. A known exercise
   // with no user history is NOT an error: the view carries empty entries.
   if (!viewResult.ok) {

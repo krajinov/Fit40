@@ -358,6 +358,50 @@ describe('buildDashboardView / recentTraining', () => {
     expect(failedView.recentTraining).toEqual({ status: 'unavailable' });
   });
 
+  it('records an unexpected history-read failure before degrading to unavailable', async () => {
+    stubCurrentProgram();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      listHistoryExecute.mockRejectedValue(new Error('db unreachable'));
+
+      const view = await buildDashboardView('user-a', PROFILE);
+
+      expect(view.recentTraining).toEqual({ status: 'unavailable' });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toContain('user user-a');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('does not log expected empty, loaded, or typed-failure history outcomes', async () => {
+    stubCurrentProgram();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      listHistoryExecute.mockResolvedValue({
+        ok: true,
+        data: { sessions: [], nextCursor: null },
+      });
+      await buildDashboardView('user-a', PROFILE);
+
+      listHistoryExecute.mockResolvedValue({
+        ok: true,
+        data: { sessions: [historySessionDto()], nextCursor: null },
+      });
+      await buildDashboardView('user-a', PROFILE);
+
+      listHistoryExecute.mockResolvedValue({
+        ok: false,
+        error: { code: 'INVALID_INPUT', message: 'bad cursor' },
+      });
+      await buildDashboardView('user-a', PROFILE);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('maps a typed history rejection to unavailable — never to empty', async () => {
     stubCurrentProgram();
     listHistoryExecute.mockResolvedValue({

@@ -133,11 +133,17 @@ async function readRecentTrainingPage(userId: string): Promise<TrainingHistoryPa
       limit: RECENT_TRAINING_LIMIT,
     });
     return result.ok ? result.data : null;
-  } catch {
-    // Infrastructure failure (e.g. the history read cannot reach the
-    // database). The rest of the dashboard stays usable; the card degrades
-    // to `unavailable` — never to "empty", which would claim the user has
-    // no training.
+  } catch (error: unknown) {
+    // Unexpected infrastructure failure (e.g. the history read cannot reach
+    // the database). Recorded per docs/error-handling.md §Logging — the
+    // dashboard degrades gracefully, so without this the failure would be
+    // swallowed entirely. The rest of the dashboard stays usable; the card
+    // degrades to `unavailable` — never to "empty", which would claim the
+    // user has no training.
+    console.error(
+      `Unexpected failure reading recent training for user ${userId}`,
+      error,
+    );
     return null;
   }
 }

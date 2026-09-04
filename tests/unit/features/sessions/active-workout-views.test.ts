@@ -54,6 +54,7 @@ function targetDto(exerciseId: string, target: ExerciseTargetDto['target']): Exe
 
 const increaseFrom50 = targetDto('ex-bench', {
   basis: 'increase',
+  reason: 'all-sets-at-top-of-range',
   previousLoadKg: 50,
   nextLoadKg: 52.5,
   incrementKg: 2.5,
@@ -113,6 +114,7 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
     const l = log(2, 'ex-1', threeByEightToTen, []);
     const regressFloored = targetDto('ex-1', {
       basis: 'regress',
+      reason: 'two-consecutive-sessions-below-minimum',
       previousLoadKg: 2,
       nextLoadKg: null,
       incrementKg: 2.5,
@@ -128,7 +130,7 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
     const bodyweightLog = log(1, 'ex-push', threeByEightToTen, [repSet(1, 12, null)]);
     const bodyweight = buildSessionLoggerView(
       bodyweightLog,
-      targetDto('ex-push', { basis: 'bodyweight' }),
+      targetDto('ex-push', { basis: 'bodyweight', reason: 'unloaded-set' }),
     );
     expect(bodyweight.prefillWeightKg).toBeNull();
     expect(bodyweight.callout).toBeNull();
@@ -136,7 +138,7 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
     const durationLog = log(2, 'ex-plank', threeByFortySeconds, []);
     const duration = buildSessionLoggerView(
       durationLog,
-      targetDto('ex-plank', { basis: 'duration' }),
+      targetDto('ex-plank', { basis: 'duration', reason: 'duration-scheme' }),
     );
     expect(duration.prefillWeightKg).toBeNull();
     expect(duration.callout).toBeNull();
@@ -165,7 +167,10 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
 
   it('scheme-change shows the current scheme, never a load prefill', () => {
     const l = log(1, 'ex-1', threeByEightToTen, []);
-    const view = buildSessionLoggerView(l, targetDto('ex-1', { basis: 'scheme-change' }));
+    const view = buildSessionLoggerView(
+      l,
+      targetDto('ex-1', { basis: 'scheme-change', reason: 'scheme-changed' }),
+    );
 
     expect(view.prefillWeightKg).toBeNull();
     expect(view.callout?.kind).toBe('scheme-change');
@@ -174,7 +179,10 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
 
   it('first-exposure renders the first-time callout with no invented load', () => {
     const l = log(1, 'ex-1', threeByEightToTen, []);
-    const view = buildSessionLoggerView(l, targetDto('ex-1', { basis: 'first-exposure' }));
+    const view = buildSessionLoggerView(
+      l,
+      targetDto('ex-1', { basis: 'first-exposure', reason: 'no-history' }),
+    );
 
     expect(view.prefillWeightKg).toBeNull();
     expect(view.callout?.kind).toBe('first-exposure');
@@ -185,7 +193,13 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
 describe('active-workout-views / mapSessionCallout', () => {
   it('regress with a load shows the lower target', () => {
     const view = mapSessionCallout(
-      targetDto('ex-1', { basis: 'regress', previousLoadKg: 60, nextLoadKg: 57.5, incrementKg: 2.5 }),
+      targetDto('ex-1', {
+        basis: 'regress',
+        reason: 'two-consecutive-sessions-below-minimum',
+        previousLoadKg: 60,
+        nextLoadKg: 57.5,
+        incrementKg: 2.5,
+      }),
       'none',
       '3 × 8–10',
     );
@@ -195,7 +209,12 @@ describe('active-workout-views / mapSessionCallout', () => {
 
   it('hold renders REPEAT semantics with the same load', () => {
     const view = mapSessionCallout(
-      targetDto('ex-1', { basis: 'hold', previousLoadKg: 22.5, nextLoadKg: 22.5 }),
+      targetDto('ex-1', {
+        basis: 'hold',
+        reason: 'mixed-performance-in-range',
+        previousLoadKg: 22.5,
+        nextLoadKg: 22.5,
+      }),
       'none',
       '3 × 8–10',
     );

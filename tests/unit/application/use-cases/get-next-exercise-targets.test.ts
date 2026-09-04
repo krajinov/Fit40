@@ -119,7 +119,7 @@ describe('GetNextExerciseTargetsUseCase', () => {
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0]?.exerciseId).toBe('ex-1');
-    expect(result.data[0]?.target).toEqual({ basis: 'first-exposure' });
+    expect(result.data[0]?.target).toEqual({ basis: 'first-exposure', reason: 'no-history' });
   });
 
   it('zips results by request position, treating absent history as first exposure', async () => {
@@ -146,12 +146,13 @@ describe('GetNextExerciseTargetsUseCase', () => {
     expect(result.data[0]?.exerciseId).toBe('ex-1');
     expect(result.data[0]?.target).toEqual({
       basis: 'increase',
+      reason: 'all-sets-at-top-of-range',
       previousLoadKg: 20,
       nextLoadKg: 22,
       incrementKg: 2,
     });
     expect(result.data[1]?.exerciseId).toBe('ex-2');
-    expect(result.data[1]?.target).toEqual({ basis: 'first-exposure' });
+    expect(result.data[1]?.target).toEqual({ basis: 'first-exposure', reason: 'no-history' });
   });
 
   it('queries each port once with deduplicated exercise ids', async () => {
@@ -175,11 +176,12 @@ describe('GetNextExerciseTargetsUseCase', () => {
     expect(result.data).toHaveLength(2);
     expect(result.data[0]?.target).toEqual({
       basis: 'increase',
+      reason: 'all-sets-at-top-of-range',
       previousLoadKg: 20,
       nextLoadKg: 22,
       incrementKg: 2,
     });
-    expect(result.data[1]?.target).toEqual({ basis: 'scheme-change' });
+    expect(result.data[1]?.target).toEqual({ basis: 'scheme-change', reason: 'scheme-changed' });
 
     expect(exerciseRepo.findByIds).toHaveBeenCalledTimes(1);
     expect(vi.mocked(exerciseRepo.findByIds).mock.calls[0]?.[0]).toEqual([eid('ex-1')]);
@@ -203,7 +205,12 @@ describe('GetNextExerciseTargetsUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data[0]?.target).toEqual({ basis: 'hold', previousLoadKg: 20, nextLoadKg: 20 });
+    expect(result.data[0]?.target).toEqual({
+      basis: 'hold',
+      reason: 'mixed-performance-in-range',
+      previousLoadKg: 20,
+      nextLoadKg: 20,
+    });
   });
 
   it('reports scheme-change when history was earned under a different scheme', async () => {
@@ -223,7 +230,7 @@ describe('GetNextExerciseTargetsUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data[0]?.target).toEqual({ basis: 'scheme-change' });
+    expect(result.data[0]?.target).toEqual({ basis: 'scheme-change', reason: 'scheme-changed' });
   });
 
   it('defers to the engine for duration prescriptions with compatible history', async () => {
@@ -245,7 +252,7 @@ describe('GetNextExerciseTargetsUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data[0]?.target).toEqual({ basis: 'duration' });
+    expect(result.data[0]?.target).toEqual({ basis: 'duration', reason: 'duration-scheme' });
   });
 
   it('fails with EXERCISE_NOT_FOUND when a requested exercise no longer exists', async () => {

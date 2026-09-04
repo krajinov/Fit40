@@ -94,12 +94,15 @@ describe('progression engine regression (mirror must not touch it)', () => {
     const scheme = reps();
     // All sets at target on a uniform load → increase by the 2 kg step.
     expect(
-      calculateNextExerciseTarget(exercise(), scheme, {
-        prescription: scheme,
-        sets: [repSet(1, 50, 10), repSet(2, 50, 10), repSet(3, 50, 10)],
-      }),
+      calculateNextExerciseTarget(exercise(), scheme, [
+        {
+          prescription: scheme,
+          sets: [repSet(1, 50, 10), repSet(2, 50, 10), repSet(3, 50, 10)],
+        },
+      ]),
     ).toEqual({
       basis: 'increase',
+      reason: 'all-sets-at-top-of-range',
       previousLoadKg: 50,
       nextLoadKg: 52,
       incrementKg: 2,
@@ -107,10 +110,12 @@ describe('progression engine regression (mirror must not touch it)', () => {
 
     // Mixed loads at target never increase — uniform requirement holds.
     // The mixed target narrows to hold, which carries previousLoadKg.
-    const mixed = calculateNextExerciseTarget(exercise(), scheme, {
-      prescription: scheme,
-      sets: [repSet(1, 50, 10), repSet(2, 45, 10), repSet(3, 50, 10)],
-    });
+    const mixed = calculateNextExerciseTarget(exercise(), scheme, [
+      {
+        prescription: scheme,
+        sets: [repSet(1, 50, 10), repSet(2, 45, 10), repSet(3, 50, 10)],
+      },
+    ]);
     if (mixed.basis !== 'hold') {
       throw new Error(`expected hold, got ${mixed.basis}`);
     }
@@ -118,18 +123,22 @@ describe('progression engine regression (mirror must not touch it)', () => {
 
     // A bodyweight set is still a bodyweight recommendation — not a load.
     expect(
-      calculateNextExerciseTarget(exercise(), scheme, {
-        prescription: scheme,
-        sets: [repSet(1, null)],
-      }).basis,
+      calculateNextExerciseTarget(exercise(), scheme, [
+        {
+          prescription: scheme,
+          sets: [repSet(1, null)],
+        },
+      ]).basis,
     ).toBe('bodyweight');
 
     // Duration prescriptions still route to the duration basis.
     expect(
-      calculateNextExerciseTarget(exercise(), duration(), {
-        prescription: duration(),
-        sets: [durationSet(1)],
-      }).basis,
+      calculateNextExerciseTarget(exercise(), duration(), [
+        {
+          prescription: duration(),
+          sets: [durationSet(1)],
+        },
+      ]).basis,
     ).toBe('duration');
   });
 });

@@ -35,6 +35,7 @@ describe('mapExerciseTargetToView', () => {
     const view = mapExerciseTargetToView(
       targetDto('ex-1', {
         basis: 'increase',
+        reason: 'all-sets-at-top-of-range',
         previousLoadKg: 50,
         nextLoadKg: 52.5,
         incrementKg: 2.5,
@@ -55,7 +56,12 @@ describe('mapExerciseTargetToView', () => {
 
   it('hold → repeat view with the same target load', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-2', { basis: 'hold', previousLoadKg: 22.5, nextLoadKg: 22.5 }),
+      targetDto('ex-2', {
+        basis: 'hold',
+        reason: 'mixed-performance-in-range',
+        previousLoadKg: 22.5,
+        nextLoadKg: 22.5,
+      }),
       threeByEightToTen,
     );
 
@@ -72,6 +78,7 @@ describe('mapExerciseTargetToView', () => {
     const view = mapExerciseTargetToView(
       targetDto('ex-3', {
         basis: 'regress',
+        reason: 'two-consecutive-sessions-below-minimum',
         previousLoadKg: 60,
         nextLoadKg: 57.5,
         incrementKg: 2.5,
@@ -92,6 +99,7 @@ describe('mapExerciseTargetToView', () => {
     const view = mapExerciseTargetToView(
       targetDto('ex-4', {
         basis: 'regress',
+        reason: 'two-consecutive-sessions-below-minimum',
         previousLoadKg: 2,
         nextLoadKg: null,
         incrementKg: 2.5,
@@ -105,7 +113,7 @@ describe('mapExerciseTargetToView', () => {
 
   it('first-exposure → no invented load, no chip', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-5', { basis: 'first-exposure' }),
+      targetDto('ex-5', { basis: 'first-exposure', reason: 'no-history' }),
       threeByEightToTen,
     );
 
@@ -115,7 +123,7 @@ describe('mapExerciseTargetToView', () => {
 
   it('scheme-change → no recommendation load, current scheme as value', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-6', { basis: 'scheme-change' }),
+      targetDto('ex-6', { basis: 'scheme-change', reason: 'scheme-changed' }),
       threeByEightToTen,
     );
 
@@ -130,7 +138,7 @@ describe('mapExerciseTargetToView', () => {
 
   it('scheme-change over a duration scheme formats seconds, not reps', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-7', { basis: 'scheme-change' }),
+      targetDto('ex-7', { basis: 'scheme-change', reason: 'scheme-changed' }),
       threeByThirtySeconds,
     );
 
@@ -139,7 +147,7 @@ describe('mapExerciseTargetToView', () => {
 
   it('bodyweight → no recommendation card', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-8', { basis: 'bodyweight' }),
+      targetDto('ex-8', { basis: 'bodyweight', reason: 'unloaded-set' }),
       threeByEightToTen,
     );
 
@@ -149,7 +157,7 @@ describe('mapExerciseTargetToView', () => {
 
   it('duration → no recommendation card', () => {
     const view = mapExerciseTargetToView(
-      targetDto('ex-9', { basis: 'duration' }),
+      targetDto('ex-9', { basis: 'duration', reason: 'duration-scheme' }),
       threeByThirtySeconds,
     );
 
@@ -170,15 +178,21 @@ describe('mapExerciseTargetsToViews', () => {
     const dtos: ReadonlyArray<ExerciseTargetDto | null> = [
       targetDto('ex-1', {
         basis: 'increase',
+        reason: 'all-sets-at-top-of-range',
         previousLoadKg: 50,
         nextLoadKg: 52.5,
         incrementKg: 2.5,
       }),
       null,
-      targetDto('ex-3', { basis: 'hold', previousLoadKg: 20, nextLoadKg: 20 }),
-      targetDto('ex-4', { basis: 'first-exposure' }),
-      targetDto('ex-5', { basis: 'bodyweight' }),
-      targetDto('ex-6', { basis: 'duration' }),
+      targetDto('ex-3', {
+        basis: 'hold',
+        reason: 'mixed-performance-in-range',
+        previousLoadKg: 20,
+        nextLoadKg: 20,
+      }),
+      targetDto('ex-4', { basis: 'first-exposure', reason: 'no-history' }),
+      targetDto('ex-5', { basis: 'bodyweight', reason: 'unloaded-set' }),
+      targetDto('ex-6', { basis: 'duration', reason: 'duration-scheme' }),
     ];
     const prescriptions: ReadonlyArray<RepPrescription> = [
       threeByEightToTen,

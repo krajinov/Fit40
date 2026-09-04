@@ -94,12 +94,17 @@ export class GetNextExerciseTargetsUseCase {
       }
 
       // The history projection is structurally assignable to the engine's
-      // PreviousExercisePerformance input (prescription + sets); absence of
-      // history is the engine's first-exposure case.
+      // PreviousExercisePerformance input (prescription + sets). Until the
+      // read-side history port grows a windowed query (Milestone 8, Slice 2),
+      // the latest projection is the newest entry of a one-occurrence window:
+      // the engine reads absence of history as first exposure, and its
+      // two-occurrence regression rule sees no prior occurrences.
+      const latest = performanceByExercise.get(request.exerciseId);
+      const history = latest === undefined ? [] : [latest];
       const target = calculateNextExerciseTarget(
         exercise,
         request.prescription,
-        performanceByExercise.get(request.exerciseId) ?? null,
+        history,
       );
 
       targets.push({ exerciseId: request.exerciseId, target });

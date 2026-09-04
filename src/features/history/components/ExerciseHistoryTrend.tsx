@@ -77,8 +77,9 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
 
       {chartPoints === null && !trend.noExternalLoad && (
         <p className="text-sm text-ink-2">
-          A load trend appears once this exercise has been performed with an
-          external load in at least two completed workouts.
+          A load trend appears once this exercise has at least two completed
+          occurrences with an external load — they may come from the same
+          workout or from different workouts.
         </p>
       )}
     </div>

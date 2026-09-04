@@ -92,11 +92,7 @@ export default async function DashboardPage() {
               programName={currentProgram.program.name}
               currentWeek={currentWeek}
             />
-            <RecentTrainingCard
-              programSlug={currentProgram.program.slug}
-              completedWorkouts={view.completedWorkouts}
-              className="hidden md:flex"
-            />
+            <RecentTrainingCard recentTraining={view.recentTraining} />
           </div>
           <aside className="flex w-full flex-col gap-6 md:w-[360px] md:shrink-0">
             <CurrentProgramCard view={currentProgram} />

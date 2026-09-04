@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 import { PageContainer } from '@/components/shared/PageContainer';
 import { CompletedSessionEntryList } from '@/features/history/components/CompletedSessionEntryList';
@@ -12,6 +13,15 @@ import { getCurrentUser, requireUser } from '@/features/auth/current-user';
 interface CompletedSessionPageProps {
   readonly params: Promise<{ readonly sessionId: string }>;
 }
+
+/**
+ * Request-scoped dedup of the completed-session lookup: generateMetadata and
+ * the page render both need the same view for the same (userId, sessionId),
+ * and without cache() the repository read would run twice per request.
+ * React's cache() is per-request only — nothing is cached across requests —
+ * and the key is the full argument pair (authenticated userId + sessionId).
+ */
+const completedSessionView = cache(buildCompletedSessionView);
 
 export async function generateMetadata({
   params,
@@ -26,7 +36,7 @@ export async function generateMetadata({
     return { title: 'Completed workout' };
   }
 
-  const viewResult = await buildCompletedSessionView(user.id, parsed.data.sessionId);
+  const viewResult = await completedSessionView(user.id, parsed.data.sessionId);
   return { title: viewResult.ok ? viewResult.data.heading : 'Completed workout' };
 }
 
@@ -43,7 +53,7 @@ export default async function CompletedSessionPage({ params }: CompletedSessionP
   // URL — so the id can only ever address the viewer's own history.
   const user = await requireUser(`/history/sessions/${paramsResult.data.sessionId}`);
 
-  const viewResult = await buildCompletedSessionView(user.id, paramsResult.data.sessionId);
+  const viewResult = await completedSessionView(user.id, paramsResult.data.sessionId);
   // SESSION_NOT_FOUND covers a missing, foreign, or in-progress session —
   // one outcome, no existence leak. Unresolvable URL input is a 404.
   if (!viewResult.ok) {

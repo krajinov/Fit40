@@ -404,11 +404,23 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .as('candidates');
 
     // The rank IS the recency ladder position: rank 1 is the exercise's newest
-    // candidate occurrence. Partitioning and ordering reference the
-    // subquery's projected columns, not the underlying tables.
+    // candidate occurrence. Both the projection and the window function
+    // reference the candidates subquery's own columns — spreading the raw
+    // `columns` object here would reference the underlying tables, which are
+    // not part of this SELECT's FROM (Drizzle fails with "table exercise_logs
+    // is not part of the query").
     const ranked = this.db
       .select({
-        ...columns,
+        exerciseId: candidates.exerciseId,
+        sessionId: candidates.sessionId,
+        startedAt: candidates.startedAt,
+        exerciseOrder: candidates.exerciseOrder,
+        completedAt: candidates.completedAt,
+        prescriptionType: candidates.prescriptionType,
+        prescribedSets: candidates.prescribedSets,
+        minReps: candidates.minReps,
+        maxReps: candidates.maxReps,
+        durationSeconds: candidates.durationSeconds,
         recencyRank: sql<number>`row_number() over (
           partition by ${candidates.exerciseId}
           order by ${candidates.completedAt} desc,

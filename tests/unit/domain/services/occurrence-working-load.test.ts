@@ -121,7 +121,7 @@ describe('progression engine regression (mirror must not touch it)', () => {
     }
     expect(mixed.previousLoadKg).toBe(45);
 
-    // A bodyweight set is still a bodyweight recommendation — not a load.
+    // An unloaded set still routes to the bodyweight decision — not a load.
     expect(
       calculateNextExerciseTarget(exercise(), scheme, [
         {
@@ -129,9 +129,9 @@ describe('progression engine regression (mirror must not touch it)', () => {
           sets: [repSet(1, null)],
         },
       ]).basis,
-    ).toBe('bodyweight');
+    ).toBe('bodyweight-hold');
 
-    // Duration prescriptions still route to the duration basis.
+    // Duration prescriptions still route to the duration decision.
     expect(
       calculateNextExerciseTarget(exercise(), duration(), [
         {
@@ -139,6 +139,6 @@ describe('progression engine regression (mirror must not touch it)', () => {
           sets: [durationSet(1)],
         },
       ]).basis,
-    ).toBe('duration');
+    ).toBe('duration-hold');
   });
 });

@@ -417,7 +417,7 @@ describe('GetNextExerciseTargetsUseCase', () => {
   });
 
 
-  it('maps the engine early gates: scheme-change, duration, and bodyweight pass through untouched', async () => {
+  it('maps the engine gates: scheme-change, duration, and bodyweight decisions pass through untouched', async () => {
     const exerciseRepo = createMockExerciseRepository();
     const historyRepo = createMockHistoryRepository();
     vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1')]);
@@ -434,10 +434,12 @@ describe('GetNextExerciseTargetsUseCase', () => {
       expect(schemeChange.data[0]?.target).toEqual({ basis: 'scheme-change', reason: 'scheme-changed' });
     }
 
-    // Duration-based current prescription → duration.
+    // Duration-based current prescription → the duration decision, verbatim.
     vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
       occurrence('ex-1', 0, duration(), [
-        { type: 'duration', setNumber: 1, durationSeconds: 30, weightKg: null, rpe: null },
+        { type: 'duration', setNumber: 1, durationSeconds: 45, weightKg: null, rpe: null },
+        { type: 'duration', setNumber: 2, durationSeconds: 45, weightKg: null, rpe: null },
+        { type: 'duration', setNumber: 3, durationSeconds: 45, weightKg: null, rpe: null },
       ]),
     ]);
     const durationTarget = await useCase.execute({
@@ -446,17 +448,26 @@ describe('GetNextExerciseTargetsUseCase', () => {
     });
     expect(durationTarget.ok).toBe(true);
     if (durationTarget.ok) {
-      expect(durationTarget.data[0]?.target).toEqual({ basis: 'duration', reason: 'duration-scheme' });
+      expect(durationTarget.data[0]?.target).toEqual({
+        basis: 'duration-increase',
+        reason: 'all-sets-at-target-duration',
+        previousSeconds: 45,
+        nextSeconds: 50,
+        incrementSeconds: 5,
+      });
     }
 
-    // Newest considered set logged without load → bodyweight.
+    // Newest considered sets logged without load → the bodyweight decision.
     vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
       occurrence('ex-1', 0, rep(), unloaded(rep())),
     ]);
     const bodyweight = await useCase.execute({ userId: 'user-1', requests: [request('ex-1')] });
     expect(bodyweight.ok).toBe(true);
     if (bodyweight.ok) {
-      expect(bodyweight.data[0]?.target).toEqual({ basis: 'bodyweight', reason: 'unloaded-set' });
+      expect(bodyweight.data[0]?.target).toEqual({
+        basis: 'bodyweight-goal-reached',
+        reason: 'all-sets-at-top-of-range',
+      });
     }
   });
 

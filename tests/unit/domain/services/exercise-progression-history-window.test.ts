@@ -16,6 +16,7 @@ import { EquipmentType } from '@/domain/types/exercise';
 import {
   allAtMaxReps,
   allBelowMinimum,
+  durationSet,
   makeExercise,
   performance,
   repSet,
@@ -220,17 +221,39 @@ describe('calculateNextExerciseTarget — history window', () => {
   });
 
   describe('structured reason codes', () => {
-    it('every Slice 1 target variant carries its decision reason', () => {
+    it('every engine target variant carries its decision reason', () => {
       const variants = [
         calculateNextExerciseTarget(exercise, threeByEightToTen, []),
         calculateNextExerciseTarget(exercise, scheme(4, 8, 10), [
           allAtMaxReps(threeByEightToTen, 20),
         ]),
         calculateNextExerciseTarget(exercise, timed(3, 30), [
-          performance(timed(3, 30), [repSet(1, 10, null)]),
+          performance(timed(3, 30), [
+            durationSet(1, 30, null),
+            durationSet(2, 30, null),
+            durationSet(3, 30, null),
+          ]),
+        ]),
+        calculateNextExerciseTarget(exercise, timed(3, 30), [
+          performance(timed(3, 30), [
+            durationSet(1, 30, null),
+            durationSet(2, 29, null),
+            durationSet(3, 30, null),
+          ]),
         ]),
         calculateNextExerciseTarget(exercise, threeByEightToTen, [
-          performance(threeByEightToTen, [repSet(1, 10, null)]),
+          performance(threeByEightToTen, [
+            repSet(1, 10, null),
+            repSet(2, 10, null),
+            repSet(3, 10, null),
+          ]),
+        ]),
+        calculateNextExerciseTarget(exercise, threeByEightToTen, [
+          performance(threeByEightToTen, [
+            repSet(1, 9, null),
+            repSet(2, 9, null),
+            repSet(3, 9, null),
+          ]),
         ]),
         calculateNextExerciseTarget(exercise, threeByEightToTen, [
           allAtMaxReps(threeByEightToTen, 20),
@@ -258,8 +281,10 @@ describe('calculateNextExerciseTarget — history window', () => {
       expect(variants.map((t) => ({ basis: t.basis, reason: t.reason }))).toEqual([
         { basis: 'first-exposure', reason: 'no-history' },
         { basis: 'scheme-change', reason: 'scheme-changed' },
-        { basis: 'duration', reason: 'duration-scheme' },
-        { basis: 'bodyweight', reason: 'unloaded-set' },
+        { basis: 'duration-increase', reason: 'all-sets-at-target-duration' },
+        { basis: 'duration-hold', reason: 'sets-below-target-duration' },
+        { basis: 'bodyweight-goal-reached', reason: 'all-sets-at-top-of-range' },
+        { basis: 'bodyweight-hold', reason: 'reps-below-top-of-range' },
         { basis: 'increase', reason: 'all-sets-at-top-of-range' },
         { basis: 'hold', reason: 'mixed-performance-in-range' },
         { basis: 'hold', reason: 'single-session-below-minimum' },

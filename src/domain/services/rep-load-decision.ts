@@ -4,7 +4,7 @@
  *
  * Decision order (first match wins):
  *
- *   5. Any considered set logged without load         → bodyweight
+ *   5. Any considered set logged without load         → bodyweight decision
  *   6. Fewer sets logged than prescribed              → hold (incomplete)
  *   7. All prescribed sets ≥ maxReps on one uniform load → increase
  *   8. All prescribed sets < minReps:
@@ -14,7 +14,8 @@
  *
  * Load semantics:
  * - `0 kg` is a real external load. Only `weightKg === null` marks an
- *   unweighted (bodyweight) set.
+ *   unweighted (bodyweight) set, and any such set routes the whole
+ *   decision to `bodyweight-rep-decision.ts`.
  * - The working load is the MINIMUM load across the considered sets:
  *   progression starts from the weakest set, never the strongest.
  * - Increasing requires a UNIFORM working load — mixed loads cannot be
@@ -40,6 +41,7 @@
  */
 import type { SetLog } from '@/domain/entities/workout-session';
 import { hasConsecutiveBelowMinimumOccurrence } from '@/domain/services/below-minimum-trend';
+import { decideBodyweightRepTarget } from '@/domain/services/bodyweight-rep-decision';
 import type { HoldProgressionReason } from '@/domain/services/progression-reason';
 import type { NextExerciseTarget } from '@/domain/services/next-exercise-target';
 import type { PreviousExercisePerformance } from '@/domain/services/previous-exercise-performance';
@@ -97,7 +99,7 @@ export function decideRepLoadTarget(
   const loads: number[] = [];
   for (const set of consideredSets) {
     if (set.weightKg === null) {
-      return { basis: 'bodyweight', reason: 'unloaded-set' };
+      return decideBodyweightRepTarget(prescription, consideredSets);
     }
     loads.push(set.weightKg);
   }

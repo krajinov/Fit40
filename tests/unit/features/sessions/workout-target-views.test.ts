@@ -145,24 +145,47 @@ describe('mapExerciseTargetToView', () => {
     expect(view.chip?.valueLabel).toBe('3 × 30s');
   });
 
-  it('bodyweight → no recommendation card', () => {
-    const view = mapExerciseTargetToView(
-      targetDto('ex-8', { basis: 'bodyweight', reason: 'unloaded-set' }),
+  it('bodyweight bases → no recommendation card', () => {
+    const goal = mapExerciseTargetToView(
+      targetDto('ex-8', { basis: 'bodyweight-goal-reached', reason: 'all-sets-at-top-of-range' }),
+      threeByEightToTen,
+    );
+    const hold = mapExerciseTargetToView(
+      targetDto('ex-8b', { basis: 'bodyweight-hold', reason: 'reps-below-top-of-range' }),
       threeByEightToTen,
     );
 
-    expect(view.lastTimeLabel).toBeNull();
-    expect(view.chip).toBeNull();
+    expect(goal.lastTimeLabel).toBeNull();
+    expect(goal.chip).toBeNull();
+    expect(hold.lastTimeLabel).toBeNull();
+    expect(hold.chip).toBeNull();
   });
 
-  it('duration → no recommendation card', () => {
-    const view = mapExerciseTargetToView(
-      targetDto('ex-9', { basis: 'duration', reason: 'duration-scheme' }),
+  it('duration bases → no recommendation card', () => {
+    const longer = mapExerciseTargetToView(
+      targetDto('ex-9', {
+        basis: 'duration-increase',
+        reason: 'all-sets-at-target-duration',
+        previousSeconds: 30,
+        nextSeconds: 35,
+        incrementSeconds: 5,
+      }),
+      threeByThirtySeconds,
+    );
+    const same = mapExerciseTargetToView(
+      targetDto('ex-9b', {
+        basis: 'duration-hold',
+        reason: 'sets-below-target-duration',
+        previousSeconds: 30,
+        nextSeconds: 30,
+      }),
       threeByThirtySeconds,
     );
 
-    expect(view.lastTimeLabel).toBeNull();
-    expect(view.chip).toBeNull();
+    expect(longer.lastTimeLabel).toBeNull();
+    expect(longer.chip).toBeNull();
+    expect(same.lastTimeLabel).toBeNull();
+    expect(same.chip).toBeNull();
   });
 
   it('null dto (anonymous/failed personalization) → no history, no chip', () => {
@@ -191,8 +214,21 @@ describe('mapExerciseTargetsToViews', () => {
         nextLoadKg: 20,
       }),
       targetDto('ex-4', { basis: 'first-exposure', reason: 'no-history' }),
-      targetDto('ex-5', { basis: 'bodyweight', reason: 'unloaded-set' }),
-      targetDto('ex-6', { basis: 'duration', reason: 'duration-scheme' }),
+      targetDto('ex-5', { basis: 'bodyweight-goal-reached', reason: 'all-sets-at-top-of-range' }),
+      targetDto('ex-6', { basis: 'bodyweight-hold', reason: 'reps-below-top-of-range' }),
+      targetDto('ex-7', {
+        basis: 'duration-increase',
+        reason: 'all-sets-at-target-duration',
+        previousSeconds: 30,
+        nextSeconds: 35,
+        incrementSeconds: 5,
+      }),
+      targetDto('ex-8', {
+        basis: 'duration-hold',
+        reason: 'sets-below-target-duration',
+        previousSeconds: 30,
+        nextSeconds: 30,
+      }),
     ];
     const prescriptions: ReadonlyArray<RepPrescription> = [
       threeByEightToTen,
@@ -200,18 +236,31 @@ describe('mapExerciseTargetsToViews', () => {
       threeByEightToTen,
       threeByEightToTen,
       threeByEightToTen,
+      threeByEightToTen,
+      threeByThirtySeconds,
       threeByThirtySeconds,
     ];
 
     const views = mapExerciseTargetsToViews(dtos, prescriptions);
 
-    expect(views.map((v) => v.exerciseId)).toEqual(['ex-1', '', 'ex-3', 'ex-4', 'ex-5', 'ex-6']);
+    expect(views.map((v) => v.exerciseId)).toEqual([
+      'ex-1',
+      '',
+      'ex-3',
+      'ex-4',
+      'ex-5',
+      'ex-6',
+      'ex-7',
+      'ex-8',
+    ]);
     expect(views[0]?.chip?.kind).toBe('increase');
     expect(views[1]?.chip).toBeNull();
     expect(views[2]?.chip?.kind).toBe('hold');
     expect(views[3]?.chip).toBeNull();
     expect(views[4]?.chip).toBeNull();
     expect(views[5]?.chip).toBeNull();
+    expect(views[6]?.chip).toBeNull();
+    expect(views[7]?.chip).toBeNull();
   });
 });
 

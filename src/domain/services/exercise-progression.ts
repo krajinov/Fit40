@@ -15,8 +15,8 @@
  *
  *   1. No history (or newest occurrence without considered sets) → first-exposure
  *   2. Newest occurrence earned under a different scheme           → scheme-change
- *   3. Current prescription is duration-based                      → duration
- *   4. Any considered set of the newest occurrence without load    → bodyweight
+ *   3. Current prescription is duration-based                      → duration decision
+ *   4. Any considered set of the newest occurrence without load    → bodyweight decision
  *   5. Fewer sets logged than prescribed                           → hold
  *   6. All prescribed sets ≥ maxReps on one uniform load            → increase
  *   7. All prescribed sets < minReps:
@@ -45,7 +45,9 @@
  *   `workingLoad − increment` rounds to ≤ 0, the target is `null` — train
  *   the exercise without added load.
  *
- * Steps 5–8 live in `rep-load-decision.ts`; the two-occurrence rule in
+ * Steps 5–8 live in `rep-load-decision.ts` (its unloaded entry gate in
+ * `bodyweight-rep-decision.ts`); the duration decision in
+ * `duration-target-decision.ts`; the two-occurrence rule in
  * `below-minimum-trend.ts`; compatibility, result shape, and equipment
  * increments each live in their own domain module.
  *
@@ -62,9 +64,13 @@ import type { NextExerciseTarget } from '@/domain/services/next-exercise-target'
 import type { PreviousExercisePerformance } from '@/domain/services/previous-exercise-performance';
 import { prescriptionsCompatible } from '@/domain/services/prescription-compatibility';
 import { decideRepLoadTarget } from '@/domain/services/rep-load-decision';
+import {
+  decideDurationTarget,
+  DURATION_TARGET_INCREMENT_SECONDS,
+} from '@/domain/services/duration-target-decision';
 
 export type { NextExerciseTarget, PreviousExercisePerformance };
-export { EQUIPMENT_LOAD_INCREMENT_KG };
+export { EQUIPMENT_LOAD_INCREMENT_KG, DURATION_TARGET_INCREMENT_SECONDS };
 
 /**
  * Calculates the next load recommendation for one exercise.
@@ -89,16 +95,16 @@ export function calculateNextExerciseTarget(
     return { basis: 'scheme-change', reason: 'scheme-changed' };
   }
 
-  if (currentPrescription.type === 'duration') {
-    return { basis: 'duration', reason: 'duration-scheme' };
-  }
-
   const consideredSets = newest.sets.slice(0, currentPrescription.sets);
 
   // Defensive: the history port never produces performances with zero sets
   // (a skipped exercise never wins), so empty input acts like no history.
   if (consideredSets.length === 0) {
     return { basis: 'first-exposure', reason: 'no-history' };
+  }
+
+  if (currentPrescription.type === 'duration') {
+    return decideDurationTarget(currentPrescription, consideredSets);
   }
 
   return decideRepLoadTarget(

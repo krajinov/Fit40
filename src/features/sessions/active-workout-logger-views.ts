@@ -20,8 +20,9 @@
  * - CALLOUTS are advisory: they always render the recommendation computed
  *   from the latest COMPLETED performance, even after the user already
  *   logged heavier sets this session.
- * - bodyweight / duration bases render NO callout (the engine progresses
- *   external load, not bodyweight reps or timed work).
+ * - bodyweight / duration bases render NO callout (the engine decides their
+ *   targets in Domain, but their presentation slice is deferred — no load
+ *   callout exists for them yet).
  * - "Last time" copy shows the previous LOAD only — previous reps are not in
  *   the DTO, so the locked hint "From 50 kg × 10" renders truthfully as
  *   "From 50 kg last time".

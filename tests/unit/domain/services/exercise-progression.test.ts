@@ -1,13 +1,15 @@
 /**
  * Progression engine — scheme compatibility and early gates.
  *
- * Covers first-exposure, scheme-change (exact compatibility), the duration
- * basis, the bodyweight basis, and defensive inputs outside the history-port
- * contract. The core load decision table lives in
+ * Covers first-exposure, scheme-change (exact compatibility), the routing
+ * into the duration and bodyweight decisions, and defensive inputs outside
+ * the history-port contract. The core load decision table lives in
  * `exercise-progression-decision-table.test.ts`; equipment increments and
  * the regression floor in `exercise-progression-increments.test.ts`; the
  * history-window semantics (ordering, two-occurrence regress) in
- * `exercise-progression-history-window.test.ts`.
+ * `exercise-progression-history-window.test.ts`; the full bodyweight and
+ * duration matrices in `exercise-progression-bodyweight.test.ts` and
+ * `exercise-progression-duration.test.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -66,7 +68,7 @@ const SCENARIOS: Scenario[] = [
     expected: { basis: 'scheme-change', reason: 'scheme-changed' },
   },
   {
-    name: 'recommends scheme-change before the duration basis when the set type changed',
+    name: 'recommends scheme-change before the duration decision when the set type changed',
     equipment: EquipmentType.Barbell,
     prescription: threeByThirtySeconds,
     history: [performance(threeByEightToTen, [
@@ -88,7 +90,7 @@ const SCENARIOS: Scenario[] = [
     expected: { basis: 'scheme-change', reason: 'scheme-changed' },
   },
   {
-    name: 'recommends duration when the prescription matches the previous one',
+    name: 'recommends duration-increase when the matched scheme earned its target seconds',
     equipment: EquipmentType.Barbell,
     prescription: threeByThirtySeconds,
     history: [performance(threeByThirtySeconds, [
@@ -96,10 +98,16 @@ const SCENARIOS: Scenario[] = [
       durationSet(2, 30, null),
       durationSet(3, 30, null),
     ])],
-    expected: { basis: 'duration', reason: 'duration-scheme' },
+    expected: {
+      basis: 'duration-increase',
+      reason: 'all-sets-at-target-duration',
+      previousSeconds: 30,
+      nextSeconds: 35,
+      incrementSeconds: 5,
+    },
   },
   {
-    name: 'recommends bodyweight when every considered set is unweighted',
+    name: 'recommends bodyweight-goal-reached when every unweighted set earns the range top',
     equipment: EquipmentType.Bodyweight,
     prescription: threeByEightToTen,
     history: [performance(threeByEightToTen, [
@@ -107,10 +115,10 @@ const SCENARIOS: Scenario[] = [
       repSet(2, 10, null),
       repSet(3, 10, null),
     ])],
-    expected: { basis: 'bodyweight', reason: 'unloaded-set' },
+    expected: { basis: 'bodyweight-goal-reached', reason: 'all-sets-at-top-of-range' },
   },
   {
-    name: 'recommends bodyweight when one considered set is unweighted',
+    name: 'recommends bodyweight-hold when one unweighted set keeps the range from its top',
     equipment: EquipmentType.Dumbbell,
     prescription: threeByEightToTen,
     history: [performance(threeByEightToTen, [
@@ -118,7 +126,7 @@ const SCENARIOS: Scenario[] = [
       repSet(2, 8, null),
       repSet(3, 10, 20),
     ])],
-    expected: { basis: 'bodyweight', reason: 'unloaded-set' },
+    expected: { basis: 'bodyweight-hold', reason: 'reps-below-top-of-range' },
   },
 ];
 

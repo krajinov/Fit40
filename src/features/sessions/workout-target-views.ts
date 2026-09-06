@@ -21,9 +21,14 @@
  * - scheme-change   neutral chip, "NEW REP TARGET" with the current scheme
  *                   (NOT a load: the old scheme's load is not today's
  *                   recommendation)
- * - bodyweight      no chip: the engine progresses externally loaded work,
- *                   not bodyweight reps — the normal prescription stands
- * - duration        no chip: timed work progresses via the scheme, not load
+ * - bodyweight-goal-reached / bodyweight-hold
+ *                   no chip (their presentation slice is excluded): the
+ *                   authored prescription stands — the engine never
+ *                   invents a load or a harder variation to show
+ * - duration-increase / duration-hold
+ *                   no chip (their presentation slice is excluded):
+ *                   timed progression is decided in Domain but not
+ *                   surfaced here yet
  *
  * The DTO does not expose previous reps, the previous scheme, or
  * lastPerformedAt, so "Last time · 50 kg × 10" cannot be rendered
@@ -146,8 +151,10 @@ function mapTarget(
         },
       };
     case 'first-exposure':
-    case 'bodyweight':
-    case 'duration':
+    case 'bodyweight-goal-reached':
+    case 'bodyweight-hold':
+    case 'duration-increase':
+    case 'duration-hold':
       return { exerciseId: '', lastTimeLabel: null, lastTimeCompactLabel: null, chip: null };
   }
 }

@@ -15,19 +15,21 @@
 export const ProgressionReason = {
   /** No usable history: the exercise was never performed, or (defensively) the newest occurrence has no considered sets. */
   NoHistory: 'no-history',
-  /** The newest history was earned under a different prescription; it cannot drive today's load. */
+  /** The newest history was earned under a different prescription; it cannot drive today's target. */
   SchemeChanged: 'scheme-changed',
-  /** A considered set of the newest occurrence was logged without external load; the engine progresses external load only. */
-  UnloadedSet: 'unloaded-set',
-  /** The current prescription is duration-based; timed work progresses via the scheme, not load. */
-  DurationScheme: 'duration-scheme',
-  /** Every prescribed set of the newest occurrence reached maxReps on one uniform load. */
+  /** Every prescribed set of the newest occurrence reached the top of the rep range; a load increase additionally requires one uniform working load. */
   AllSetsAtTopOfRange: 'all-sets-at-top-of-range',
+  /** Bodyweight: every prescribed set was logged, but at least one fell short of the top of the authored range. */
+  RepsBelowTopOfRange: 'reps-below-top-of-range',
+  /** Duration: every prescribed set reached the scheme's target seconds — the exact boundary counts. */
+  AllSetsAtTargetDuration: 'all-sets-at-target-duration',
+  /** Duration: every prescribed set was logged, but at least one fell short of the scheme's target seconds. */
+  SetsBelowTargetDuration: 'sets-below-target-duration',
   /** The considered sets used mixed loads; one number cannot progress them. */
   NonUniformLoad: 'non-uniform-load',
   /** Reps landed inside the range (or mixed): neither the increase nor the regress criterion was met. */
   MixedPerformanceInRange: 'mixed-performance-in-range',
-  /** Fewer sets were logged than prescribed; incomplete performance never changes the load. */
+  /** Fewer sets were logged than prescribed; incomplete performance never changes the recommendation. */
   IncompleteSets: 'incomplete-sets',
   /** One below-minimum occurrence: a single poor session holds the load, never regresses it. */
   SingleSessionBelowMinimum: 'single-session-below-minimum',
@@ -46,3 +48,19 @@ export type HoldProgressionReason =
   | (typeof ProgressionReason)['SingleSessionBelowMinimum']
   | (typeof ProgressionReason)['MixedPerformanceInRange']
   | (typeof ProgressionReason)['NonUniformLoad'];
+
+/**
+ * Every reason that can produce a `bodyweight-hold` target — the bodyweight
+ * counterpart of the hold reasons.
+ */
+export type BodyweightHoldProgressionReason =
+  | (typeof ProgressionReason)['IncompleteSets']
+  | (typeof ProgressionReason)['RepsBelowTopOfRange'];
+
+/**
+ * Every reason that can produce a `duration-hold` target — the timed-work
+ * counterpart of the hold reasons.
+ */
+export type DurationHoldProgressionReason =
+  | (typeof ProgressionReason)['IncompleteSets']
+  | (typeof ProgressionReason)['SetsBelowTargetDuration'];

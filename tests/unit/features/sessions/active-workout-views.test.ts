@@ -128,20 +128,45 @@ describe('active-workout-views / buildSessionLoggerView (prefill precedence)', (
 
   it('bodyweight and duration bases carry no prefill and no callout', () => {
     const bodyweightLog = log(1, 'ex-push', threeByEightToTen, [repSet(1, 12, null)]);
-    const bodyweight = buildSessionLoggerView(
+    const bodyweightGoal = buildSessionLoggerView(
       bodyweightLog,
-      targetDto('ex-push', { basis: 'bodyweight', reason: 'unloaded-set' }),
+      targetDto('ex-push', { basis: 'bodyweight-goal-reached', reason: 'all-sets-at-top-of-range' }),
     );
-    expect(bodyweight.prefillWeightKg).toBeNull();
-    expect(bodyweight.callout).toBeNull();
+    expect(bodyweightGoal.prefillWeightKg).toBeNull();
+    expect(bodyweightGoal.callout).toBeNull();
+
+    const bodyweightHold = buildSessionLoggerView(
+      bodyweightLog,
+      targetDto('ex-push', { basis: 'bodyweight-hold', reason: 'reps-below-top-of-range' }),
+    );
+    expect(bodyweightHold.prefillWeightKg).toBeNull();
+    expect(bodyweightHold.callout).toBeNull();
 
     const durationLog = log(2, 'ex-plank', threeByFortySeconds, []);
-    const duration = buildSessionLoggerView(
+    const durationLonger = buildSessionLoggerView(
       durationLog,
-      targetDto('ex-plank', { basis: 'duration', reason: 'duration-scheme' }),
+      targetDto('ex-plank', {
+        basis: 'duration-increase',
+        reason: 'all-sets-at-target-duration',
+        previousSeconds: 40,
+        nextSeconds: 45,
+        incrementSeconds: 5,
+      }),
     );
-    expect(duration.prefillWeightKg).toBeNull();
-    expect(duration.callout).toBeNull();
+    expect(durationLonger.prefillWeightKg).toBeNull();
+    expect(durationLonger.callout).toBeNull();
+
+    const durationSame = buildSessionLoggerView(
+      durationLog,
+      targetDto('ex-plank', {
+        basis: 'duration-hold',
+        reason: 'sets-below-target-duration',
+        previousSeconds: 40,
+        nextSeconds: 40,
+      }),
+    );
+    expect(durationSame.prefillWeightKg).toBeNull();
+    expect(durationSame.callout).toBeNull();
   });
 
   it('null target (failed personalization) prefills nothing and renders no callout', () => {

@@ -36,9 +36,12 @@ Recommendations are designed to assist, never to take over:
   recommendation chips. They never mutate the program or the prescription.
 - **You have the final say.** The weight you actually log in the current
   session is what gets recorded — it takes precedence over the recommendation.
-- **Bodyweight & duration stay manual.** Progression for bodyweight and
-  time-based exercises is intentionally not automated in v1; they render no
-  recommendation chip.
+- **Bodyweight & duration decide in Domain, surface later.** The engine
+  computes advisory bodyweight targets (repeat the authored range until
+  every prescribed set earns its top) and duration targets (+5 s once
+  every prescribed set reaches the scheme's seconds); their presentation
+  (recommendation chips) is deferred to a later slice — today they render
+  no chip.
 
 Data model note: program progress is **enrollment-scoped**, while completed
 exercise performance history is **user-global** — an exercise performed in any

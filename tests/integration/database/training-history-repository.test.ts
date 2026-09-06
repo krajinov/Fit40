@@ -13,6 +13,7 @@ import {
   createScheduledWorkoutId,
   createUserId,
   createWorkoutId,
+  createWorkoutSessionId,
 } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
@@ -46,6 +47,11 @@ function scheduledWorkoutId(value: string) {
 }
 function workoutId(value: string) {
   const result = createWorkoutId(value);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+function workoutSessionId(value: string) {
+  const result = createWorkoutSessionId(value);
   if (!result.ok) throw new Error(result.error.message);
   return result.data;
 }
@@ -1133,6 +1139,326 @@ describe('training history — per-exercise occurrences', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries).toHaveLength(EXERCISE_HISTORY_OCCURRENCE_LIMIT);
+  });
+});
+
+describe('training history — progression performance windows', () => {
+  it('returns an empty result for an empty exercise id list', async () => {
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [],
+      5,
+    );
+    expect(performances).toEqual([]);
+  });
+
+  it('returns empty windows for exercises the user has never performed', async () => {
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-001'), exerciseId('ex-002')],
+      5,
+    );
+    expect(performances).toEqual([]);
+  });
+
+  it('returns completed performances only, grouped by exercise id ascending, newest first per exercise', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-perf-2-old',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'session-perf-1-new',
+        occurrence: 1,
+        startedAt: '2025-02-03T10:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 22.5 }] }],
+      }),
+      historySession({
+        id: 'session-perf-2-new',
+        occurrence: 2,
+        startedAt: '2025-02-10T10:00:00Z',
+        completedAt: '2025-02-10T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 22.5 }] }],
+      }),
+      // In-progress and newest — current-session logs never enter the window.
+      historySession({
+        id: 'session-perf-2-progress',
+        occurrence: 3,
+        startedAt: '2025-03-01T10:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 12 }] }],
+      }),
+    );
+
+    // Requested out of order on purpose: grouping follows exercise id asc.
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002'), exerciseId('ex-001')],
+      5,
+    );
+
+    expect(performances.map((p) => [p.exerciseId, p.sessionId])).toEqual([
+      ['ex-001', 'session-perf-1-new'],
+      ['ex-002', 'session-perf-2-new'],
+      ['ex-002', 'session-perf-2-old'],
+    ]);
+  });
+
+  it('never lets a skipped exercise (zero logged sets) shadow an older real performance', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-perf-skip-real',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      // Newer completed session in which the target exercise was skipped.
+      historySession({
+        id: 'session-perf-skip-newer',
+        occurrence: 1,
+        startedAt: '2025-02-03T10:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+          { exerciseId: 'ex-002', type: 'reps', sets: [] },
+        ],
+      }),
+    );
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002')],
+      5,
+    );
+    // The skipped log never enters candidacy, so the older real performance
+    // surfaces instead of being shadowed.
+    expect(performances.map((p) => [p.sessionId, p.exerciseOrder])).toEqual([
+      ['session-perf-skip-real', 1],
+    ]);
+  });
+
+  it('scopes windows to sessions owned by the requesting user', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-perf-own-a',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      // Foreign user performing the same exercise more recently: recency
+      // never leaks across ownership. OWNER_B has no enrollment, so the
+      // session is detached (NULL enrollment).
+      historySession({
+        id: 'session-perf-own-b',
+        userId: OWNER_B,
+        enrollmentId: null,
+        startedAt: '2025-01-13T10:00:00Z',
+        completedAt: '2025-01-13T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 22.5 }] }],
+      }),
+    );
+
+    const forA = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-001'), exerciseId('ex-002')],
+      5,
+    );
+    expect(forA.map((p) => [p.exerciseId, p.sessionId])).toEqual([['ex-001', 'session-perf-own-a']]);
+
+    const forB = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_B),
+      [exerciseId('ex-001'), exerciseId('ex-002')],
+      5,
+    );
+    expect(forB.map((p) => [p.exerciseId, p.sessionId])).toEqual([['ex-001', 'session-perf-own-b']]);
+  });
+
+  it('treats duplicate same-exercise occurrences in one session as distinct window entries', async () => {
+    await saveAll(
+      // One session performing ex-001 twice (orders 1 and 2), newer than an
+      // older single-occurrence session: with limit 2 the window fills with
+      // the two in-session duplicates — occurrences, not sessions, are
+      // counted, and neither duplicate is collapsed.
+      historySession({
+        id: 'session-perf-dup',
+        occurrence: 1,
+        startedAt: '2025-01-13T10:00:00Z',
+        completedAt: '2025-01-13T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] },
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 22.5 }] },
+        ],
+      }),
+      historySession({
+        id: 'session-perf-dup-old',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 18 }] }],
+      }),
+    );
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-001')],
+      2,
+    );
+    // Newest first; within one session the ladder resolves to the later
+    // position (exercise order desc), and the older session's occurrence
+    // falls outside the per-exercise bound.
+    expect(performances.map((p) => [p.sessionId, p.exerciseOrder])).toEqual([
+      ['session-perf-dup', 2],
+      ['session-perf-dup', 1],
+    ]);
+  });
+
+  it('breaks recency ties deterministically by startedAt, then session id', async () => {
+    await saveAll(
+      // Oldest completion: always last regardless of the ties below.
+      historySession({
+        id: 'session-perf-ladder-old',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      // Same completion instant: the later START wins the newer rank.
+      historySession({
+        id: 'session-perf-ladder-start-late',
+        occurrence: 1,
+        startedAt: '2025-02-03T09:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10 }] }],
+      }),
+      // Same completion AND start: the greater session id ranks newer.
+      historySession({
+        id: 'session-perf-ladder-tie-b',
+        occurrence: 2,
+        startedAt: '2025-02-03T08:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 9 }] }],
+      }),
+      historySession({
+        id: 'session-perf-ladder-tie-z',
+        occurrence: 3,
+        startedAt: '2025-02-03T08:00:00Z',
+        completedAt: '2025-02-03T11:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 11 }] }],
+      }),
+    );
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-001')],
+      5,
+    );
+
+    expect(performances.map((p) => p.sessionId)).toEqual([
+      'session-perf-ladder-start-late',
+      'session-perf-ladder-tie-z',
+      'session-perf-ladder-tie-b',
+      'session-perf-ladder-old',
+    ]);
+  });
+
+  it('bounds each exercise to its own limitPerExercise, never a global cap', async () => {
+    // Five detached sessions performing BOTH exercises each: detached rows
+    // never collide on the (enrollment, scheduled workout) uniqueness rule.
+    const sessions: WorkoutSession[] = [];
+    for (let i = 0; i < 5; i++) {
+      sessions.push(
+        historySession({
+          id: `session-perf-limit-${i}`,
+          enrollmentId: null,
+          startedAt: new Date(Date.parse('2025-01-06T10:00:00Z') + i * 86_400_000).toISOString(),
+          completedAt: new Date(Date.parse('2025-01-06T11:00:00Z') + i * 86_400_000).toISOString(),
+          logs: [
+            { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+            { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 16 }] },
+          ],
+        }),
+      );
+    }
+    await saveAll(...sessions);
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002'), exerciseId('ex-001')],
+      2,
+    );
+
+    // Two newest occurrences per exercise — four rows total, not two — so
+    // the ceiling binds per exercise, never globally, and grouping still
+    // follows exercise id ascending.
+    expect(performances.map((p) => [p.exerciseId, p.sessionId])).toEqual([
+      ['ex-001', 'session-perf-limit-4'],
+      ['ex-001', 'session-perf-limit-3'],
+      ['ex-002', 'session-perf-limit-4'],
+      ['ex-002', 'session-perf-limit-3'],
+    ]);
+  });
+
+  it('hydrates the full performance shape with explicit nulls for unlogged values', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-perf-full',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-001',
+            type: 'duration',
+            sets: [
+              { durationSeconds: 30, rpe: 6 },
+              { durationSeconds: 45 },
+            ],
+          },
+          {
+            exerciseId: 'ex-002',
+            type: 'reps',
+            sets: [
+              { reps: 10, weightKg: 20, rpe: 7 },
+              { reps: 8, weightKg: 22.5, rpe: 8 },
+              { reps: 12 },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002'), exerciseId('ex-001')],
+      5,
+    );
+
+    // Strict deep equality over the whole projection: every field, with
+    // explicit nulls wherever load or RPE went unlogged — never undefined.
+    expect(performances).toEqual([
+      {
+        exerciseId: exerciseId('ex-001'),
+        sessionId: workoutSessionId('session-perf-full'),
+        exerciseOrder: 1,
+        completedAt: new Date('2025-01-06T11:00:00Z'),
+        prescription: { type: 'duration', sets: 3, seconds: 30 },
+        sets: [
+          { type: 'duration', setNumber: 1, durationSeconds: 30, weightKg: null, rpe: 6 },
+          { type: 'duration', setNumber: 2, durationSeconds: 45, weightKg: null, rpe: null },
+        ],
+      },
+      {
+        exerciseId: exerciseId('ex-002'),
+        sessionId: workoutSessionId('session-perf-full'),
+        exerciseOrder: 2,
+        completedAt: new Date('2025-01-06T11:00:00Z'),
+        prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+        sets: [
+          { type: 'reps', setNumber: 1, reps: 10, weightKg: 20, rpe: 7 },
+          { type: 'reps', setNumber: 2, reps: 8, weightKg: 22.5, rpe: 8 },
+          { type: 'reps', setNumber: 3, reps: 12, weightKg: null, rpe: null },
+        ],
+      },
+    ]);
   });
 });
 

@@ -459,6 +459,74 @@ describe('GetNextExerciseTargetsUseCase', () => {
       expect(bodyweight.data[0]?.target).toEqual({ basis: 'bodyweight', reason: 'unloaded-set' });
     }
   });
+
+  it('supplies each exercise its own window in a mixed batch: never crosses a history-bearing sibling with a first exposure', async () => {
+    const exerciseRepo = createMockExerciseRepository();
+    const historyRepo = createMockHistoryRepository();
+    vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1'), makeExercise('ex-2')]);
+    // Only ex-1 has completed history; ex-2 has never been performed.
+    vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
+      occurrence('ex-1', 0, rep(), atMaxReps(rep(), 50)),
+    ]);
+
+    const useCase = new GetNextExerciseTargetsUseCase(exerciseRepo, historyRepo);
+    const result = await useCase.execute({
+      userId: 'user-1',
+      requests: [request('ex-1'), request('ex-2')],
+    });
+
+    // Still exactly one batched history call covering both requested ids.
+    expect(historyRepo.listRecentCompletedExercisePerformances).toHaveBeenCalledTimes(1);
+    expect(historyRepo.listRecentCompletedExercisePerformances).toHaveBeenCalledWith(
+      'user-1',
+      [eid('ex-1'), eid('ex-2')],
+      5,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Positional zip: the history-bearing exercise gets its window decision,
+    // the never-performed sibling gets first exposure — never crossed.
+    expect(result.data[0]).toEqual({
+      exerciseId: 'ex-1',
+      target: {
+        basis: 'increase',
+        reason: 'all-sets-at-top-of-range',
+        previousLoadKg: 50,
+        nextLoadKg: 52,
+        incrementKg: 2,
+      },
+    });
+    expect(result.data[1]).toEqual({
+      exerciseId: 'ex-2',
+      target: { basis: 'first-exposure', reason: 'no-history' },
+    });
+  });
+
+  it('holds through real application history when a single below-min newest breaks a healthy streak', async () => {
+    const exerciseRepo = createMockExerciseRepository();
+    const historyRepo = createMockHistoryRepository();
+    vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1')]);
+    vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
+      // Newest: eligible but below minimum — one poor occurrence.
+      occurrence('ex-1', 1, rep(), belowMin(rep(), 50)),
+      // First eligible prior: at the top of the range — the streak breaks.
+      occurrence('ex-1', 0, rep(), atMaxReps(rep(), 50)),
+    ]);
+
+    const useCase = new GetNextExerciseTargetsUseCase(exerciseRepo, historyRepo);
+    const result = await useCase.execute({ userId: 'user-1', requests: [request('ex-1')] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Slice 1 semantics through the windowed read: a single below-min
+    // occurrence never regresses — hold at the current load.
+    expect(result.data[0]?.target).toEqual({
+      basis: 'hold',
+      reason: 'single-session-below-minimum',
+      previousLoadKg: 50,
+      nextLoadKg: 50,
+    });
+  });
 });
 
 

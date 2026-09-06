@@ -1,13 +1,14 @@
-import type { LatestCompletedExercisePerformance } from '@/application/ports/workout-session-repository';
+import type { ProgressionHistoryPerformance } from '@/application/ports/training-history-repository';
 import type { SetLog } from '@/domain/entities/workout-session';
 
 import { prescriptionFromColumns } from './prescription-mapper';
 import { mapSet, parseExerciseId, parseWorkoutSessionId, type SetLogRow } from './session-mapper';
 
 /**
- * Row shape produced by the latest-completed-performance DISTINCT ON query.
+ * Row shape produced by the windowed progression-history query: one exercise
+ * log (within the per-exercise raw bound) plus its session's recency columns.
  */
-export interface LatestPerformanceRow {
+export interface RecentPerformanceRow {
   readonly exerciseId: string;
   readonly sessionId: string;
   readonly exerciseOrder: number;
@@ -24,18 +25,21 @@ function logKey(sessionId: string, exerciseOrder: number): string {
 }
 
 /**
- * Maps the winning exercise-log rows to `LatestCompletedExercisePerformance`
+ * Maps the windowed performance rows to `ProgressionHistoryPerformance`
  * projections, attaching their set logs.
  *
- * `setRows` may contain set logs of other exercises in the same sessions;
- * only rows matching a winning (session, exercise order) pair are used.
- * Throws on corrupt rows (unreachable through normal writes — the query
- * filters and the DB CHECK constraints enforce the shape).
+ * `performanceRows` must arrive grouped by exercise id ascending, newest first
+ * within each group (the recency ladder) — the mapping preserves that order
+ * exactly as delivered and never re-sorts. `setRows` may contain set logs of
+ * other exercises in the same sessions; only rows matching a returned
+ * (session, exercise order) pair are used. Throws on corrupt rows
+ * (unreachable through normal writes — the query filters and the DB CHECK
+ * constraints enforce the shape).
  */
-export function mapLatestCompletedExercisePerformances(
-  performanceRows: ReadonlyArray<LatestPerformanceRow>,
+export function mapRecentCompletedExercisePerformances(
+  performanceRows: ReadonlyArray<RecentPerformanceRow>,
   setRows: ReadonlyArray<SetLogRow>,
-): ReadonlyArray<LatestCompletedExercisePerformance> {
+): ReadonlyArray<ProgressionHistoryPerformance> {
   const setsByLog = new Map<string, SetLog[]>();
   for (const row of setRows) {
     const context = `set_logs (session_id=${row.sessionId}, exercise_order=${row.exerciseOrder})`;
@@ -46,7 +50,7 @@ export function mapLatestCompletedExercisePerformances(
   }
 
   return performanceRows.map((row) => {
-    const context = `latest exercise performance (session_id=${row.sessionId}, exercise_order=${row.exerciseOrder})`;
+    const context = `progression history performance (session_id=${row.sessionId}, exercise_order=${row.exerciseOrder})`;
     if (row.completedAt === null) {
       throw new Error(`Corrupt data in ${context}: completed_at is null`);
     }

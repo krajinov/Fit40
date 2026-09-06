@@ -114,6 +114,36 @@ export interface CompletedExerciseOccurrence {
 }
 
 /**
+ * One completed performance of one exercise, projected for the progression
+ * engine's newest-first history window (Slice 2 of the progressive-overload
+ * milestone).
+ *
+ * Shape-wise this is `CompletedExerciseOccurrence` minus display names:
+ * the engine reads only the prescription snapshot and the logged sets, so
+ * the projection deliberately carries no session coordinates beyond the
+ * (sessionId, exerciseOrder) occurrence identity and no join-resolved names.
+ * It is structurally assignable to the domain's `PreviousExercisePerformance`
+ * input, so the use case passes occurrences through unchanged.
+ *
+ * `0 kg` is a real external load; only `weightKg === null` marks an
+ * unweighted (bodyweight) set. `rpe` rides along in the set logs but the
+ * engine ignores it.
+ */
+export interface ProgressionHistoryPerformance {
+  /** The exercise this performance is history for. */
+  readonly exerciseId: ExerciseId;
+  readonly sessionId: WorkoutSessionId;
+  /** Position of the exercise log within the session — its identity part. */
+  readonly exerciseOrder: number;
+  /** ISO instant of the owning session's completion — history recency. */
+  readonly completedAt: Date;
+  /** The persisted prescription snapshot of this occurrence. */
+  readonly prescription: RepPrescription;
+  /** The logged sets, ordered by set number; at least one by contract. */
+  readonly sets: ReadonlyArray<SetLog>;
+}
+
+/**
  * Read port for the user's training history.
  */
 export interface TrainingHistoryRepository {
@@ -150,6 +180,53 @@ export interface TrainingHistoryRepository {
     exerciseId: ExerciseId,
     limit: number,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
+
+  /**
+   * Returns the user's recent completed performances of MANY exercises —
+   * the progression engine's batched, bounded, newest-first history windows
+   * (progressive-overload milestone, Slice 2).
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached history (sessions left behind after leaving a
+   *   program) is still the user's training past and therefore included.
+   * - Completed sessions only; in-progress sessions never appear, even when
+   *   started more recently (current-session logs never influence the next
+   *   workout's targets). Occurrences are user-global across programs.
+   * - Every returned occurrence must have at least one logged set: an
+   *   exercise log with zero sets (the exercise was skipped in an otherwise
+   *   completed session) is not a performance and never enters the window,
+   *   so it never shadows an older real performance.
+   * - Duplicate occurrences of one exercise inside one session are distinct
+   *   occurrences, identified by `(sessionId, exerciseOrder)`; both may appear
+   *   in the window.
+   * - Within one exercise, occurrences are ordered newest first by the
+   *   deterministic recency ladder: `completed_at` desc, `started_at` desc,
+   *   session id desc, `exercise_order` desc (a repeated exercise inside one
+   *   session resolves to its later position). Sets within one occurrence are
+   *   ordered by set number.
+   * - Bounded per exercise: at most `limitPerExercise` occurrences each. The
+   *   bound is a hard ceiling on read cost — an INFRASTRUCTURE OVER-FETCH
+   *   BOUND, deliberately NOT the domain's progression decision horizon.
+   *   Eligibility (scheme compatibility, completeness, load) is domain logic
+   *   and never moves into this query: the engine receives raw occurrences
+   *   newest first and skips ineligible ones itself. When the raw bound hides
+   *   the first eligible prior behind more consecutive ineligible occurrences
+   *   than it can span, the engine degrades conservatively (it holds instead
+   *   of regressing — never an unsafe load change).
+   * - No N+1: implementations must batch hydration for all requested
+   *   exercises (at most a constant number of queries, never one per
+   *   exercise), so a whole workout's targets read in one bounded call.
+   * - An empty `exerciseIds` returns an empty result without querying.
+   * - The result is grouped and ordered by exercise id ascending; the
+   *   projection is an isolated snapshot (mutating it never affects stored
+   *   sessions).
+   */
+  listRecentCompletedExercisePerformances(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+    limitPerExercise: number,
+  ): Promise<ReadonlyArray<ProgressionHistoryPerformance>>;
 
   /**
    * Returns the user's lifetime totals across all completed sessions,

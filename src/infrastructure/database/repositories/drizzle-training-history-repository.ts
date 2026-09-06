@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq, exists, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, inArray, isNotNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type {
   CompletedExerciseOccurrence,
   CompletedSessionContext,
   CompletedWorkoutSession,
+  ProgressionHistoryPerformance,
   TrainingHistoryCursor,
   TrainingHistoryEntry,
   TrainingHistoryPage,
@@ -15,6 +16,8 @@ import type {
 import type { ExerciseId, UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
+import type { RecentPerformanceRow } from '../mappers/exercise-performance-mapper';
+import { mapRecentCompletedExercisePerformances } from '../mappers/exercise-performance-mapper';
 import type { ExerciseOccurrenceRow } from '../mappers/exercise-occurrence-mapper';
 import { mapCompletedExerciseOccurrences } from '../mappers/exercise-occurrence-mapper';
 import { mapSessionRows } from '../mappers/session-mapper';
@@ -312,6 +315,128 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
 
     return mapCompletedExerciseOccurrences(occurrenceRows, setRows);
+  }
+
+  async listRecentCompletedExercisePerformances(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+    limitPerExercise: number,
+  ): Promise<ReadonlyArray<ProgressionHistoryPerformance>> {
+    if (exerciseIds.length === 0) {
+      return [];
+    }
+
+    const performanceRows = await this.selectRecentPerformanceRows(userId, exerciseIds, limitPerExercise);
+    if (performanceRows.length === 0) {
+      return [];
+    }
+
+    // Batched second query: sets of every winning occurrence across all
+    // requested exercises in one round trip (no per-exercise N+1). Set rows
+    // of non-winning exercises in those sessions are ignored by the mapper's
+    // (session, order) keying.
+    const sessionIds = [...new Set(performanceRows.map((row) => row.sessionId))];
+    const setRows = await this.db
+      .select()
+      .from(setLogs)
+      .where(inArray(setLogs.sessionId, sessionIds))
+      .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+
+    return mapRecentCompletedExercisePerformances(performanceRows, setRows);
+  }
+
+  /**
+   * The per-exercise raw occurrence windows, newest first: one SELECT with a
+   * `ROW_NUMBER() OVER (PARTITION BY exercise_id ORDER BY <recency ladder>)`
+   * subquery that keeps each exercise's `limitPerExercise` newest candidate
+   * logs, wrapped by an outer SELECT that re-orders by (exercise id asc,
+   * ladder desc) so the mapper receives the groups in contract order.
+   *
+   * Semantics are identical to the single-exercise occurrence read: user-
+   * owned sessions regardless of enrollment (detached included), completed
+   * only, and at least one set log (a skipped exercise never shadows an older
+   * real performance). Eligibility never enters the SQL — the bound is a raw
+   * over-fetch ceiling and the domain engine does its own skipping.
+   */
+  private async selectRecentPerformanceRows(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId>,
+    limitPerExercise: number,
+  ): Promise<ReadonlyArray<RecentPerformanceRow>> {
+    const columns = {
+      exerciseId: exerciseLogs.exerciseId,
+      sessionId: workoutSessions.id,
+      startedAt: workoutSessions.startedAt,
+      exerciseOrder: exerciseLogs.exerciseOrder,
+      completedAt: workoutSessions.completedAt,
+      prescriptionType: exerciseLogs.prescriptionType,
+      prescribedSets: exerciseLogs.sets,
+      minReps: exerciseLogs.minReps,
+      maxReps: exerciseLogs.maxReps,
+      durationSeconds: exerciseLogs.durationSeconds,
+    };
+
+    const candidates = this.db
+      .select(columns)
+      .from(exerciseLogs)
+      .innerJoin(workoutSessions, eq(exerciseLogs.sessionId, workoutSessions.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          inArray(exerciseLogs.exerciseId, [...exerciseIds]),
+          // A performance requires at least one set: skipped exercises (zero
+          // set logs) are filtered out of candidacy by an EXISTS subquery —
+          // no join, so no duplicate candidate rows.
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(setLogs)
+              .where(
+                and(
+                  eq(setLogs.sessionId, exerciseLogs.sessionId),
+                  eq(setLogs.exerciseOrder, exerciseLogs.exerciseOrder),
+                ),
+              ),
+          ),
+        ),
+      )
+      .as('candidates');
+
+    // The rank IS the recency ladder position: rank 1 is the exercise's newest
+    // candidate occurrence. Partitioning and ordering reference the
+    // subquery's projected columns, not the underlying tables.
+    const ranked = this.db
+      .select({
+        ...columns,
+        recencyRank: sql<number>`row_number() over (
+          partition by ${candidates.exerciseId}
+          order by ${candidates.completedAt} desc,
+                   ${candidates.startedAt} desc,
+                   ${candidates.sessionId} desc,
+                   ${candidates.exerciseOrder} desc
+        )`.as('recency_rank'),
+      })
+      .from(candidates)
+      .as('ranked');
+
+    // Rank ascending within each exercise-id-ascending group = newest first
+    // (rank 1 first), exactly the window order the engine consumes.
+    return this.db
+      .select({
+        exerciseId: ranked.exerciseId,
+        sessionId: ranked.sessionId,
+        exerciseOrder: ranked.exerciseOrder,
+        completedAt: ranked.completedAt,
+        prescriptionType: ranked.prescriptionType,
+        prescribedSets: ranked.prescribedSets,
+        minReps: ranked.minReps,
+        maxReps: ranked.maxReps,
+        durationSeconds: ranked.durationSeconds,
+      })
+      .from(ranked)
+      .where(lte(ranked.recencyRank, limitPerExercise))
+      .orderBy(asc(ranked.exerciseId), asc(ranked.recencyRank));
   }
 
   async findCompletedSessionById(

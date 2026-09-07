@@ -3,6 +3,7 @@ import type { WorkoutDetailView } from '@/features/sessions/workout-detail-view'
 import { WorkoutDetailHeader } from '@/features/sessions/components/WorkoutDetailHeader';
 import { WorkoutExerciseRow } from '@/features/sessions/components/WorkoutExerciseRow';
 import { WorkoutStartPanel } from '@/features/sessions/components/WorkoutStartPanel';
+import { EMPTY_WORKOUT_TARGET } from '@/features/sessions/workout-target-views';
 
 interface WorkoutDetailProps {
   readonly view: WorkoutDetailView;
@@ -41,7 +42,8 @@ export function WorkoutDetail({ view }: WorkoutDetailProps) {
             Exercises
           </h2>
           <p className="text-[13px] text-ink-3 md:text-sm">
-            Load recommendations appear only for externally loaded exercises — always advisory.
+            Targets update from your last performance. They are advisory — your logged
+            weights are always the source of truth.
           </p>
         </div>
 
@@ -50,14 +52,7 @@ export function WorkoutDetail({ view }: WorkoutDetailProps) {
             <WorkoutExerciseRow
               key={exercise.order}
               exercise={exercise}
-              target={
-                view.targets[index] ?? {
-                  exerciseId: '',
-                  lastTimeLabel: null,
-                  lastTimeCompactLabel: null,
-                  chip: null,
-                }
-              }
+              target={view.targets[index] ?? EMPTY_WORKOUT_TARGET}
             />
           ))}
         </ol>

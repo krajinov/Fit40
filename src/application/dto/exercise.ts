@@ -58,8 +58,30 @@ export interface ExerciseDetailDto {
  * `exerciseId` mirrors the corresponding request entry (brand stripped), so
  * callers can zip requests and results by position. `target` is the engine's
  * serializable decision; its `basis` states why the load was chosen.
+ *
+ * `previousSets` carries the considered sets (the first `prescription.sets`
+ * logged sets) of the newest history occurrence, so presentation can render
+ * truthful "Last time" context — e.g. "Last time · 60 kg × 10, 10, 10". It is
+ * null when the engine had no comparable newest occurrence (no history at
+ * all, or history earned under a different prescription): no context is
+ * fabricated then. RPE is not part of this projection — recommendations
+ * never read it.
  */
 export interface ExerciseTargetDto {
   readonly exerciseId: string;
   readonly target: NextExerciseTarget;
+  readonly previousSets: ReadonlyArray<PreviousExerciseSetDto> | null;
 }
+
+/** One considered set of the previous occurrence, for "Last time" context. */
+export type PreviousExerciseSetDto =
+  | {
+      readonly type: 'reps';
+      readonly reps: number;
+      readonly weightKg: number | null;
+    }
+  | {
+      readonly type: 'duration';
+      readonly durationSeconds: number;
+      readonly weightKg: number | null;
+    };

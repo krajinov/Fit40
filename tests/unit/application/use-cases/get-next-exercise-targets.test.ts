@@ -506,10 +506,16 @@ describe('GetNextExerciseTargetsUseCase', () => {
         nextLoadKg: 52,
         incrementKg: 2,
       },
+      previousSets: [
+        { type: 'reps', reps: 10, weightKg: 50 },
+        { type: 'reps', reps: 10, weightKg: 50 },
+        { type: 'reps', reps: 10, weightKg: 50 },
+      ],
     });
     expect(result.data[1]).toEqual({
       exerciseId: 'ex-2',
       target: { basis: 'first-exposure', reason: 'no-history' },
+      previousSets: null,
     });
   });
 
@@ -537,6 +543,77 @@ describe('GetNextExerciseTargetsUseCase', () => {
       previousLoadKg: 50,
       nextLoadKg: 50,
     });
+  });
+
+  it('projects the newest occurrence’s considered sets for truthful Last-time context', async () => {
+    const exerciseRepo = createMockExerciseRepository();
+    const historyRepo = createMockHistoryRepository();
+    vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1')]);
+    // A five-set performance under a three-set prescription: only the FIRST
+    // three sets are considered — the DTO carries the engine's own slice.
+    vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
+      occurrence('ex-1', 0, rep(), [
+        repSet(1, 10, 60),
+        repSet(2, 9, 60),
+        repSet(3, 10, 60),
+        repSet(4, 8, 60),
+        repSet(5, 7, 60),
+      ]),
+    ]);
+
+    const useCase = new GetNextExerciseTargetsUseCase(exerciseRepo, historyRepo);
+    const result = await useCase.execute({ userId: 'user-1', requests: [request('ex-1')] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data[0]?.previousSets).toEqual([
+      { type: 'reps', reps: 10, weightKg: 60 },
+      { type: 'reps', reps: 9, weightKg: 60 },
+      { type: 'reps', reps: 10, weightKg: 60 },
+    ]);
+  });
+
+  it('omits previousSets for scheme-change: incomparable history renders no context', async () => {
+    const exerciseRepo = createMockExerciseRepository();
+    const historyRepo = createMockHistoryRepository();
+    vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1')]);
+
+    // Scheme change: history exists but is not comparable — no context.
+    vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
+      occurrence('ex-1', 0, rep(4, 8, 10), atMaxReps(rep(4, 8, 10), 50)),
+    ]);
+    const useCase = new GetNextExerciseTargetsUseCase(exerciseRepo, historyRepo);
+    const schemeChange = await useCase.execute({ userId: 'user-1', requests: [request('ex-1')] });
+    expect(schemeChange.ok).toBe(true);
+    if (schemeChange.ok) {
+      expect(schemeChange.data[0]?.target.basis).toBe('scheme-change');
+      expect(schemeChange.data[0]?.previousSets).toBeNull();
+    }
+  });
+
+  it('projects duration seconds for timed-work Last-time context', async () => {
+    const exerciseRepo = createMockExerciseRepository();
+    const historyRepo = createMockHistoryRepository();
+    vi.mocked(exerciseRepo.findByIds).mockResolvedValue([makeExercise('ex-1')]);
+    vi.mocked(historyRepo.listRecentCompletedExercisePerformances).mockResolvedValue([
+      occurrence('ex-1', 0, duration(), [
+        { type: 'duration', setNumber: 1, durationSeconds: 40, weightKg: null, rpe: null },
+        { type: 'duration', setNumber: 2, durationSeconds: 35, weightKg: null, rpe: null },
+        { type: 'duration', setNumber: 3, durationSeconds: 40, weightKg: null, rpe: null },
+      ]),
+    ]);
+
+    const useCase = new GetNextExerciseTargetsUseCase(exerciseRepo, historyRepo);
+    const result = await useCase.execute({ userId: 'user-1', requests: [request('ex-1', duration())] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data[0]?.target.basis).toBe('duration-hold');
+    expect(result.data[0]?.previousSets).toEqual([
+      { type: 'duration', durationSeconds: 40, weightKg: null },
+      { type: 'duration', durationSeconds: 35, weightKg: null },
+      { type: 'duration', durationSeconds: 40, weightKg: null },
+    ]);
   });
 });
 

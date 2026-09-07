@@ -7,7 +7,7 @@
  */
 
 import type { CompletedSessionSetDto } from '@/application/dto/completed-session';
-import { formatKg } from '@/features/sessions/workout-target-views';
+import { formatKg } from '@/features/sessions/progression-labels';
 
 /** Formats a completion instant as a concise UTC date, e.g. "Feb 15, 2026". */
 export function formatHistoryDate(isoTimestamp: string): string {

@@ -7,7 +7,9 @@
  * completed history of it — user-global across programs — then delegates the
  * decision to the pure domain engine. It owns no progression rules of its
  * own: it is the orchestration boundary that connects the history projection
- * and the exercise catalog to `calculateNextExerciseTarget`.
+ * and the exercise catalog to `calculateNextExerciseTarget`. The DTO carries
+ * the engine's decision plus the considered sets of the newest occurrence
+ * (`previousSets`) for truthful "Last time" presentation context.
  *
  * Success returns exactly one target per request, in request order, so
  * callers can zip requests and results by position. A request referencing
@@ -20,7 +22,7 @@ import type {
   ProgressionHistoryPerformance,
   TrainingHistoryRepository,
 } from '@/application/ports/training-history-repository';
-import type { ExerciseTargetDto } from '@/application/dto/exercise';
+import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
 import type { Exercise } from '@/domain/entities/exercise';
 import { calculateNextExerciseTarget } from '@/domain/services/exercise-progression';
 import type { ExerciseId } from '@/domain/types/ids';
@@ -72,6 +74,35 @@ function windowsByExercise(
     windows.set(performance.exerciseId, window);
   }
   return windows;
+}
+
+/**
+ * The considered sets of the newest occurrence — the same `prescription.sets`
+ * slice the engine reads — projected to plain DTO shapes for truthful
+ * "Last time" context. Null when the engine's comparability gates mean no
+ * previous performance can be shown (first exposure or scheme change).
+ */
+function previousSetsOf(
+  newest: ProgressionHistoryPerformance | undefined,
+  currentPrescription: RepPrescription,
+  target: ExerciseTargetDto['target'],
+): ReadonlyArray<PreviousExerciseSetDto> | null {
+  if (target.basis === 'first-exposure' || target.basis === 'scheme-change') {
+    return null;
+  }
+  if (newest === undefined) {
+    return null;
+  }
+  return newest.sets.slice(0, currentPrescription.sets).map((set) => {
+    if (set.type === 'reps') {
+      return { type: 'reps' as const, reps: set.reps, weightKg: set.weightKg };
+    }
+    return {
+      type: 'duration' as const,
+      durationSeconds: set.durationSeconds,
+      weightKg: set.weightKg,
+    };
+  });
 }
 
 export class GetNextExerciseTargetsUseCase {
@@ -137,7 +168,11 @@ export class GetNextExerciseTargetsUseCase {
         history,
       );
 
-      targets.push({ exerciseId: request.exerciseId, target });
+      targets.push({
+        exerciseId: request.exerciseId,
+        target,
+        previousSets: previousSetsOf(history[0], request.prescription, target),
+      });
     }
 
     return ok(targets);

@@ -89,7 +89,7 @@ export function UpcomingExerciseList({
                 </summary>
                 <div className="pb-3 pt-1">
                   <SetLoggerForm
-                    key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? 'none'}`}
+                    key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                     sessionId={sessionId}
                     exerciseOrder={log.order}
                     prescription={log.prescription}
@@ -97,7 +97,10 @@ export function UpcomingExerciseList({
                     weekNumber={weekNumber}
                     workoutOrder={workoutOrder}
                     prefillWeightKg={logger.prefillWeightKg}
+                    prefillSeconds={logger.prefillSeconds}
                     callout={logger.callout}
+                    quietLabel={logger.quietLabel}
+                    hintLabel={logger.hintLabel}
                   />
                 </div>
               </details>

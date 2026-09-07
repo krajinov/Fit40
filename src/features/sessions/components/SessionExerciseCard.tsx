@@ -127,7 +127,7 @@ export function SessionExerciseCard({
       {logger !== null &&
         (card.kind === 'active' ? (
           <SetLoggerForm
-            key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? 'none'}`}
+            key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
             sessionId={sessionId}
             exerciseOrder={log.order}
             prescription={log.prescription}
@@ -135,7 +135,10 @@ export function SessionExerciseCard({
             weekNumber={weekNumber}
             workoutOrder={workoutOrder}
             prefillWeightKg={logger.prefillWeightKg}
+            prefillSeconds={logger.prefillSeconds}
             callout={logger.callout}
+            quietLabel={logger.quietLabel}
+            hintLabel={logger.hintLabel}
           />
         ) : (
           <details className="group/log -mx-1">
@@ -148,7 +151,7 @@ export function SessionExerciseCard({
             </summary>
             <div className="pt-3">
               <SetLoggerForm
-                key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? 'none'}`}
+                key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                 sessionId={sessionId}
                 exerciseOrder={log.order}
                 prescription={log.prescription}
@@ -156,7 +159,10 @@ export function SessionExerciseCard({
                 weekNumber={weekNumber}
                 workoutOrder={workoutOrder}
                 prefillWeightKg={logger.prefillWeightKg}
+                prefillSeconds={logger.prefillSeconds}
                 callout={logger.callout}
+                quietLabel={logger.quietLabel}
+                hintLabel={logger.hintLabel}
               />
             </div>
           </details>

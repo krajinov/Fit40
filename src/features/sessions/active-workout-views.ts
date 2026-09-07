@@ -21,7 +21,7 @@ import type {
 import type { EquipmentType } from '@/domain/types/exercise';
 import { formatPrescription } from '@/features/programs/program-labels';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
-import { formatKg } from '@/features/sessions/workout-target-views';
+import { formatKg } from '@/features/sessions/progression-labels';
 import {
   buildSessionLoggerView,
   type SessionLoggerView,

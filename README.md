@@ -15,8 +15,9 @@ history.
   track progress through their weeks.
 - **Guided workout sessions** — start or resume a scheduled workout, log sets
   (weight, reps, RPE), and complete the session.
-- **Progressive-overload recommendations** — per-exercise "recommended today"
-  chips derived from your completed performance history.
+- **Progressive-overload recommendations** — per-exercise "next target"
+  states with truthful last-time context, derived from your completed
+  performance history.
 - **Exercise catalog** — filterable by equipment and personal limitations, with
   suitable alternatives.
 - **Profile & onboarding** — age, weight, goals, equipment, and limitations
@@ -32,16 +33,21 @@ Recommendations are designed to assist, never to take over:
 
 - **Snapshot prescriptions.** A workout session snapshots the prescribed
   sets/reps/load when it starts. You train what was prescribed, not a live view.
-- **Advisory only.** Suggestions (e.g. "increase to 52.5 kg") appear as
-  recommendation chips. They never mutate the program or the prescription.
-- **You have the final say.** The weight you actually log in the current
-  session is what gets recorded — it takes precedence over the recommendation.
-- **Bodyweight & duration decide in Domain, surface later.** The engine
-  computes advisory bodyweight targets (repeat the authored range until
-  every prescribed set earns its top) and duration targets (+5 s once
-  every prescribed set reaches the scheme's seconds); their presentation
-  (recommendation chips) is deferred to a later slice — today they render
-  no chip.
+- **Advisory only.** Suggestions (e.g. "NEXT TARGET 62.5 kg · Increase
+  2.5 kg — completed all prescribed sets at the top of the rep range")
+  appear as target blocks and logger callouts. They never mutate the
+  program or the prescription.
+- **You have the final say.** The weight or duration you actually log in
+  the current session is what gets recorded — it takes precedence over
+  any recommendation, which stays visible as context ("Your value stands").
+- **Every progression state is surfaced.** Loaded work increases, holds,
+  and regresses (supportive amber, never error styling). Bodyweight work
+  shows the authored rep target — "Goal reached" or rep guidance, never
+  an invented load or substitution. Timed work shows the target duration
+  ("35 sec · Increase duration by 5 sec" / "Keep current duration").
+  First exposure stays lightweight ("First time · no history yet"), and a
+  changed prescription shows the new scheme without implying history was
+  deleted. Every state names its direction in words, never color alone.
 
 Data model note: program progress is **enrollment-scoped**, while completed
 exercise performance history is **user-global** — an exercise performed in any

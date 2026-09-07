@@ -26,13 +26,22 @@ interface SetLoggerFormProps {
   /**
    * Weight prefill (latest session load → recommendation → null), resolved
    * server-side. Applied ONCE on mount: the parent remounts this form (key =
-   * order + set count + latest weight) whenever the session data actually
+   * order + set count + latest value) whenever the session data actually
    * changes, and deliberately keeps it mounted on failed submits so the
    * user's typed values survive.
    */
   readonly prefillWeightKg: number | null;
+  /**
+   * Seconds prefill for timed work (latest session seconds → recommended
+   * seconds → null), with the same precedence and remount semantics.
+   */
+  readonly prefillSeconds: number | null;
   /** Advisory recommendation callout; null renders no callout. */
   readonly callout: SessionCalloutView | null;
+  /** Quiet muted line (first exposure); null renders nothing. */
+  readonly quietLabel: string | null;
+  /** Advisory hint under the callout; null renders nothing. */
+  readonly hintLabel: string | null;
 }
 
 /**
@@ -56,7 +65,10 @@ export function SetLoggerForm({
   weekNumber,
   workoutOrder,
   prefillWeightKg,
+  prefillSeconds,
   callout,
+  quietLabel,
+  hintLabel,
 }: SetLoggerFormProps) {
   const router = useRouter();
   const isReps = prescription.type === 'reps';
@@ -65,7 +77,7 @@ export function SetLoggerForm({
   const rpeId = useId();
 
   const [weight, setWeight] = useState(prefillWeightKg === null ? '' : String(prefillWeightKg));
-  const [count, setCount] = useState('');
+  const [count, setCount] = useState(prefillSeconds === null ? '' : String(prefillSeconds));
   const [rpe, setRpe] = useState('');
 
   async function submitAction(
@@ -96,15 +108,21 @@ export function SetLoggerForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-3 md:flex-row md:items-stretch md:gap-5">
-      {callout !== null && (
-        <div className="shrink-0 md:w-[300px]">
+      <div className="flex min-w-0 flex-col gap-2 md:w-[300px] md:shrink-0">
+        {callout !== null && (
           <RecommendationCallout
             kind={callout.kind}
             valueLabel={callout.valueLabel}
+            deltaLabel={callout.deltaLabel}
             contextLabel={callout.contextLabel}
+            compact
           />
-        </div>
-      )}
+        )}
+        {hintLabel !== null && (
+          <p className="text-[13px] text-ink-3 md:text-sm">{hintLabel}</p>
+        )}
+        {quietLabel !== null && <p className="text-xs text-ink-3 md:text-[13px]">{quietLabel}</p>}
+      </div>
 
       <div className="min-w-0 flex-1">
         <div className="grid grid-cols-3 gap-2 md:flex md:items-end md:gap-3">

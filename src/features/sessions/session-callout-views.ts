@@ -41,7 +41,6 @@ export interface SessionCalloutView {
  */
 export function mapSessionCallout(
   target: ExerciseTargetDto | null,
-  source: 'session' | 'recommendation' | 'none',
   prescription: RepPrescription,
 ): SessionCalloutView | null {
   if (target === null) {
@@ -112,7 +111,8 @@ export function sessionQuietLabel(target: ExerciseTargetDto | null): string | nu
  * Advisory hint copy (the M8 "Hint" line under the callout). The claim
  * "prefilled" is only made when the prefill actually came from the
  * recommendation — an in-session value never claims to be the
- * recommendation, it stands.
+ * recommendation, it stands. A null session prefill hints nothing: no
+ * logged value is invented.
  */
 export function sessionHintLabel(
   source: 'session' | 'recommendation' | 'none',
@@ -120,7 +120,12 @@ export function sessionHintLabel(
   prefill: number | null,
 ): string | null {
   if (source === 'session') {
-    const value = kind === 'weight' ? formatKg(prefill ?? 0) : formatSeconds(prefill ?? 0);
+    if (prefill === null) {
+      // Nothing was actually logged — "You logged 0 kg" would fabricate a
+      // value (0 is a real load, not a stand-in for "nothing").
+      return null;
+    }
+    const value = kind === 'weight' ? formatKg(prefill) : formatSeconds(prefill);
     const unit = kind === 'weight' ? 'weight' : 'duration';
     return `You logged ${value} — your ${unit} stands. The recommendation stays as context.`;
   }

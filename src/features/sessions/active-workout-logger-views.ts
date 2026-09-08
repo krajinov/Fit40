@@ -140,7 +140,7 @@ function loggerBase(
   return {
     prefillSource: source,
     prefillKind: kind,
-    callout: mapSessionCallout(target, source, prescription),
+    callout: mapSessionCallout(target, prescription),
     quietLabel: sessionQuietLabel(target),
     hintLabel: sessionHintLabel(source, kind, prefill),
   };

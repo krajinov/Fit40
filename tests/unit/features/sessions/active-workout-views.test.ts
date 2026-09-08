@@ -19,6 +19,7 @@ import {
 } from '@/features/sessions/active-workout-logger-views';
 import {
   mapSessionCallout,
+  sessionHintLabel,
   sessionQuietLabel,
 } from '@/features/sessions/session-callout-views';
 
@@ -169,6 +170,16 @@ describe('active-workout-views / buildSessionLoggerView (weight prefill preceden
     expect(view.prefillSource).toBe('none');
     expect(view.callout?.valueLabel).toBe('No added load');
     expect(view.callout?.deltaLabel).toBeUndefined();
+  });
+
+  it('sessionHintLabel with a null prefill never claims a logged 0 kg', () => {
+    // 0 kg is a real external load, not a stand-in for "nothing logged" —
+    // a null prefill must not fabricate "You logged 0 kg".
+    expect(sessionHintLabel('session', 'weight', null)).toBeNull();
+    expect(sessionHintLabel('session', 'seconds', null)).toBeNull();
+    expect(sessionHintLabel('session', 'weight', 0)).toBe(
+      'You logged 0 kg — your weight stands. The recommendation stays as context.',
+    );
   });
 });
 
@@ -353,7 +364,6 @@ describe('active-workout-views / mapSessionCallout', () => {
         { basis: 'hold', reason: 'mixed-performance-in-range', previousLoadKg: 22.5, nextLoadKg: 22.5 },
         loadedSets([9, 9, 10], 22.5),
       ),
-      'none',
       threeByEightToTen,
     );
     expect(view?.kind).toBe('hold');
@@ -374,7 +384,6 @@ describe('active-workout-views / mapSessionCallout', () => {
         },
         loadedSets([7, 6, 6], 60),
       ),
-      'none',
       threeByEightToTen,
     );
     expect(view?.kind).toBe('regress');
@@ -389,7 +398,6 @@ describe('active-workout-views / mapSessionCallout', () => {
         { basis: 'hold', reason: 'incomplete-sets', previousLoadKg: 50, nextLoadKg: 50 },
         [],
       ),
-      'none',
       threeByEightToTen,
     );
     expect(view?.contextLabel).toBeUndefined();

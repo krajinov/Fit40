@@ -241,13 +241,24 @@ export function mapExerciseTargetToView(
  * Maps a batch of targets (one per request position, as returned by
  * `GetNextExerciseTargetsUseCase`) zipped with their current
  * prescriptions. Order is preserved by construction: position i of the
- * result corresponds to position i of the requests.
+ * result corresponds to position i of the requests. A violated zip
+ * contract (mismatched lengths) renders the truthful empty view for every
+ * position — a missing prescription is never cast into existence.
  */
 export function mapExerciseTargetsToViews(
   dtos: ReadonlyArray<ExerciseTargetDto | null>,
   currentPrescriptions: ReadonlyArray<RepPrescription>,
 ): ReadonlyArray<WorkoutExerciseTargetView> {
-  return dtos.map((dto, index) =>
-    mapExerciseTargetToView(dto, currentPrescriptions[index] as RepPrescription),
-  );
+  if (dtos.length !== currentPrescriptions.length) {
+    // Defensive: callers zip one prescription per request position (see
+    // workout-detail-view.ts), so a mismatch is a caller bug — every row
+    // renders the empty view rather than casting a missing prescription.
+    return dtos.map(() => EMPTY_WORKOUT_TARGET);
+  }
+  return dtos.map((dto, index) => {
+    const prescription = currentPrescriptions[index];
+    return prescription === undefined
+      ? EMPTY_WORKOUT_TARGET
+      : mapExerciseTargetToView(dto, prescription);
+  });
 }

@@ -114,6 +114,49 @@ describe('progression-labels / last-time context', () => {
     ).toBe('Last time · 60 kg × 10, 10, 9');
   });
 
+  it('names each set’s own load when history used mixed loads — never the minimum as every set’s load', () => {
+    // non-uniform-load hold: the engine's previousLoadKg (20) is the working
+    // MINIMUM, not the load each set actually used — it must not stand in
+    // as the load of every set.
+    expect(
+      lastTimeLabel(
+        { basis: 'hold', reason: 'non-uniform-load', previousLoadKg: 20, nextLoadKg: 20 },
+        [
+          { type: 'reps', reps: 9, weightKg: 20 },
+          { type: 'reps', reps: 9, weightKg: 22.5 },
+          { type: 'reps', reps: 8, weightKg: 25 },
+        ],
+      ),
+    ).toBe('Last time · 20 kg × 9, 22.5 kg × 9, 25 kg × 8');
+  });
+
+  it('regress with mixed loads renders each set’s own load, not the minimum as the shared load', () => {
+    expect(
+      lastTimeLabel(
+        {
+          basis: 'regress',
+          reason: 'two-consecutive-sessions-below-minimum',
+          previousLoadKg: 40,
+          nextLoadKg: 37.5,
+          incrementKg: 2.5,
+        },
+        [
+          { type: 'reps', reps: 6, weightKg: 40 },
+          { type: 'reps', reps: 5, weightKg: 45 },
+        ],
+      ),
+    ).toBe('Last time · 40 kg × 6, 45 kg × 5');
+  });
+
+  it('holds with incomplete sets still render truthfully when the logged loads differ', () => {
+    expect(
+      lastTimeLabel(
+        { basis: 'hold', reason: 'incomplete-sets', previousLoadKg: 50, nextLoadKg: 50 },
+        [{ type: 'reps', reps: 9, weightKg: 55 }],
+      ),
+    ).toBe('Last time · 55 kg × 9');
+  });
+
   it('formats timed work as the seconds list without duplicating a scheme value', () => {
     expect(
       lastTimeLabel(

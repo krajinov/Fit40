@@ -397,4 +397,18 @@ describe('mapExerciseTargetsToViews', () => {
     expect(views[3]?.quietLabel).toBe('First time · no history yet');
     expect(views[0]?.quietLabel).toBeNull();
   });
+
+  it('renders the empty view for every position when the zip contract is violated', () => {
+    // A caller bug (mismatched lengths) must never cast a missing
+    // prescription into existence — every row renders the empty view.
+    const views = mapExerciseTargetsToViews([increaseFrom60, null], [threeByEightToTen]);
+
+    expect(views).toHaveLength(2);
+    for (const view of views) {
+      expect(view.block).toBeNull();
+      expect(view.lastTimeLabel).toBeNull();
+      expect(view.quietLabel).toBeNull();
+      expect(view.exerciseId).toBe('');
+    }
+  });
 });

@@ -18,6 +18,8 @@
  *   color alone.
  * - Regress is supportive amber copy, never error wording.
  * - Bodyweight states never invent load, variation, or substitution copy.
+ * - Mixed-load history names each set's own load — the working minimum is
+ *   never presented as the load of every set.
  */
 
 import type { PreviousExerciseSetDto } from '@/application/dto/exercise';
@@ -146,12 +148,34 @@ function setFragment(set: PreviousExerciseSetDto): string {
 }
 
 /**
+ * The one load every considered set shared, or null when loads were mixed
+ * or absent. The engine's `previousLoadKg` is the working MINIMUM across
+ * sets, so it alone cannot authorize presenting one load for every set.
+ */
+function uniformLoadKg(previousSets: ReadonlyArray<PreviousExerciseSetDto>): number | null {
+  const first = previousSets[0]?.weightKg;
+  if (first === null || first === undefined) {
+    return null;
+  }
+  return previousSets.every((set) => set.weightKg === first) ? first : null;
+}
+
+/** One set of a mixed-load line: "62.5 kg × 9", or just "9" with no load. */
+function loadedSetFragment(set: PreviousExerciseSetDto): string {
+  const value = setFragment(set);
+  return set.weightKg === null ? value : `${formatKg(set.weightKg)} × ${value}`;
+}
+
+/**
  * Truthful "Last time" context from the DTO's previous-sets projection:
- * "Last time · 60 kg × 10, 10, 10" for loaded reps, "Last time · 30, 30, 25
- * sec" for timed work, "Last time · 12, 12, 10 reps" for unloaded bodyweight
- * reps, or null when nothing truthful exists. Timed work lists its seconds
- * directly (they are the performance — the scheme seconds are not a load);
- * bodyweight work never shows a fabricated load.
+ * "Last time · 60 kg × 10, 10, 10" when one load covered every set, "Last
+ * time · 60 kg × 10, 62.5 kg × 9, 25 kg × 8" when the sets used mixed
+ * loads (each set names its own — the working minimum never stands in as
+ * the load of every set), "Last time · 30, 30, 25 sec" for timed work,
+ * "Last time · 12, 12, 10 reps" for unloaded bodyweight reps, or null when
+ * nothing truthful exists. Timed work lists its seconds directly (they are
+ * the performance — the scheme seconds are not a load); bodyweight work
+ * never shows a fabricated load.
  */
 export function lastTimeLabel(
   target: NextExerciseTarget,
@@ -161,14 +185,16 @@ export function lastTimeLabel(
     return null;
   }
 
-  const setLabels = previousSets.map(setFragment);
-
   if (target.basis === 'increase' || target.basis === 'hold' || target.basis === 'regress') {
-    return `Last time · ${formatKg(target.previousLoadKg)} × ${setLabels.join(', ')}`;
+    const load = uniformLoadKg(previousSets);
+    if (load !== null) {
+      return `Last time · ${formatKg(load)} × ${previousSets.map(setFragment).join(', ')}`;
+    }
+    return `Last time · ${previousSets.map(loadedSetFragment).join(', ')}`;
   }
 
   const unit = previousSets[0]?.type === 'duration' ? ' sec' : ' reps';
-  return `Last time · ${setLabels.join(', ')}${unit}`;
+  return `Last time · ${previousSets.map(setFragment).join(', ')}${unit}`;
 }
 
 // ─── Bodyweight value labels ──────────────────────────────────────────────────

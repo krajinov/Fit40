@@ -105,7 +105,9 @@ context. Raw reason codes never reach users. Locked semantics:
   styling.
 - **Truthful context:** `ExerciseTargetDto.previousSets` carries the newest
   occurrence's considered sets, so "Last time · 60 kg × 10, 10, 10" renders
-  from real data; scheme-change/first-exposure render none, never a
+  from real data (mixed loads name each set's own load — "Last time ·
+  20 kg × 9, 22.5 kg × 9" — never the working minimum as every set's
+  load); scheme-change/first-exposure render none, never a
   fabricated line. RPE is not in the projection — recommendations never
   read it.
 
@@ -239,7 +241,9 @@ badges, exercise list, CTA band) with **no** personalized recommendations.
   color), and adds the `Goal reached` badge for bodyweight-goal-reached.
 - **Last-time context:** `ExerciseTargetDto.previousSets` (the newest
   occurrence's considered sets) powers "Last time · 60 kg × 10, 10, 10";
-  timed work lists seconds ("Last time · 30, 30, 25 sec"), bodyweight work
+  mixed loads name each set's own load ("Last time · 20 kg × 9, 22.5 kg ×
+  9") — the working minimum is never presented as every set's load; timed
+  work lists seconds ("Last time · 30, 30, 25 sec"), bodyweight work
   lists reps — never a fabricated load.
 
 ### Basis → M8 target-block states (approved design)

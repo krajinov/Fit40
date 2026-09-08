@@ -97,6 +97,13 @@ export const workoutSessions = pgTable(
  * Self-contained historical snapshot of one exercise performed in a session.
  * The prescription (and rest period) are copied from the workout template at
  * session start, so the log remains meaningful if the template later changes.
+ *
+ * Each log carries two exercise identities:
+ * - `exercise_id` (PERFORMED): the exercise actually trained in the session.
+ * - `authored_exercise_id` (AUTHORED): the exercise the template prescribed.
+ *   Nullable for pre-M9 legacy rows, where the performed id is the authored id.
+ * Both are snapshots at session start; substitutions only rewrite the
+ * performed id, leaving the authored prescription intact.
  */
 export const exerciseLogs = pgTable(
   'exercise_logs',
@@ -108,6 +115,9 @@ export const exerciseLogs = pgTable(
     exerciseId: text('exercise_id')
       .notNull()
       .references(() => exercises.id, { onDelete: 'restrict' }),
+    authoredExerciseId: text('authored_exercise_id').references(() => exercises.id, {
+      onDelete: 'restrict',
+    }),
     prescriptionType: text('prescription_type').notNull(),
     sets: integer('sets').notNull(),
     minReps: integer('min_reps'),
@@ -118,6 +128,11 @@ export const exerciseLogs = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.sessionId, table.exerciseOrder] }),
     exerciseIdIdx: index('exercise_logs_exercise_id_idx').on(table.exerciseId),
+    // FK index for the authored exercise: serves FK restrict checks against
+    // exercises when an exercise row is deleted, matching the exercise_id FK.
+    authoredExerciseIdIdx: index('exercise_logs_authored_exercise_id_idx').on(
+      table.authoredExerciseId,
+    ),
     exerciseOrderCheck: check('exercise_logs_exercise_order_check', sql`${table.exerciseOrder} > 0`),
     setsCheck: check('exercise_logs_sets_check', sql`${table.sets} > 0`),
     minRepsCheck: check('exercise_logs_min_reps_check', sql`${table.minReps} > 0`),

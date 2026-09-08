@@ -57,6 +57,13 @@
       "when": 1788446785708,
       "tag": "0007_training_history_index",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788889998217,
+      "tag": "0008_charming_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

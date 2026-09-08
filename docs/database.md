@@ -292,6 +292,8 @@ npx drizzle-kit migrate
 | `workout_sessions` | `workout_id` | Find sessions by workout |
 | `workout_sessions` | `started_at` | Time-range queries |
 | `exercise_logs` | `session_id` | Load logs for a session |
+| `exercise_logs` | `exercise_id` | FK restrict checks against `exercises` |
+| `exercise_logs` | `authored_exercise_id` | FK restrict checks against `exercises` (authored exercise) |
 | `set_logs` | `exercise_log_id` | Load sets for a log |
 | `program_enrollments` | `user_id` | Find enrollments by user |
 | `program_enrollments` | `program_id` | Find enrollments by program |
@@ -342,6 +344,8 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 | `workout_sessions.user_id` | `users.id` | CASCADE |
 | `workout_sessions.workout_id` | `workouts.id` | RESTRICT |
 | `exercise_logs.session_id` | `workout_sessions.id` | CASCADE |
+| `exercise_logs.exercise_id` | `exercises.id` | RESTRICT |
+| `exercise_logs.authored_exercise_id` | `exercises.id` | RESTRICT |
 | `set_logs.exercise_log_id` | `exercise_logs.id` | CASCADE |
 | `program_enrollments.user_id` | `users.id` | CASCADE |
 | `program_enrollments.program_id` | `training_programs.id` | RESTRICT |

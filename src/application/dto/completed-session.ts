@@ -20,6 +20,7 @@
 import type { CompletedSessionContext } from '@/application/ports/training-history-repository';
 import type { EquipmentType } from '@/domain/types/exercise';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import { resolveOccurrenceSubstitutionState } from '@/domain/services/session-exercise-substitution';
 import type { ExerciseLog, SetLog } from '@/domain/entities/workout-session';
 
 /** Current catalog display metadata for one exercise id. Display-only. */
@@ -63,12 +64,28 @@ export type CompletedSessionSetDto =
 
 /** One exercise occurrence in the completed session. */
 export interface CompletedSessionEntryDto {
+  /** The exercise the program's template authored for this occurrence. */
+  readonly authoredExerciseId: string;
   /** The exercise actually performed (equals authored when not substituted). */
   readonly performedExerciseId: string;
+  /**
+   * Derived: the performed identity diverged from the authored one. The
+   * domain owns this derivation; it is never part of the persisted record.
+   */
+  readonly isSubstituted: boolean;
   /** Position within the session — the entry's identity component. */
   readonly exerciseOrder: number;
-  /** Current catalog name, or null when the exercise was not resolved. */
+  /**
+   * Current catalog name of the PERFORMED exercise, or null when unresolved.
+   * This is the exercise the user actually trained — the visible identity.
+   */
   readonly exerciseName: string | null;
+  /**
+   * Current catalog name of the AUTHORED exercise, or null when the catalog
+   * cannot resolve it. Equal to `exerciseName` when the entry was performed
+   * as authored. Never fabricated from other data.
+   */
+  readonly authoredExerciseName: string | null;
   /** Current catalog slug (links to the exercise's history page), or null when unresolved. */
   readonly exerciseSlug: string | null;
   /** Current catalog equipment, or null when unresolved. Display-only. */
@@ -121,14 +138,19 @@ function serializeEntry(
   log: ExerciseLog,
   catalog: ReadonlyMap<string, ExerciseMeta>,
 ): CompletedSessionEntryDto {
-  const meta = catalog.get(log.performedExerciseId);
+  const performed = catalog.get(log.performedExerciseId);
+  const authored = catalog.get(log.authoredExerciseId);
   const prescription = log.prescription;
+  const substitution = resolveOccurrenceSubstitutionState(log);
   return {
+    authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId,
+    isSubstituted: substitution.isSubstituted,
     exerciseOrder: log.order,
-    exerciseName: meta?.name ?? null,
-    exerciseSlug: meta?.slug ?? null,
-    equipment: meta?.equipment ?? null,
+    exerciseName: performed?.name ?? null,
+    authoredExerciseName: authored?.name ?? null,
+    exerciseSlug: performed?.slug ?? null,
+    equipment: performed?.equipment ?? null,
     restSeconds: log.restSeconds,
     prescription:
       prescription.type === 'reps'

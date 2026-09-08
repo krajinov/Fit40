@@ -5,6 +5,7 @@
  */
 
 import type { NextExerciseTarget } from '@/domain/services/exercise-progression';
+import type { Exercise } from '@/domain/entities/exercise';
 import type {
   Difficulty,
   EquipmentType,
@@ -25,6 +26,23 @@ export interface ExerciseSummaryDto {
   readonly equipment: EquipmentType;
   readonly difficulty: Difficulty;
   readonly movementPattern: MovementPattern;
+}
+
+/**
+ * Maps one catalog exercise to its presentation-neutral summary shape.
+ * Exported for the batched ids lookup (GetExercisesByIds), which composes
+ * the same summary without duplicating the field projection.
+ */
+export function toExerciseSummaryDto(exercise: Exercise): ExerciseSummaryDto {
+  return {
+    id: exercise.id,
+    name: exercise.name,
+    slug: exercise.slug,
+    primaryMuscle: exercise.primaryMuscle,
+    equipment: exercise.equipment,
+    difficulty: exercise.difficulty,
+    movementPattern: exercise.movementPattern,
+  };
 }
 
 /**

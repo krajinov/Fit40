@@ -66,11 +66,21 @@ export class GetCompletedSessionUseCase {
       return err({ code: 'SESSION_NOT_FOUND', message: 'Completed workout session not found' });
     }
 
-    // One batched catalog read for display metadata only. Current catalog
-    // state never overrides the persisted snapshot; a sparse map (unresolved
-    // exercises) degrades to positional labels in the view instead of
-    // failing the read.
-    const exerciseIds = [...new Set(context.session.exerciseLogs.map((log) => log.performedExerciseId))];
+    // One batched catalog read for display metadata only, covering the UNION
+    // of every occurrence's performed and authored exercise ids — substituted
+    // occurrences need both names (performed: the visible identity; authored:
+    // the original prescription's exercise) without a second repository
+    // call. Current catalog state never overrides the persisted snapshot; a
+    // sparse map (unresolved exercises) degrades to positional labels in the
+    // view instead of failing the read.
+    const exerciseIds = [
+      ...new Set(
+        context.session.exerciseLogs.flatMap((log) => [
+          log.performedExerciseId,
+          log.authoredExerciseId,
+        ]),
+      ),
+    ];
     const catalogExercises = await this.exerciseRepository.findByIds(exerciseIds);
     const exerciseCatalog = new Map<string, ExerciseMeta>(
       catalogExercises.map((exercise) => [

@@ -9,6 +9,7 @@ import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 import type { WorkoutSession, WorkoutSessionStatus } from '@/domain/entities/workout-session';
 import { getSessionStatus } from '@/domain/entities/workout-session';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import { resolveOccurrenceSubstitutionState } from '@/domain/services/session-exercise-substitution';
 
 export type WorkoutSessionSetDto =
   | {
@@ -27,8 +28,16 @@ export type WorkoutSessionSetDto =
     };
 
 export interface WorkoutSessionExerciseDto {
+  /** The exercise the program's template authored for this occurrence. */
+  readonly authoredExerciseId: string;
   /** The exercise actually performed (equals authored when not substituted). */
   readonly performedExerciseId: string;
+  /**
+   * Derived: the performed identity diverged from the authored one. The
+   * domain owns this derivation (`resolveOccurrenceSubstitutionState`);
+   * it is never persisted or stored alongside the session.
+   */
+  readonly isSubstituted: boolean;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly sets: ReadonlyArray<WorkoutSessionSetDto>;
@@ -90,12 +99,17 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     status: getSessionStatus(session),
     startedAt: session.startedAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
-    exerciseLogs: session.exerciseLogs.map((log) => ({
-      performedExerciseId: log.performedExerciseId as string,
-      order: log.order,
-      prescription: log.prescription,
-      sets: log.sets.map(serializeSetLog),
-    })),
+    exerciseLogs: session.exerciseLogs.map((log) => {
+      const substitution = resolveOccurrenceSubstitutionState(log);
+      return {
+        authoredExerciseId: substitution.authoredExerciseId as string,
+        performedExerciseId: substitution.performedExerciseId as string,
+        isSubstituted: substitution.isSubstituted,
+        order: log.order,
+        prescription: log.prescription,
+        sets: log.sets.map(serializeSetLog),
+      };
+    }),
     metrics: {
       totalSets: metrics.totalSets,
       totalReps: metrics.totalReps,

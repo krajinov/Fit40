@@ -67,6 +67,8 @@ interface SetSpec {
 }
 interface LogSpec {
   readonly exerciseId: string;
+  /** Defaults to exerciseId (performed-as-authored) when omitted. */
+  readonly performedExerciseId?: string;
   readonly sets: ReadonlyArray<SetSpec>;
 }
 
@@ -81,6 +83,7 @@ function completedSession(id: string, logs: ReadonlyArray<LogSpec>): CompletedWo
     startedAt: new Date('2026-01-01T10:00:00Z'),
     exerciseLogs: logs.map((log, index) => ({
       authoredExerciseId: eid(log.exerciseId),
+      performedExerciseId: eid(log.performedExerciseId ?? log.exerciseId),
       order: index + 1,
       prescription: log.sets[0]?.type === 'duration' ? durationScheme() : repScheme(),
       restSeconds: 60,
@@ -282,6 +285,77 @@ describe('GetCompletedSessionUseCase', () => {
     if (!result.ok) return;
     expect(result.data.entries[0]?.exerciseName).toBeNull();
     expect(result.data.entries[0]?.equipment).toBeNull();
+  });
+
+  it('resolves authored and performed names in ONE batched call over the union of ids', async () => {
+    // Order 1 substituted (authored ex-001, performed ex-009); order 2
+    // performed as authored (ex-002 both ways); order 3 substituted with the
+    // authored exercise UNKNOWN to the catalog.
+    const session = completedSession('session-subst', [
+      { exerciseId: 'ex-001', performedExerciseId: 'ex-009', sets: [{ reps: 10, weightKg: 50 }] },
+      { exerciseId: 'ex-002', sets: [{ reps: 12, weightKg: 52 }] },
+      { exerciseId: 'ex-777', performedExerciseId: 'ex-015', sets: [{ type: 'duration', durationSeconds: 45 }] },
+    ]);
+    const exerciseRepo = makeExerciseRepo([
+      makeExercise('ex-009'),
+      makeExercise('ex-001'),
+      makeExercise('ex-002'),
+      makeExercise('ex-015'),
+    ]);
+    const uc = new GetCompletedSessionUseCase(makeHistoryRepo(makeContext(session)), exerciseRepo);
+
+    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-subst' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // ONE call whose argument is exactly the deduplicated union.
+    expect(exerciseRepo.findByIds).toHaveBeenCalledTimes(1);
+    expect(exerciseRepo.findByIds).toHaveBeenCalledWith([
+      eid('ex-009'),
+      eid('ex-001'),
+      eid('ex-002'),
+      eid('ex-015'),
+      eid('ex-777'),
+    ]);
+
+    const [first, second, third] = result.data.entries;
+    // Substituted entry: performed name is the visible identity; authored
+    // name rides along for truthful display.
+    expect(first?.performedExerciseId).toBe('ex-009');
+    expect(first?.authoredExerciseId).toBe('ex-001');
+    expect(first?.isSubstituted).toBe(true);
+    expect(first?.exerciseName).toBe('Goblet Squat');
+    expect(first?.authoredExerciseName).toBe('Goblet Squat');
+    // Non-substituted entry stays correct with both names equal.
+    expect(second?.performedExerciseId).toBe('ex-002');
+    expect(second?.authoredExerciseId).toBe('ex-002');
+    expect(second?.isSubstituted).toBe(false);
+    expect(second?.exerciseName).toBe('Goblet Squat');
+    expect(second?.authoredExerciseName).toBe('Goblet Squat');
+    // Missing AUTHORED metadata degrades to null — never fabricated.
+    expect(third?.authoredExerciseId).toBe('ex-777');
+    expect(third?.performedExerciseId).toBe('ex-015');
+    expect(third?.isSubstituted).toBe(true);
+    expect(third?.authoredExerciseName).toBeNull();
+    expect(third?.exerciseName).toBe('Goblet Squat');
+  });
+
+  it('reports a null authored name when the performed name is missing too', async () => {
+    const session = completedSession('session-subst-orphan', [
+      { exerciseId: 'ex-888', performedExerciseId: 'ex-999', sets: [{ reps: 10 }] },
+    ]);
+    const uc = new GetCompletedSessionUseCase(
+      makeHistoryRepo(makeContext(session)),
+      makeExerciseRepo([]),
+    );
+
+    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-subst-orphan' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const entry = result.data.entries[0];
+    expect(entry?.isSubstituted).toBe(true);
+    expect(entry?.exerciseName).toBeNull();
+    expect(entry?.authoredExerciseName).toBeNull();
   });
 
   it('rejects malformed input before touching the repository', async () => {

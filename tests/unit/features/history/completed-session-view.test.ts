@@ -32,9 +32,12 @@ function sessionDto(overrides?: {
       overrides?.entries ??
       [
         {
+          authoredExerciseId: 'ex-001',
           performedExerciseId: 'ex-001',
+          isSubstituted: false,
           exerciseOrder: 1,
           exerciseName: 'Goblet Squat',
+          authoredExerciseName: 'Goblet Squat',
           exerciseSlug: 'goblet-squat',
           equipment: 'kettlebell',
           restSeconds: 90,
@@ -96,9 +99,12 @@ describe('toCompletedSessionView', () => {
   it('falls back to positional names and omits unresolved equipment', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
+        authoredExerciseId: 'ex-404',
         performedExerciseId: 'ex-404',
+        isSubstituted: false,
         exerciseOrder: 3,
         exerciseName: null,
+        authoredExerciseName: null,
         exerciseSlug: null,
         equipment: null,
         restSeconds: 0,
@@ -116,9 +122,12 @@ describe('toCompletedSessionView', () => {
   it('omits zero-value reps and volume from the metrics line', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
+        authoredExerciseId: 'ex-015',
         performedExerciseId: 'ex-015',
+        isSubstituted: false,
         exerciseOrder: 1,
         exerciseName: 'Plank',
+        authoredExerciseName: 'Plank',
         exerciseSlug: 'dead-bug',
         equipment: 'bodyweight',
         restSeconds: 60,
@@ -140,9 +149,12 @@ describe('toCompletedSessionView', () => {
   it('renders no history link when the slug is missing or malformed', () => {
     const badSlug: CompletedSessionDto['entries'] = [
       {
+        authoredExerciseId: 'ex-099',
         performedExerciseId: 'ex-099',
+        isSubstituted: false,
         exerciseOrder: 1,
         exerciseName: 'Odd Exercise',
+        authoredExerciseName: 'Odd Exercise',
         exerciseSlug: 'Not_A_Valid_Slug',
         equipment: null,
         restSeconds: 60,
@@ -158,9 +170,12 @@ describe('toCompletedSessionView', () => {
     const unresolved = sessionDto({
       entries: [
         {
+          authoredExerciseId: 'ex-404',
           performedExerciseId: 'ex-404',
+          isSubstituted: false,
           exerciseOrder: 2,
           exerciseName: null,
+          authoredExerciseName: null,
           exerciseSlug: null,
           equipment: null,
           restSeconds: 60,

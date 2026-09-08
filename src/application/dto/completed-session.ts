@@ -63,7 +63,8 @@ export type CompletedSessionSetDto =
 
 /** One exercise occurrence in the completed session. */
 export interface CompletedSessionEntryDto {
-  readonly exerciseId: string;
+  /** The exercise actually performed (equals authored when not substituted). */
+  readonly performedExerciseId: string;
   /** Position within the session — the entry's identity component. */
   readonly exerciseOrder: number;
   /** Current catalog name, or null when the exercise was not resolved. */
@@ -120,10 +121,10 @@ function serializeEntry(
   log: ExerciseLog,
   catalog: ReadonlyMap<string, ExerciseMeta>,
 ): CompletedSessionEntryDto {
-  const meta = catalog.get(log.exerciseId);
+  const meta = catalog.get(log.performedExerciseId);
   const prescription = log.prescription;
   return {
-    exerciseId: log.exerciseId,
+    performedExerciseId: log.performedExerciseId,
     exerciseOrder: log.order,
     exerciseName: meta?.name ?? null,
     exerciseSlug: meta?.slug ?? null,

@@ -52,7 +52,18 @@ export type SetLog = RepSetLog | DurationSetLog;
 // ─── Exercise Log ────────────────────────────────────────────────────────────
 
 export interface ExerciseLog {
-  readonly exerciseId: ExerciseId;
+  /**
+   * The exercise the program's template authored for this occurrence.
+   * Together with the prescription and rest snapshot below, this identity is
+   * the occurrence's contract: substitution swaps only the performed
+   * identity, never the authored one or the prescription.
+   */
+  readonly authoredExerciseId: ExerciseId;
+  /**
+   * The exercise actually performed. Equal to `authoredExerciseId` whenever
+   * the occurrence was performed as authored (not substituted).
+   */
+  readonly performedExerciseId: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -92,7 +103,13 @@ export interface WorkoutSession {
 // ─── Input Types ─────────────────────────────────────────────────────────────
 
 export interface CreateExerciseLogInput {
-  readonly exerciseId: ExerciseId;
+  readonly authoredExerciseId: ExerciseId;
+  /**
+   * The performed identity for rehydrating a possibly-substituted
+   * occurrence. Fresh sessions omit it: the factory then sets
+   * performed := authored (performed-as-authored).
+   */
+  readonly performedExerciseId?: ExerciseId;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -281,7 +298,8 @@ export function createWorkoutSession(
   }
 
   const exerciseLogs: ReadonlyArray<ExerciseLog> = input.exerciseLogs.map((log) => ({
-    exerciseId: log.exerciseId,
+    authoredExerciseId: log.authoredExerciseId,
+    performedExerciseId: log.performedExerciseId ?? log.authoredExerciseId,
     order: log.order,
     prescription: log.prescription,
     restSeconds: log.restSeconds,

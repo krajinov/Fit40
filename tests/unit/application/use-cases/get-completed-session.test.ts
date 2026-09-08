@@ -80,7 +80,7 @@ function completedSession(id: string, logs: ReadonlyArray<LogSpec>): CompletedWo
     workoutId: wid('wo-1'),
     startedAt: new Date('2026-01-01T10:00:00Z'),
     exerciseLogs: logs.map((log, index) => ({
-      exerciseId: eid(log.exerciseId),
+      authoredExerciseId: eid(log.exerciseId),
       order: index + 1,
       prescription: log.sets[0]?.type === 'duration' ? durationScheme() : repScheme(),
       restSeconds: 60,
@@ -182,7 +182,7 @@ describe('GetCompletedSessionUseCase', () => {
     expect(result.data.completedAt).toBe('2026-01-01T10:45:00.000Z');
     expect(result.data.entries).toHaveLength(1);
     const entry = result.data.entries[0];
-    expect(entry?.exerciseId).toBe('ex-001');
+    expect(entry?.performedExerciseId).toBe('ex-001');
     expect(entry?.exerciseOrder).toBe(1);
     expect(entry?.exerciseName).toBe('Goblet Squat');
     expect(entry?.equipment).toBe(EquipmentTypeEnum.Kettlebell);

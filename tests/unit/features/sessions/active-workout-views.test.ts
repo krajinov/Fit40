@@ -50,7 +50,7 @@ function log(
   prescription: RepPrescription,
   sets: WorkoutSessionSetDto[],
 ): WorkoutSessionExerciseDto {
-  return { exerciseId, order, prescription, sets };
+  return { performedExerciseId: exerciseId, order, prescription, sets };
 }
 
 function loadedSets(reps: number[], load: number): PreviousExerciseSetDto[] {

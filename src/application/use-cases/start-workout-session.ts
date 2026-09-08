@@ -127,7 +127,9 @@ export class StartWorkoutSessionUseCase {
 
     const exerciseLogInputs: ReadonlyArray<CreateExerciseLogInput> = occurrence.workout.exercises.map(
       (exercise) => ({
-        exerciseId: exercise.exerciseId,
+        // A fresh session performs every occurrence as authored; the factory
+        // defaults performedExerciseId to this authored id.
+        authoredExerciseId: exercise.exerciseId,
         order: exercise.order,
         prescription: exercise.prescription,
         restSeconds: exercise.restSeconds,

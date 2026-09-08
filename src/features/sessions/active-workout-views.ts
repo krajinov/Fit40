@@ -149,7 +149,7 @@ export function buildSessionExerciseCardViews(
       : null;
 
   return input.logs.map((log, index) => {
-    const meta = input.catalogByExerciseId.get(log.exerciseId);
+    const meta = input.catalogByExerciseId.get(log.performedExerciseId);
     const prescribed = log.prescription.sets;
     const kind: SessionExerciseKind =
       log.sets.length >= prescribed

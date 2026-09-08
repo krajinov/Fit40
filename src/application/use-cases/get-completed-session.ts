@@ -70,7 +70,7 @@ export class GetCompletedSessionUseCase {
     // state never overrides the persisted snapshot; a sparse map (unresolved
     // exercises) degrades to positional labels in the view instead of
     // failing the read.
-    const exerciseIds = [...new Set(context.session.exerciseLogs.map((log) => log.exerciseId))];
+    const exerciseIds = [...new Set(context.session.exerciseLogs.map((log) => log.performedExerciseId))];
     const catalogExercises = await this.exerciseRepository.findByIds(exerciseIds);
     const exerciseCatalog = new Map<string, ExerciseMeta>(
       catalogExercises.map((exercise) => [

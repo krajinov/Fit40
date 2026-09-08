@@ -233,7 +233,7 @@ export function toTrainingHistorySessionDto(
     startedAt: entry.session.startedAt.toISOString(),
     completedAt: entry.session.completedAt.toISOString(),
     exerciseLogs: entry.session.exerciseLogs.map((log) => ({
-      exerciseId: log.exerciseId,
+      performedExerciseId: log.performedExerciseId,
       order: log.order,
       prescription: log.prescription,
       sets: log.sets.map(serializeSetLog),

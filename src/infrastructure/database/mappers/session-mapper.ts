@@ -145,7 +145,11 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
   const logInputs = orderedLogs.map((row) => {
     const context = `exercise_logs (session_id=${row.sessionId}, exercise_order=${row.exerciseOrder})`;
     return {
-      exerciseId: parseExerciseId(row.exerciseId, context),
+      // The exercise_id column stores the PERFORMED exercise. Until the
+      // authored_exercise_id column lands (Slice 2), every persisted row is
+      // performed-as-authored, so both identities resolve from exercise_id.
+      performedExerciseId: parseExerciseId(row.exerciseId, context),
+      authoredExerciseId: parseExerciseId(row.exerciseId, context),
       order: row.exerciseOrder,
       prescription: prescriptionFromColumns(row, context),
       restSeconds: row.restSeconds,
@@ -210,7 +214,9 @@ export function mapExerciseLogToRow(
   return {
     sessionId,
     exerciseOrder: log.order,
-    exerciseId: log.exerciseId,
+    // exercise_id persists the PERFORMED exercise (authored_exercise_id is
+    // written alongside it once the column lands in Slice 2).
+    exerciseId: log.performedExerciseId,
     ...prescriptionToColumns(log.prescription),
     restSeconds: log.restSeconds,
   };

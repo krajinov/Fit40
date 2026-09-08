@@ -27,7 +27,8 @@ export type WorkoutSessionSetDto =
     };
 
 export interface WorkoutSessionExerciseDto {
-  readonly exerciseId: string;
+  /** The exercise actually performed (equals authored when not substituted). */
+  readonly performedExerciseId: string;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly sets: ReadonlyArray<WorkoutSessionSetDto>;
@@ -90,7 +91,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     startedAt: session.startedAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
     exerciseLogs: session.exerciseLogs.map((log) => ({
-      exerciseId: log.exerciseId as string,
+      performedExerciseId: log.performedExerciseId as string,
       order: log.order,
       prescription: log.prescription,
       sets: log.sets.map(serializeSetLog),

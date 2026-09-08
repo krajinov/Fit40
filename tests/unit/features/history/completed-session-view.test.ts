@@ -32,7 +32,7 @@ function sessionDto(overrides?: {
       overrides?.entries ??
       [
         {
-          exerciseId: 'ex-001',
+          performedExerciseId: 'ex-001',
           exerciseOrder: 1,
           exerciseName: 'Goblet Squat',
           exerciseSlug: 'goblet-squat',
@@ -96,7 +96,7 @@ describe('toCompletedSessionView', () => {
   it('falls back to positional names and omits unresolved equipment', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
-        exerciseId: 'ex-404',
+        performedExerciseId: 'ex-404',
         exerciseOrder: 3,
         exerciseName: null,
         exerciseSlug: null,
@@ -116,7 +116,7 @@ describe('toCompletedSessionView', () => {
   it('omits zero-value reps and volume from the metrics line', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
-        exerciseId: 'ex-015',
+        performedExerciseId: 'ex-015',
         exerciseOrder: 1,
         exerciseName: 'Plank',
         exerciseSlug: 'dead-bug',
@@ -140,7 +140,7 @@ describe('toCompletedSessionView', () => {
   it('renders no history link when the slug is missing or malformed', () => {
     const badSlug: CompletedSessionDto['entries'] = [
       {
-        exerciseId: 'ex-099',
+        performedExerciseId: 'ex-099',
         exerciseOrder: 1,
         exerciseName: 'Odd Exercise',
         exerciseSlug: 'Not_A_Valid_Slug',
@@ -158,7 +158,7 @@ describe('toCompletedSessionView', () => {
     const unresolved = sessionDto({
       entries: [
         {
-          exerciseId: 'ex-404',
+          performedExerciseId: 'ex-404',
           exerciseOrder: 2,
           exerciseName: null,
           exerciseSlug: null,

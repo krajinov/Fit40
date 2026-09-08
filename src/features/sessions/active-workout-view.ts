@@ -77,7 +77,7 @@ async function resolveSnapshotTargets(
     readonly prescription: WorkoutSessionDto['exerciseLogs'][number]['prescription'];
   }[] = [];
   for (const log of session.exerciseLogs) {
-    const idResult = createExerciseId(log.exerciseId);
+    const idResult = createExerciseId(log.performedExerciseId);
     if (!idResult.ok) {
       // Defensive: catalog ids are non-empty by the schema's constraints, so
       // this is unreachable — treat like a personalization failure and omit.
@@ -126,9 +126,9 @@ function resolveCatalogMeta(
 
   const resolved = new Map<string, SessionExerciseCatalogMeta>();
   for (const log of session.exerciseLogs) {
-    const match = byExerciseId.get(log.exerciseId);
+    const match = byExerciseId.get(log.performedExerciseId);
     if (match !== undefined) {
-      resolved.set(log.exerciseId, match);
+      resolved.set(log.performedExerciseId, match);
     }
   }
   return resolved;

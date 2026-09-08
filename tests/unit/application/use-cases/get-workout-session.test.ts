@@ -39,7 +39,7 @@ function seedEnrollment(repo: InMemoryProgramEnrollmentRepository, enrollmentId:
 
 function seedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, userId: string, enrollmentId: string) {
   const { swId, workoutId } = seedProgram();
-  const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date(), exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+  const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
   return repo.save(sr.data);
 }

@@ -149,7 +149,7 @@ function historySession(spec: {
     workoutId: workoutId(occurrence.workoutId),
     startedAt: new Date(spec.startedAt),
     exerciseLogs: spec.logs.map((log, index) => ({
-      exerciseId: exerciseId(log.exerciseId),
+      authoredExerciseId: exerciseId(log.exerciseId),
       order: index + 1,
       prescription: log.type === 'reps' ? reps() : duration(),
       restSeconds: 90,
@@ -642,7 +642,7 @@ describe('training history — hydration and metrics mapping', () => {
     if (!result.ok) return;
     const logs = result.data.sessions[0]?.exerciseLogs;
     expect(logs).toHaveLength(2);
-    expect(logs?.map((log) => log.exerciseId)).toEqual(['ex-002', 'ex-002']);
+    expect(logs?.map((log) => log.performedExerciseId)).toEqual(['ex-002', 'ex-002']);
     expect(logs?.map((log) => log.order)).toEqual([1, 2]);
     expect(result.data.sessions[0]?.metrics.totalSets).toBe(2);
     expect(result.data.sessions[0]?.metrics.volume).toBe(10 * 40 + 12 * 42);
@@ -778,8 +778,8 @@ describe('training history — completed-session detail', () => {
     expect(result.data.entries).toHaveLength(2);
     expect(result.data.entries[0]?.exerciseOrder).toBe(1);
     expect(result.data.entries[1]?.exerciseOrder).toBe(2);
-    expect(result.data.entries[0]?.exerciseId).toBe('ex-002');
-    expect(result.data.entries[1]?.exerciseId).toBe('ex-002');
+    expect(result.data.entries[0]?.performedExerciseId).toBe('ex-002');
+    expect(result.data.entries[1]?.performedExerciseId).toBe('ex-002');
   });
 
   it('preserves a logged 0 kg as distinct from no external load', async () => {

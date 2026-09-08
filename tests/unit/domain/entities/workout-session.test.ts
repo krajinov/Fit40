@@ -64,8 +64,8 @@ function makeValidInput() {
     workoutId: workoutId('wo-1'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [
-      { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
-      { exerciseId: validExerciseId('ex-002'), order: 2, prescription: validDurationScheme(), restSeconds: 90 },
+      { authoredExerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
+      { authoredExerciseId: validExerciseId('ex-002'), order: 2, prescription: validDurationScheme(), restSeconds: 90 },
     ],
   };
 }
@@ -198,8 +198,8 @@ describe('createWorkoutSession', () => {
     const result = createWorkoutSession({
       ...makeValidInput(),
       exerciseLogs: [
-        { exerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
-        { exerciseId: validExerciseId('ex-002'), order: 3, prescription: validDurationScheme(), restSeconds: 90 },
+        { authoredExerciseId: validExerciseId('ex-001'), order: 1, prescription: validRepScheme(), restSeconds: 60 },
+        { authoredExerciseId: validExerciseId('ex-002'), order: 3, prescription: validDurationScheme(), restSeconds: 90 },
       ],
     });
 
@@ -207,6 +207,36 @@ describe('createWorkoutSession', () => {
     if (result.ok) return;
 
     expect(result.error.code).toBe('INVALID_WORKOUT_SESSION');
+  });
+
+  it('defaults performedExerciseId to authoredExerciseId (performed-as-authored)', () => {
+    const result = createWorkoutSession(makeValidInput());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const log of result.data.exerciseLogs) {
+      expect(log.performedExerciseId).toBe(log.authoredExerciseId);
+    }
+  });
+
+  it('preserves an explicit performedExerciseId (rehydrated substitution)', () => {
+    const result = createWorkoutSession({
+      ...makeValidInput(),
+      exerciseLogs: [
+        {
+          authoredExerciseId: validExerciseId('ex-001'),
+          performedExerciseId: validExerciseId('ex-009'),
+          order: 1,
+          prescription: validRepScheme(),
+          restSeconds: 60,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs[0]?.authoredExerciseId).toBe('ex-001');
+    expect(result.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-009');
   });
 });
 

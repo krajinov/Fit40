@@ -70,7 +70,7 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 | Stat | `shared/Stat.tsx` | server | Sora 30/600 value + Inter 13/500 label |
 | EmptyState | `shared/EmptyState.tsx` | server | r20, p40, icon + title + body |
 | ProgressBar | `shared/ProgressBar.tsx` | server | surface-2 track + accent fill, 10/8px, progressbar ARIA |
-| RecommendationCallout | `shared/RecommendationCallout.tsx` | server | increase/hold/regress/first-exposure/scheme-change |
+| RecommendationCallout | `shared/RecommendationCallout.tsx` | server | M8 states: increase/hold/regress/scheme-change/bodyweight-goal-reached/bodyweight-hold/duration-increase/duration-hold/first-exposure |
 | PageContainer | `shared/PageContainer.tsx` | server | 1120px column, responsive gutters |
 | AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; profile pill or sign-in link |
 | AppNavLinks | `shared/AppNavLinks.tsx` | client | `usePathname` active state |
@@ -80,13 +80,36 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 
 ### RecommendationCallout contract
 
-The callout is **domain-agnostic and presentation-only**: props are
-`kind` (`increase | hold | regress | first-exposure | scheme-change`),
-`valueLabel?`, `contextLabel?`, `eyebrowLabel?`. It imports nothing from
-domain/application and decides nothing. Bodyweight and duration exercises
-render **no** callout — the screen that wires live data simply omits it.
-The `ExerciseTargetDto -> RecommendationCallout` mapping belongs in the
-Workout/Progressive Overload screen slice, not in this component.
+The callout is **domain-agnostic and presentation-only**: props are `kind`
+(`increase | hold | regress | scheme-change | bodyweight-goal-reached |
+bodyweight-hold | duration-increase | duration-hold | first-exposure`),
+`valueLabel?`, `deltaLabel?`, `contextLabel?`, `eyebrowLabel?`, `compact?`.
+It imports nothing from domain/application and decides nothing. The M8
+progression states render through it on the Active Workout logger; the
+`ExerciseTargetDto → callout` mapping lives in
+`active-workout-logger-views.ts`, never in this component.
+
+### M8 progression presentation (Slice 4)
+
+`progression-labels.ts` (features/sessions) is the single home of
+progression UI copy: deterministic `basis`/`reason` → sentence mapping
+(exhaustive switches — a new variant fails compilation until given copy),
+`formatKg`/`formatSeconds`, direction lines, and truthful "Last time"
+context. Raw reason codes never reach users. Locked semantics:
+
+- **Advisory precedence:** current-session logged value > progression
+  recommendation > empty. A recommendation never overwrites an entered
+  value; it stays visible as context ("Your value stands").
+- **Direction is always named in words** (Increase / Keep / Reduce), never
+  color alone; regress uses the supportive amber family, never error
+  styling.
+- **Truthful context:** `ExerciseTargetDto.previousSets` carries the newest
+  occurrence's considered sets, so "Last time · 60 kg × 10, 10, 10" renders
+  from real data (mixed loads name each set's own load — "Last time ·
+  20 kg × 9, 22.5 kg × 9" — never the working minimum as every set's
+  load); scheme-change/first-exposure render none, never a
+  fabricated line. RPE is not in the projection — recommendations never
+  read it.
 
 ## Application shell and responsive strategy
 
@@ -205,29 +228,36 @@ badges, exercise list, CTA band) with **no** personalized recommendations.
 - Typed target failures are recoverable personalization: recommendations
   are omitted and the public workout content stays intact (the error
   contract does not require failing the page).
-- `workout-target-views.ts` is the deferred `ExerciseTargetDto → view`
-  presentation mapper: formats kg (trims float dust), scheme labels and
-  per-basis copy; owns zero progression logic (domain decisions arrive
-  complete). bodyweight/duration/first-exposure render **no** chip;
+- `workout-target-views.ts` is the `ExerciseTargetDto → view` presentation
+  mapper: formats the M8 target blocks (eyebrow / value / delta / reason)
+  plus truthful "Last time" context; owns zero progression logic (domain
+  decisions arrive complete, copy comes from `progression-labels.ts`).
   regress with a floored `nextLoadKg: null` renders "No added load",
-  never a fake "0 kg"; scheme-change shows `NEW REP TARGET` + the current
-  scheme, never the historical load.
-- **DTO gap (reported, not papered over):** `ExerciseTargetDto` carries no
-  previous reps / previous scheme / lastPerformedAt, so the locked row copy
-  "Last time · 50 kg × 10" is rendered truthfully as "Last time · 50 kg"
-  (previous LOAD only, from `previousLoadKg`). No Application contract was
-  changed for this.
+  never a fake "0 kg"; scheme-change shows `NEW TARGET SCHEME` + the
+  current scheme, never the historical load.
+- `WorkoutTargetBlock` renders the block (accent / surface-2 / amber /
+  card treatments, rounded-control), announces eyebrow · value · delta ·
+  reason once via `role="img"` + `aria-label` (meaning never depends on
+  color), and adds the `Goal reached` badge for bodyweight-goal-reached.
+- **Last-time context:** `ExerciseTargetDto.previousSets` (the newest
+  occurrence's considered sets) powers "Last time · 60 kg × 10, 10, 10";
+  mixed loads name each set's own load ("Last time · 20 kg × 9, 22.5 kg ×
+  9") — the working minimum is never presented as every set's load; timed
+  work lists seconds ("Last time · 30, 30, 25 sec"), bodyweight work
+  lists reps — never a fabricated load.
 
-### Basis → chip treatments (locked design)
+### Basis → M8 target-block states (approved design)
 
-- increase → accent-tint chip `TRY TODAY {next} kg` (+2/2.5 kg per equipment)
-- hold → surface-2/border-strong chip `REPEAT {load} kg`
-- regress → amber-tint chip `TRY TODAY {lower} kg` / `No added load`
-- scheme-change → neutral chip `NEW REP TARGET {scheme}`
-- bodyweight / duration / first-exposure → no chip (normal prescription row)
-- Chips are compact inline elements, not `RecommendationCallout`s (the big
-  callout component stays for the Active Workout slice); mobile uses the
-  smaller `TRY`/`NEW TARGET` label variants from the locked mobile frame.
+- increase → accent-tint block `NEXT TARGET {next} kg` + "Increase {n} kg"
+- hold → surface-2 block `NEXT TARGET {load} kg` + "Keep current load"
+- regress → amber block `NEXT TARGET {lower} kg` + "Reduce {n} kg" /
+  `No added load`
+- scheme-change → neutral card block `NEW TARGET SCHEME {scheme}`
+- bodyweight-goal-reached → accent block `TARGET {maxReps} reps` + goal badge
+- bodyweight-hold → accent block `TARGET {maxReps} reps` + rep guidance
+- duration-increase → accent block `NEXT TARGET {sec} sec` + "+5 sec"
+- duration-hold → surface-2 block `TARGET {sec} sec` + "Keep current duration"
+- first-exposure → NO block: one quiet "First time · no history yet" line
 
 ### CTA band
 
@@ -238,6 +268,33 @@ anonymous → "Sign in to start" (login deep link to the session page),
 not-enrolled → "Join program to start", none → "Start workout",
 in-progress → "Resume workout", completed → "View session". The secondary
 "View program" CTA is desktop-only (locked mobile frame omits it).
+
+## Screen notes: Active Workout · M8 recommendations (Slice 4)
+
+The session logger surfaces the already-computed M8 recommendation as an
+advisory callout beside the input fields (compact variant, M8 "Rec" column
+layout). `active-workout-logger-views.ts` owns the prefill precedence;
+`session-callout-views.ts` maps the callout, hint, and quiet-line copy; the
+callout component stays domain-agnostic.
+
+- **Prefill precedence (locked):** current-session logged value >
+  recommendation > empty. Loaded reps work prefills the WEIGHT field from
+  the latest logged weight, else `nextLoadKg`. Timed work prefills the
+  SECONDS field from the latest logged seconds, else `nextSeconds`. A
+  floored regress (`nextLoadKg: null`) prefills nothing, and bodyweight
+  work never invents a weight — no prefill, rep-goal callout only.
+- **Override behavior:** when a session value won, the prefill keeps it,
+  the recommendation callout stays visible as context, and the hint reads
+  "You logged 60 kg — your weight stands. The recommendation stays as
+  context." No warning, no confirmation, no restoring of the recommendation.
+  Recommendation-sourced prefills hint "Advisory prefill — edit freely."
+- **Quiet states:** first exposure renders one muted "First time · no
+  history yet" line instead of a callout; scheme-change renders the
+  informational NEW TARGET SCHEME callout (history is kept, it is simply
+  not comparable).
+- **RPE:** never part of the recommendation presentation — the history
+  projection carries no RPE, and the optional RPE input is unrelated to
+  recommendation copy.
 
 ## Screen notes: Exercises (Slice 6)
 

@@ -69,6 +69,38 @@ export function performance(
   return { prescription, sets };
 }
 
+/**
+ * Builds a complete, externally loaded occurrence whose every set hit
+ * `reps` — the archetypal "successful" history entry.
+ */
+export function allAtReps(
+  prescription: RepPrescription,
+  reps: number,
+  weightKg: number,
+): PreviousExercisePerformance {
+  if (prescription.type !== 'reps') throw new Error('allAtReps expects a reps scheme');
+  const sets = Array.from({ length: prescription.sets }, (_, i) => repSet(i + 1, reps, weightKg));
+  return performance(prescription, sets);
+}
+
+/** Every set at maxReps: the increase-ready occurrence. */
+export function allAtMaxReps(
+  prescription: RepPrescription,
+  weightKg: number,
+): PreviousExercisePerformance {
+  if (prescription.type !== 'reps') throw new Error('allAtMaxReps expects a reps scheme');
+  return allAtReps(prescription, prescription.maxReps, weightKg);
+}
+
+/** Every set one rep below minReps: a clearly below-minimum occurrence. */
+export function allBelowMinimum(
+  prescription: RepPrescription,
+  weightKg: number,
+): PreviousExercisePerformance {
+  if (prescription.type !== 'reps') throw new Error('allBelowMinimum expects a reps scheme');
+  return allAtReps(prescription, prescription.minReps - 1, weightKg);
+}
+
 // ─── Shared Fixtures ──────────────────────────────────────────────────────────
 
 export const threeByEightToTen = scheme(3, 8, 10);
@@ -82,6 +114,8 @@ export interface Scenario {
   readonly name: string;
   readonly equipment: EquipmentType;
   readonly prescription: RepPrescription;
-  readonly previous: PreviousExercisePerformance | null;
+  /** Newest-first history window handed to the engine (empty = first exposure). */
+  readonly history: ReadonlyArray<PreviousExercisePerformance>;
   readonly expected: NextExerciseTarget;
 }
+

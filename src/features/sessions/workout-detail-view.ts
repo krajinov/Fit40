@@ -20,6 +20,7 @@ import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lo
 import { getNextExerciseTargetsUseCase } from '@/features/sessions/services';
 import { getWorkoutSessionUseCase } from '@/features/sessions/services';
 import {
+  EMPTY_WORKOUT_TARGET,
   mapExerciseTargetsToViews,
   type WorkoutExerciseTargetView,
 } from '@/features/sessions/workout-target-views';
@@ -31,15 +32,10 @@ export interface WorkoutDetailView {
   readonly workout: ScheduledWorkoutDetailDto;
   /** One entry per workout exercise, aligned with `workout.workout.exercises`. */
   readonly targets: ReadonlyArray<WorkoutExerciseTargetView>;
-  /** Whether any target resolved a personalized recommendation chip. */
+  /** Whether any target resolved a personalized target block. */
   readonly hasRecommendations: boolean;
   /** CTA state for the start panel (see {@link WorkoutCtaState}). */
   readonly ctaState: WorkoutCtaState;
-}
-
-/** A target view meaning "nothing personalized for this position". */
-function noTarget(): WorkoutExerciseTargetView {
-  return { exerciseId: '', lastTimeLabel: null, lastTimeCompactLabel: null, chip: null };
 }
 
 /**
@@ -70,7 +66,7 @@ async function resolveTargets(
   if (requests.length === 0 || requests.length !== prescriptions.length) {
     // Defensive: catalog ids are non-empty by the schema's constraints, so
     // this is unreachable — treat like a personalization failure and omit.
-    return prescriptions.map(() => noTarget());
+    return prescriptions.map(() => EMPTY_WORKOUT_TARGET);
   }
 
   const result = await getNextExerciseTargetsUseCase.execute({ userId, requests });
@@ -79,7 +75,7 @@ async function resolveTargets(
     // public workout content (the error contract does not require failing
     // the page — EXERCISE_NOT_FOUND means the catalog changed mid-request,
     // INVALID_INPUT is unreachable with the trusted user id).
-    return prescriptions.map(() => noTarget());
+    return prescriptions.map(() => EMPTY_WORKOUT_TARGET);
   }
 
   return mapExerciseTargetsToViews(result.data, prescriptions);
@@ -118,7 +114,7 @@ export async function buildWorkoutDetailView(
   if (user === null) {
     return {
       workout,
-      targets: workout.workout.exercises.map(() => noTarget()),
+      targets: workout.workout.exercises.map(() => EMPTY_WORKOUT_TARGET),
       hasRecommendations: false,
       ctaState: 'anonymous',
     };
@@ -149,7 +145,7 @@ export async function buildWorkoutDetailView(
   return {
     workout,
     targets,
-    hasRecommendations: targets.some((target) => target.chip !== null),
+    hasRecommendations: targets.some((target) => target.block !== null),
     ctaState,
   };
 }

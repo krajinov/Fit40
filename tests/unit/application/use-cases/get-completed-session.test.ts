@@ -143,6 +143,7 @@ function makeHistoryRepo(context: CompletedSessionContext | null) {
   return {
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn(),
+    listRecentCompletedExercisePerformances: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn().mockResolvedValue(context),
   } satisfies TrainingHistoryRepository;
@@ -200,7 +201,6 @@ describe('GetCompletedSessionUseCase', () => {
     });
   });
 
-  // __APPEND_TESTS__
   it('queries the catalog once with deduplicated exercise ids', async () => {
     const session = completedSession('session-dup', [
       { exerciseId: 'ex-001', sets: [{ reps: 10, weightKg: 50 }] },
@@ -306,118 +306,3 @@ describe('GetCompletedSessionUseCase', () => {
   });
 
 });
-
-  it('queries the catalog once with deduplicated exercise ids', async () => {
-    const session = completedSession('session-dup', [
-      { exerciseId: 'ex-001', sets: [{ reps: 10, weightKg: 50 }] },
-      { exerciseId: 'ex-001', sets: [{ reps: 12, weightKg: 52 }] },
-    ]);
-    const exerciseRepo = makeExerciseRepo([makeExercise('ex-001')]);
-    const uc = new GetCompletedSessionUseCase(
-      makeHistoryRepo(makeContext(session)),
-      exerciseRepo,
-    );
-
-    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-dup' });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(exerciseRepo.findByIds).toHaveBeenCalledTimes(1);
-    expect(exerciseRepo.findByIds).toHaveBeenCalledWith([eid('ex-001')]);
-    // Duplicate occurrences of one exercise never collapse.
-    expect(result.data.entries).toHaveLength(2);
-    expect(result.data.entries[0]?.exerciseName).toBe('Goblet Squat');
-    expect(result.data.entries[1]?.exerciseName).toBe('Goblet Squat');
-  });
-
-  it('preserves 0 kg as a real load and null weight as bodyweight', async () => {
-    const session = completedSession('session-zero', [
-      {
-        exerciseId: 'ex-001',
-        sets: [
-          { reps: 10, weightKg: 0, rpe: null },
-          { reps: 10, weightKg: null, rpe: null },
-        ],
-      },
-    ]);
-    const uc = new GetCompletedSessionUseCase(
-      makeHistoryRepo(makeContext(session)),
-      makeExerciseRepo([]),
-    );
-
-    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-zero' });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.entries[0]?.sets[0]?.weightKg).toBe(0);
-    expect(result.data.entries[0]?.sets[0]?.rpe).toBeNull();
-    expect(result.data.entries[0]?.sets[1]?.weightKg).toBeNull();
-  });
-
-  it('serializes duration prescriptions and duration sets', async () => {
-    const session = completedSession('session-duration', [
-      {
-        exerciseId: 'ex-015',
-        sets: [{ type: 'duration', durationSeconds: 45, rpe: 6 }],
-      },
-    ]);
-    const uc = new GetCompletedSessionUseCase(
-      makeHistoryRepo(makeContext(session)),
-      makeExerciseRepo([]),
-    );
-
-    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-duration' });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.entries[0]?.prescription).toEqual({
-      type: 'duration',
-      sets: 3,
-      seconds: 45,
-    });
-    expect(result.data.entries[0]?.sets[0]).toEqual({
-      type: 'duration',
-      setNumber: 1,
-      durationSeconds: 45,
-      weightKg: null,
-      rpe: 6,
-    });
-    expect(result.data.metrics.totalDurationSeconds).toBe(45);
-  });
-
-  it('degrades gracefully when catalog entries are unresolved', async () => {
-    const session = completedSession('session-orphan', [
-      { exerciseId: 'ex-404', sets: [{ reps: 10 }] },
-    ]);
-    const uc = new GetCompletedSessionUseCase(
-      makeHistoryRepo(makeContext(session)),
-      makeExerciseRepo([]),
-    );
-
-    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-orphan' });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.entries[0]?.exerciseName).toBeNull();
-    expect(result.data.entries[0]?.equipment).toBeNull();
-  });
-
-  it('rejects malformed input before touching the repository', async () => {
-    const historyRepo = makeHistoryRepo(null);
-    const uc = new GetCompletedSessionUseCase(historyRepo, makeExerciseRepo([]));
-
-    const badSession = await uc.execute({ userId: 'user-a', sessionId: '' });
-    expect(badSession.ok).toBe(false);
-    if (!badSession.ok) expect(badSession.error.code).toBe('INVALID_INPUT');
-    const badUser = await uc.execute({ userId: '', sessionId: 'session-1' });
-    expect(badUser.ok).toBe(false);
-    if (!badUser.ok) expect(badUser.error.code).toBe('INVALID_INPUT');
-    expect(historyRepo.findCompletedSessionById).not.toHaveBeenCalled();
-  });
-
-  it('returns SESSION_NOT_FOUND when the id does not address a completed session', async () => {
-    const uc = new GetCompletedSessionUseCase(
-      makeHistoryRepo(null),
-      makeExerciseRepo([]),
-    );
-
-    const result = await uc.execute({ userId: 'user-a', sessionId: 'session-missing' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('SESSION_NOT_FOUND');
-  });

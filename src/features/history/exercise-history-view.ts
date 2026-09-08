@@ -34,7 +34,7 @@ import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
 import { formatHistoryDate, formatSessionSetLine } from '@/features/history/history-labels';
 import { getExerciseHistoryUseCase } from '@/features/history/services';
 import { formatPrescription } from '@/features/programs/program-labels';
-import { formatKg } from '@/features/sessions/workout-target-views';
+import { formatKg } from '@/features/sessions/progression-labels';
 
 /** Minimum externally loaded points before a line chart is drawn. */
 const MIN_TREND_POINTS_FOR_CHART = 2;

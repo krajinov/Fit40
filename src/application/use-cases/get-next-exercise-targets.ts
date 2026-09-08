@@ -3,11 +3,13 @@
  * exercises using the progressive overload engine.
  *
  * For each request (exercise + the prescription it is scheduled under), the
- * use case loads the exercise from the catalog and the user's latest
- * completed performance of it, then delegates the decision to the pure
- * domain engine. It owns no progression rules of its own: it is the
- * orchestration boundary that connects the history projection and the
- * exercise catalog to `calculateNextExerciseTarget`.
+ * use case loads the exercise from the catalog and the user's recent
+ * completed history of it — user-global across programs — then delegates the
+ * decision to the pure domain engine. It owns no progression rules of its
+ * own: it is the orchestration boundary that connects the history projection
+ * and the exercise catalog to `calculateNextExerciseTarget`. The DTO carries
+ * the engine's decision plus the considered sets of the newest occurrence
+ * (`previousSets`) for truthful "Last time" presentation context.
  *
  * Success returns exactly one target per request, in request order, so
  * callers can zip requests and results by position. A request referencing
@@ -17,10 +19,10 @@
 
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type {
-  LatestCompletedExercisePerformance,
-  WorkoutSessionRepository,
-} from '@/application/ports/workout-session-repository';
-import type { ExerciseTargetDto } from '@/application/dto/exercise';
+  ProgressionHistoryPerformance,
+  TrainingHistoryRepository,
+} from '@/application/ports/training-history-repository';
+import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
 import type { Exercise } from '@/domain/entities/exercise';
 import { calculateNextExerciseTarget } from '@/domain/services/exercise-progression';
 import type { ExerciseId } from '@/domain/types/ids';
@@ -43,10 +45,70 @@ export interface GetNextExerciseTargetsInput {
   readonly requests: ReadonlyArray<NextExerciseTargetRequest>;
 }
 
+/**
+ * RAW OCCURRENCE FETCH BOUND (infrastructure over-fetch ceiling) — at most
+ * this many of the user's newest RAW completed occurrences are read per
+ * exercise, in ONE batched history call for the whole request.
+ *
+ * This is deliberately NOT the domain's progression decision horizon. The
+ * engine reads the raw newest occurrence plus the first ELIGIBLE prior
+ * (skipping scheme-incompatible, incomplete, and unloaded occurrences itself
+ * — see `below-minimum-trend.ts`); eligibility is domain logic and never
+ * enters the query. The horizon stays conceptually at the newest relevant
+ * performances: raw-5 lets the engine skip across up to three consecutive
+ * ineligible occurrences and still see the first eligible prior. When MORE
+ * than three consecutive ineligible occurrences precede the first eligible
+ * prior, the read degrades conservatively — the engine holds instead of
+ * regressing — never an unsafe load change.
+ */
+const PROGRESSION_HISTORY_RAW_FETCH_BOUND = 5;
+
+/** Newest-first raw performance window per exercise, grouped from the flat projection. */
+function windowsByExercise(
+  performances: ReadonlyArray<ProgressionHistoryPerformance>,
+): Map<ExerciseId, ProgressionHistoryPerformance[]> {
+  const windows = new Map<ExerciseId, ProgressionHistoryPerformance[]>();
+  for (const performance of performances) {
+    const window = windows.get(performance.exerciseId) ?? [];
+    window.push(performance);
+    windows.set(performance.exerciseId, window);
+  }
+  return windows;
+}
+
+/**
+ * The considered sets of the newest occurrence — the same `prescription.sets`
+ * slice the engine reads — projected to plain DTO shapes for truthful
+ * "Last time" context. Null when the engine's comparability gates mean no
+ * previous performance can be shown (first exposure or scheme change).
+ */
+function previousSetsOf(
+  newest: ProgressionHistoryPerformance | undefined,
+  currentPrescription: RepPrescription,
+  target: ExerciseTargetDto['target'],
+): ReadonlyArray<PreviousExerciseSetDto> | null {
+  if (target.basis === 'first-exposure' || target.basis === 'scheme-change') {
+    return null;
+  }
+  if (newest === undefined) {
+    return null;
+  }
+  return newest.sets.slice(0, currentPrescription.sets).map((set) => {
+    if (set.type === 'reps') {
+      return { type: 'reps' as const, reps: set.reps, weightKg: set.weightKg };
+    }
+    return {
+      type: 'duration' as const,
+      durationSeconds: set.durationSeconds,
+      weightKg: set.weightKg,
+    };
+  });
+}
+
 export class GetNextExerciseTargetsUseCase {
   constructor(
     private readonly exerciseRepository: ExerciseRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly historyRepository: TrainingHistoryRepository,
   ) {}
 
   async execute(
@@ -72,13 +134,16 @@ export class GetNextExerciseTargetsUseCase {
     const exercises = await this.exerciseRepository.findByIds(exerciseIds);
     const exerciseById = new Map<ExerciseId, Exercise>(exercises.map((e) => [e.id, e]));
 
-    const performances = await this.sessionRepository.listLatestCompletedExercisePerformances(
+    // One batched, bounded history read for every requested exercise: the
+    // user's newest RAW completed occurrences per exercise, newest first.
+    // The projection is structurally assignable to the engine's window
+    // input (prescription + sets), so it is passed through unchanged.
+    const performances = await this.historyRepository.listRecentCompletedExercisePerformances(
       userIdResult.data,
       exerciseIds,
+      PROGRESSION_HISTORY_RAW_FETCH_BOUND,
     );
-    const performanceByExercise = new Map<ExerciseId, LatestCompletedExercisePerformance>(
-      performances.map((p) => [p.exerciseId, p]),
-    );
+    const historyByExercise = windowsByExercise(performances);
 
     const targets: ExerciseTargetDto[] = [];
 
@@ -93,16 +158,21 @@ export class GetNextExerciseTargetsUseCase {
         });
       }
 
-      // The history projection is structurally assignable to the engine's
-      // PreviousExercisePerformance input (prescription + sets); absence of
-      // history is the engine's first-exposure case.
+      // The raw window is already newest first (index 0 = most recent);
+      // the engine reads it as-is and applies its own eligibility skipping.
+      const history = historyByExercise.get(request.exerciseId) ?? [];
+
       const target = calculateNextExerciseTarget(
         exercise,
         request.prescription,
-        performanceByExercise.get(request.exerciseId) ?? null,
+        history,
       );
 
-      targets.push({ exerciseId: request.exerciseId, target });
+      targets.push({
+        exerciseId: request.exerciseId,
+        target,
+        previousSets: previousSetsOf(history[0], request.prescription, target),
+      });
     }
 
     return ok(targets);

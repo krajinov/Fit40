@@ -12,6 +12,7 @@ import {
   exerciseRepository,
   programEnrollmentRepository,
   programRepository,
+  trainingHistoryRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
 
@@ -40,7 +41,7 @@ export const completeWorkoutSessionUseCase = new CompleteWorkoutSessionUseCase(
 
 export const getNextExerciseTargetsUseCase = new GetNextExerciseTargetsUseCase(
   exerciseRepository,
-  workoutSessionRepository,
+  trainingHistoryRepository,
 );
 
 export const resolveNextWorkoutUseCase = new ResolveNextWorkoutUseCase(

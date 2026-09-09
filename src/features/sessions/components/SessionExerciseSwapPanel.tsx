@@ -21,6 +21,21 @@ import {
 
 const initialState: SessionActionState = { ok: true };
 
+/**
+ * Stale-state outcomes of a substitution/restore submit: the page's view of
+ * the occurrence no longer matches the persisted session, so the caller must
+ * reload the latest state. `SESSION_MODIFIED` means another tab changed the
+ * session (optimistic-concurrency version); `SUBSTITUTION_NO_CHANGE` means
+ * another tab already applied the same swap/restore, so this tab still shows
+ * an outdated exercise identity. Ordinary validation/business errors (e.g.
+ * `EXERCISE_HAS_LOGGED_SETS`, `VALIDATION_ERROR`) are about the persisted
+ * state itself, not staleness, and must NOT trigger a reload.
+ */
+function isStaleSessionState(state: SessionActionState): boolean {
+  if (state.ok) return false;
+  return state.error.code === 'SESSION_MODIFIED' || state.error.code === 'SUBSTITUTION_NO_CHANGE';
+}
+
 interface SessionExerciseSwapPanelProps {
   readonly sessionId: string;
   readonly exerciseOrder: number;
@@ -51,9 +66,10 @@ interface SessionExerciseSwapPanelProps {
  * decided upstream of this component).
  *
  * Expected action errors surface as user-facing copy via
- * `sessionActionErrorLabel`; `SESSION_MODIFIED` additionally triggers the
- * established reload/retry pattern (`router.refresh()`), matching every
- * other session mutation.
+ * `sessionActionErrorLabel`; stale-state outcomes (`SESSION_MODIFIED`,
+ * `SUBSTITUTION_NO_CHANGE` — another tab already changed/applied the same
+ * swap) additionally trigger the established reload/retry pattern
+ * (`router.refresh()`), matching every other session mutation.
  */
 export function SessionExerciseSwapPanel({
   sessionId,
@@ -75,7 +91,7 @@ export function SessionExerciseSwapPanel({
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
     const state = await substituteExerciseAction(formData);
-    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+    if (isStaleSessionState(state)) {
       router.refresh();
     }
     return state;
@@ -91,7 +107,7 @@ export function SessionExerciseSwapPanel({
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
     const state = await restoreExerciseAction(formData);
-    if (!state.ok && state.error.code === 'SESSION_MODIFIED') {
+    if (isStaleSessionState(state)) {
       router.refresh();
     }
     return state;

@@ -244,8 +244,11 @@ navigation and form submission work with zero extra client state:
   rendered only when the domain's eligibility says restore is currently
   possible (`canRestore`).
 - **Expected action errors** surface as user-facing copy via
-  `sessionActionErrorLabel`; `SESSION_MODIFIED` additionally triggers the
-  established `router.refresh()` reload/retry pattern.
+  `sessionActionErrorLabel`; stale-state outcomes — `SESSION_MODIFIED`, and
+  `SUBSTITUTION_NO_CHANGE` when another tab already applied the same
+  swap/restore — additionally trigger the established `router.refresh()`
+  reload/retry pattern, so a stale tab never keeps an outdated exercise
+  identity.
 - The **substituted occurrence card shows the performed exercise as primary
   identity** with a subtle "Originally: …" line naming the authored
   exercise — same convention as History (section 9) and as the "Up next"
@@ -324,6 +327,7 @@ Rows written before migration `0008` store NULL in
 | Affordance consumes the eligibility projection — never re-derives blocking from raw facts | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts`, `tests/unit/features/sessions/active-workout-views.test.ts` |
 | "Originally: …" context on substituted upcoming rows ("Up next") | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | Swap panel copy and affordance states | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts` |
+| Swap panel reloads on stale-state outcomes (`SESSION_MODIFIED`, `SUBSTITUTION_NO_CHANGE`) for both substitute and restore; ordinary errors and success never reload | Presentation (unit) | `tests/unit/features/sessions/session-exercise-swap-panel.test.ts` |
 
 
 

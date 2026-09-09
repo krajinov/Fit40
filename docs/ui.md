@@ -330,3 +330,29 @@ URL-driven filter contract are unchanged.
   Infrastructure changes were needed: the DTOs already expose every field
   presented.
 
+## Screen notes: History (M9 Slice 6 — substitution context)
+
+The completed-session detail screen keeps its locked, read-only design; the
+only M9 Slice 6 addition is the truthful "Originally: …" context.
+
+- **Performed-first identity:** every entry's title is the PERFORMED
+  exercise (the work actually done), linking to that exercise's history
+  when the slug resolves.
+- **"Originally: …" context:** a substituted occurrence renders one subtle
+  `text-xs text-ink-3` line under the performed title naming the AUTHORED
+  exercise — same visual convention as the Active Workout card. The line is
+  omitted for non-substituted occurrences and when the authored exercise no
+  longer resolves in the catalog (never fabricated). Chained substitutions
+  still name the original authored exercise.
+- **No controls:** history carries no substitution controls — the swap
+  panel exists only on the Active Workout screen for in-progress sessions.
+- **Order and identity unchanged:** entries render in persisted
+  `(sessionId, exerciseOrder)` order; duplicate exercises never collapse;
+  set lines keep rendering the persisted snapshot.
+
+Regression coverage: `tests/unit/features/history/completed-session-view.test.ts`
+(mapping rules) and the substitution context tests in
+`tests/integration/database/training-history-repository.test.ts`
+(history/progression key on the performed exercise). Full feature reference:
+[`docs/exercise-substitution.md`](exercise-substitution.md).
+

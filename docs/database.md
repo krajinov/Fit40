@@ -350,6 +350,23 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 | `program_enrollments.user_id` | `users.id` | CASCADE |
 | `program_enrollments.program_id` | `training_programs.id` | RESTRICT |
 
+### Exercise identity on `exercise_logs` (authored vs. performed)
+
+Each exercise log carries two exercise identities, both snapshotted at
+session start:
+
+- **`exercise_id` (PERFORMED)** — the exercise actually trained. Substitution
+  (M9) rewrites only this column. History and progression queries key on it.
+- **`authored_exercise_id` (AUTHORED)** — the exercise the workout template
+  prescribed; the occurrence contract. Nullable only for pre-M9 legacy rows,
+  where the performed id *is* the authored id (hydration falls back, and the
+  next save heals the NULL).
+
+The pair `(session_id, exercise_order)` — not the exercise id — is the
+occurrence identity, so the same exercise can appear as two distinct
+occurrences in one session. Full substitution semantics:
+[`docs/exercise-substitution.md`](exercise-substitution.md).
+
 ---
 
 ## Database Errors

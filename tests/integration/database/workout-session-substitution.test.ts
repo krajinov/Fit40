@@ -2,7 +2,9 @@ import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  completeWorkoutSession,
   createWorkoutSession,
+  logSessionSet,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
@@ -283,6 +285,68 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
         constraint_name: 'exercise_logs_authored_exercise_id_exercises_id_fk',
       }),
     });
+  });
+
+  it('still marks its scheduled workout completed when a session with a substituted exercise completes', async () => {
+    // Program progress keys on (enrollmentId, scheduledWorkoutId) — never on
+    // exercise identity. Completing a session whose exercise was substituted
+    // (ex-002 → ex-010 here) must list that scheduled workout as completed,
+    // same as any other completion.
+    const session = makeSession('session-subst-completion');
+    const substituted = substituteSessionExercise(session, {
+      exerciseOrder: 1,
+      replacementExerciseId: exerciseId('ex-010'),
+    });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const withSet = logSessionSet(substituted.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: null,
+    });
+    expect(withSet.ok).toBe(true);
+    if (!withSet.ok) return;
+    const completedSession = completeWorkoutSession(
+      withSet.data,
+      new Date('2025-01-01T11:00:00Z'),
+    );
+    expect(completedSession.ok).toBe(true);
+    if (!completedSession.ok) return;
+    await workoutSessionRepository.save(completedSession.data);
+
+    const completedIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+    expect(completedIds).toContainEqual(scheduledWorkoutId('fit40-beginner-strength-w1-1'));
+  });
+
+  it('does not count an in-progress substituted session toward program progress', async () => {
+    // The in-progress twin (saved, not completed) must not count toward
+    // program progress just because it carries a substitution.
+    const session = makeSession('session-subst-completion-progress');
+    const substituted = substituteSessionExercise(session, {
+      exerciseOrder: 1,
+      replacementExerciseId: exerciseId('ex-010'),
+    });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const withSet = logSessionSet(substituted.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: null,
+    });
+    expect(withSet.ok).toBe(true);
+    if (!withSet.ok) return;
+    await workoutSessionRepository.save(withSet.data);
+
+    const completedIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+    expect(completedIds).toEqual([]);
   });
 });
 

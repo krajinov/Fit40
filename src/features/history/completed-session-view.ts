@@ -15,6 +15,9 @@
  *   when the timestamps make it non-positive (honest-or-omit).
  * - Entries keep the persisted exercise order; duplicate exercises never
  *   collapse (identity is (sessionId, exerciseOrder), not exercise id).
+ * - The PERFORMED exercise is each entry's primary identity; a substituted
+ *   occurrence adds the subtle "Originally: …" authored-exercise context,
+ *   omitted when the authored metadata is unavailable — never fabricated.
  * - Current catalog names are display-only; an unresolved exercise falls
  *   back to a positional label instead of hiding the work.
  * - Logged timed work (`totalDurationSeconds`) is never labeled as the
@@ -42,6 +45,14 @@ export interface CompletedSessionSetView {
 export interface CompletedSessionEntryView {
   readonly exerciseOrder: number;
   readonly name: string;
+  /**
+   * The AUTHORED exercise's name, rendered as the subtle "Originally: …"
+   * context line when the occurrence was substituted; null when not
+   * substituted or when the authored exercise no longer resolves in the
+   * catalog — never fabricated. The PERFORMED name stays the primary
+   * identity, and history stays read-only (no substitution controls).
+   */
+  readonly originallyName: string | null;
   /** `/history/exercises/<slug>` when a valid slug resolved, else null. */
   readonly historyHref: string | null;
   readonly equipmentLabel: string | null;
@@ -74,6 +85,15 @@ function toEntryView(
   return {
     exerciseOrder: entry.exerciseOrder,
     name: entry.exerciseName ?? `Exercise ${entry.exerciseOrder}`,
+    // Substitution context (M9): the PERFORMED exercise is the primary
+    // identity; the authored name is subtle context only when the domain
+    // says this occurrence is substituted AND the catalog resolves the
+    // authored exercise. A chained substitution still names the ORIGINAL
+    // authored exercise — authoredExerciseId is never rewritten.
+    originallyName:
+      entry.isSubstituted && entry.authoredExerciseName !== null
+        ? entry.authoredExerciseName
+        : null,
     // The slug is current catalog data, not the persisted record — only a
     // structurally valid slug links out; anything else renders as plain
     // text instead of a broken URL.

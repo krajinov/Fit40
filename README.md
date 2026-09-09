@@ -15,6 +15,10 @@ history.
   track progress through their weeks.
 - **Guided workout sessions** — start or resume a scheduled workout, log sets
   (weight, reps, RPE), and complete the session.
+- **Exercise substitution** — swap the performed exercise of any
+  not-yet-logged occurrence for a structurally similar catalog alternative,
+  while per-exercise history and progression stay keyed on the exercise you
+  actually performed.
 - **Progressive-overload recommendations** — per-exercise "next target"
   states with truthful last-time context, derived from your completed
   performance history.
@@ -189,9 +193,10 @@ pnpm test:integration  # integration tests against a real PostgreSQL database
 | Workout detail        | `/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]`                                   |
 | Active session        | `/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session`                            |
 | Exercise catalog      | `/exercises`, `/exercises/[slug]`                                                                      |
+| Training history      | `/history`, `/history/sessions/[sessionId]`, `/history/exercises/[slug]`                                |
 
 Feature modules under `src/features/`: `auth`, `dashboard`, `enrollment`,
-`exercises`, `profile`, `programs`, `sessions`.
+`exercises`, `history`, `profile`, `programs`, `sessions`.
 
 ## Design / Engineering Principles
 

@@ -187,4 +187,95 @@ describe('toCompletedSessionView', () => {
     const unresolvedView = toCompletedSessionView(unresolved);
     expect(unresolvedView.entries[0]?.historyHref).toBeNull();
   });
+
+  // ─── Substitution display (M9) ────────────────────────────────────────────
+
+  describe('substitution context (M9)', () => {
+    function substitutedEntry(overrides?: {
+      readonly isSubstituted?: boolean;
+      readonly performedExerciseId?: string;
+      readonly exerciseName?: string | null;
+      readonly authoredExerciseName?: string | null;
+      readonly exerciseOrder?: number;
+    }): CompletedSessionDto['entries'][number] {
+      return {
+        authoredExerciseId: 'ex-002',
+        performedExerciseId: overrides?.performedExerciseId ?? 'ex-008',
+        isSubstituted: overrides?.isSubstituted ?? true,
+        exerciseOrder: overrides?.exerciseOrder ?? 1,
+        exerciseName: overrides?.exerciseName === undefined ? 'Dumbbell Bench Press' : overrides.exerciseName,
+        authoredExerciseName:
+          overrides?.authoredExerciseName === undefined
+            ? 'Goblet Squat'
+            : overrides.authoredExerciseName,
+        exerciseSlug: 'dumbbell-bench-press',
+        equipment: 'dumbbell',
+        restSeconds: 90,
+        prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+        sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 30, rpe: null }],
+      };
+    }
+
+    it('shows the performed name as the primary identity with the authored name as context', () => {
+      const view = toCompletedSessionView(sessionDto({ entries: [substitutedEntry()] }));
+      expect(view.entries[0]?.name).toBe('Dumbbell Bench Press');
+      expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
+    });
+
+    it('omits the "Originally" line for a non-substituted occurrence', () => {
+      // Even when both names are available, only a substituted occurrence
+      // carries the context line.
+      const view = toCompletedSessionView(
+        sessionDto({
+          entries: [
+            substitutedEntry({
+              isSubstituted: false,
+              performedExerciseId: 'ex-002',
+              exerciseName: 'Goblet Squat',
+              authoredExerciseName: 'Goblet Squat',
+            }),
+          ],
+        }),
+      );
+      expect(view.entries[0]?.originallyName).toBeNull();
+    });
+
+    it('omits the "Originally" line when the authored metadata is unavailable', () => {
+      // The authored exercise no longer resolves in the catalog: the line is
+      // omitted — no fallback name is ever fabricated.
+      const view = toCompletedSessionView(
+        sessionDto({ entries: [substitutedEntry({ authoredExerciseName: null })] }),
+      );
+      expect(view.entries[0]?.originallyName).toBeNull();
+      // The performed identity still renders (with its positional fallback
+      // when even the performed name is unresolvable).
+      const orphan = toCompletedSessionView(
+        sessionDto({
+          entries: [
+            substitutedEntry({ exerciseName: null, authoredExerciseName: null, exerciseOrder: 3 }),
+          ],
+        }),
+      );
+      expect(orphan.entries[0]?.name).toBe('Exercise 3');
+      expect(orphan.entries[0]?.originallyName).toBeNull();
+    });
+
+    it('names the FIRST authored exercise after a chained substitution', () => {
+      // Goblet Squat (authored) → Dumbbell Bench Press → Push-up (performed):
+      // authoredExerciseId is never rewritten, so the context line stays the
+      // original authored exercise even after chained swaps.
+      const view = toCompletedSessionView(
+        sessionDto({
+          entries: [
+            substitutedEntry({
+              exerciseName: 'Push-up',
+              authoredExerciseName: 'Goblet Squat',
+            }),
+          ],
+        }),
+      );
+      expect(view.entries[0]?.name).toBe('Push-up');
+      expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
+    });
+  });
 });

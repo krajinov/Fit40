@@ -112,6 +112,11 @@ interface HistorySetSpec {
 
 interface HistoryLogSpec {
   readonly exerciseId: string;
+  /**
+   * The performed exercise when the occurrence was substituted; omit for
+   * performed-as-authored. `exerciseId` remains the AUTHORED id.
+   */
+  readonly performedExerciseId?: string;
   readonly type: 'reps' | 'duration';
   readonly sets: ReadonlyArray<HistorySetSpec>;
 }
@@ -150,6 +155,9 @@ function historySession(spec: {
     startedAt: new Date(spec.startedAt),
     exerciseLogs: spec.logs.map((log, index) => ({
       authoredExerciseId: exerciseId(log.exerciseId),
+      performedExerciseId: exerciseId(
+        log.performedExerciseId ?? log.exerciseId,
+      ),
       order: index + 1,
       prescription: log.type === 'reps' ? reps() : duration(),
       restSeconds: 90,
@@ -1140,6 +1148,149 @@ describe('training history — per-exercise occurrences', () => {
     if (!result.ok) return;
     expect(result.data.entries).toHaveLength(EXERCISE_HISTORY_OCCURRENCE_LIMIT);
   });
+
+  // ─── Substitution truthfulness (M9) ─────────────────────────────────────
+  // A substituted occurrence belongs to the PERFORMED exercise's history —
+  // never to the authored template exercise's history.
+
+  it('keeps a substituted occurrence in the PERFORMED exercise history only', async () => {
+    // Authored Goblet Squat (ex-002), performed Dumbbell Bench Press
+    // (ex-008): the completed occurrence belongs to ex-008's history and
+    // must not appear under ex-002 merely because it authored the template.
+    await saveAll(
+      historySession({
+        id: 'session-occ-subst',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 30 }],
+          },
+        ],
+      }),
+      // A plain authored-and-performed ex-002 occurrence: the control that
+      // ex-002's history still contains its own real work.
+      historySession({
+        id: 'session-occ-subst-control',
+        occurrence: 1,
+        startedAt: '2025-02-06T10:00:00Z',
+        completedAt: '2025-02-06T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 16 }] }],
+      }),
+    );
+
+    const performed = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'dumbbell-bench-press',
+    });
+    expect(performed.ok).toBe(true);
+    if (!performed.ok) return;
+    // Exactly ONE occurrence — no double-counting from the authored identity.
+    expect(performed.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-occ-subst', 1],
+    ]);
+    expect(performed.data.entries[0]?.workingLoadKg).toBe(30);
+
+    const authored = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(authored.ok).toBe(true);
+    if (!authored.ok) return;
+    // The substituted occurrence is NOT in the authored exercise history;
+    // only the control session's own work is.
+    expect(authored.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-occ-subst-control',
+    ]);
+  });
+
+  it('keeps a detached substituted occurrence in the PERFORMED exercise history', async () => {
+    // Detached (left-program) history stays the user's training past, and
+    // substitution truthfulness is unaffected by detachment: the occurrence
+    // remains under the performed exercise.
+    await saveAll(
+      historySession({
+        id: 'session-occ-subst-detached',
+        enrollmentId: null,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 28 }],
+          },
+        ],
+      }),
+    );
+
+    const performed = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'dumbbell-bench-press',
+    });
+    expect(performed.ok).toBe(true);
+    if (!performed.ok) return;
+    expect(performed.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-occ-subst-detached',
+    ]);
+    expect(performed.data.entries[0]?.programName).toBe('Fit40 Beginner Strength');
+    expect(performed.data.entries[0]?.workoutName).toBe('Full Body A');
+
+    const authored = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(authored.ok).toBe(true);
+    if (!authored.ok) return;
+    expect(authored.data.entries).toEqual([]);
+  });
+
+  it('keeps duplicate occurrence identity when one of two same-authored occurrences is substituted', async () => {
+    // Two occurrences authored as ex-002; only the first is substituted to
+    // ex-008. Identity is (sessionId, exerciseOrder): each occurrence keeps
+    // its own performed identity, ex-002's history keeps exactly one entry,
+    // and ex-008's gains exactly one — never a split or double-count.
+    await saveAll(
+      historySession({
+        id: 'session-occ-subst-dup',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 30 }],
+          },
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 16 }] },
+        ],
+      }),
+    );
+
+    const performed = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'dumbbell-bench-press',
+    });
+    expect(performed.ok).toBe(true);
+    if (!performed.ok) return;
+    expect(performed.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-occ-subst-dup', 1],
+    ]);
+
+    const authored = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(authored.ok).toBe(true);
+    if (!authored.ok) return;
+    expect(authored.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-occ-subst-dup', 2],
+    ]);
+  });
 });
 
 describe('training history — progression performance windows', () => {
@@ -1460,15 +1611,45 @@ describe('training history — progression performance windows', () => {
       },
     ]);
   });
+
+  it('keys progression windows on the PERFORMED exercise, never the authored one', async () => {
+    // Substituted occurrence: authored Goblet Squat (ex-002), performed
+    // Dumbbell Bench Press (ex-008). The performance must feed ex-008's
+    // progression window only — never ex-002's, even though ex-002
+    // authored the template row.
+    await saveAll(
+      historySession({
+        id: 'session-perf-subst',
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 30, rpe: 7 }],
+          },
+        ],
+      }),
+    );
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002'), exerciseId('ex-008')],
+      5,
+    );
+
+    // Exactly one performance, attributed to the PERFORMED exercise.
+    expect(performances.map((p) => [p.exerciseId, p.sessionId, p.exerciseOrder])).toEqual([
+      ['ex-008', 'session-perf-subst', 1],
+    ]);
+    // The window shape is fully hydrated for the performed exercise.
+    expect(performances[0]?.sets).toEqual([
+      { type: 'reps', setNumber: 1, reps: 10, weightKg: 30, rpe: 7 },
+    ]);
+  });
 });
 
 afterAll(async () => {
   await closeDatabase();
 });
-
-
-
-
-
-
-

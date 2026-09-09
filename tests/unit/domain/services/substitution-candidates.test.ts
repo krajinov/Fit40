@@ -226,6 +226,51 @@ describe('selectSubstitutionCandidates: ranking', () => {
     expect(candidateIds(result)).toEqual(['ex-a', 'ex-b']);
   });
 
+  it('breaks an identical-name tie with exercise id ascending', () => {
+    // Two distinct candidates with the same display name, tier, overlap,
+    // and difficulty: only the id can order them.
+    const z = tierOneMatch('ex-twin-z', { name: 'Twin Squat', slug: 'twin-squat-z' });
+    const a = tierOneMatch('ex-twin-a', { name: 'Twin Squat', slug: 'twin-squat-a' });
+    const m = tierOneMatch('ex-twin-m', { name: 'Twin Squat', slug: 'twin-squat-m' });
+
+    const result = selectSubstitutionCandidateSet(source, [z, m, a]);
+
+    expect(candidateIds(result)).toEqual(['ex-twin-a', 'ex-twin-m', 'ex-twin-z']);
+  });
+
+  it('orders identical-name twins identically from any shuffled catalog input, with an identical cutoff', () => {
+    // The regression the review called out: equal rank keys must never
+    // inherit the repository's input order. Nine same-name tier-1 twins
+    // (one beyond the default limit of 8), shuffled across every rotation
+    // and its reversal, must yield the identical ranked list and the
+    // identical truncation behavior.
+    const twinIds = [
+      'ex-twin-01', 'ex-twin-02', 'ex-twin-03', 'ex-twin-04', 'ex-twin-05',
+      'ex-twin-06', 'ex-twin-07', 'ex-twin-08', 'ex-twin-09',
+    ];
+    const twins = twinIds.map((id) =>
+      tierOneMatch(id, { name: 'Twin Squat', slug: `twin-squat-${id}` }),
+    );
+
+    // Every rotation of the catalog, each also reversed — 18 distinct input
+    // orders, all deterministic.
+    const shuffles: Exercise[][] = [];
+    for (let rotation = 0; rotation < twins.length; rotation++) {
+      const rotated = [...twins.slice(rotation), ...twins.slice(0, rotation)];
+      shuffles.push(rotated, [...rotated].reverse());
+    }
+
+    const expectedOrder = twinIds.slice(0, 8);
+    for (const catalog of shuffles) {
+      const result = selectSubstitutionCandidateSet(source, catalog);
+      // Identical ordering regardless of the repository's input order...
+      expect(candidateIds(result)).toEqual(expectedOrder);
+      // ...and identical truthful cutoff behavior: the ninth twin is dropped
+      // and reported as truncated in every input order.
+      expect(result.isTruncated).toBe(true);
+    }
+  });
+
   it('produces the identical result from a shuffled catalog', () => {
     const catalog = [
       tierOneMatch('ex-t1-03', { name: 'C Squat', secondaryMuscles: [MuscleGroup.Glutes] }),

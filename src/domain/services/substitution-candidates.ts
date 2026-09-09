@@ -28,7 +28,8 @@
  *
  * 1. greater secondary-muscle overlap with the source first (descending),
  * 2. same difficulty as the source first,
- * 3. exercise name ascending as the final tiebreaker.
+ * 3. exercise name ascending,
+ * 4. exercise id ascending — the final total-order tie-breaker.
  *
  * The catalog input is never mutated, and duplicate ExerciseIds in the input
  * defensively collapse to their first occurrence. The candidate limit applies
@@ -135,7 +136,10 @@ function secondaryMuscleOverlapCount(source: Exercise, candidate: Exercise): num
  * 1. greater secondary-muscle overlap with the source first (descending),
  * 2. same difficulty as the source first,
  * 3. name ascending — a plain code-unit comparison, so the order is
- *    locale-independent and identical everywhere.
+ *    locale-independent and identical everywhere,
+ * 4. exercise id ascending — the final total-order tie-breaker, so distinct
+ *    candidates with equal rank keys (e.g. the same display name) never
+ *    depend on the repository's input order.
  */
 function compareByRank(source: Exercise, a: Exercise, b: Exercise): number {
   const overlapDiff =
@@ -146,7 +150,9 @@ function compareByRank(source: Exercise, a: Exercise, b: Exercise): number {
   const bSameDifficulty = b.difficulty === source.difficulty;
   if (aSameDifficulty !== bSameDifficulty) return aSameDifficulty ? -1 : 1;
 
-  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 // ─── Deduplication ──────────────────────────────────────────────────────────

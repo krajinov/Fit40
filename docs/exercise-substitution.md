@@ -138,7 +138,10 @@ exercises.
 
 1. Greater secondary-muscle overlap with the source first (descending),
 2. Same difficulty as the source first,
-3. Exercise name ascending as the final tiebreaker.
+3. Exercise name ascending,
+4. Exercise id ascending — the final total-order tie-breaker, so distinct
+   candidates with equal rank keys (e.g. the same display name) never
+   depend on the repository's input order.
 
 The catalog input is never mutated; duplicate exercise ids in the input
 defensively collapse to their first occurrence. The limit applies only after
@@ -310,14 +313,16 @@ Rows written before migration `0008` store NULL in
 
 | Behavior | Layer | Test file |
 |---|---|---|
-| Identity swap semantics, prescription-snapshot invariant, blocked-when-logged lifecycle | Domain (unit) | `tests/unit/domain/services/session-exercise-substitution.test.ts` |
-| Tier fallback, ranking, dedup, limit, truthful truncation | Domain (unit) | `tests/unit/domain/services/substitution-candidates.test.ts` |
+| Identity swap semantics, prescription-snapshot invariant, blocked-when-logged lifecycle, eligibility projection (incl. guard agreement) | Domain (unit) | `tests/unit/domain/services/session-exercise-substitution.test.ts` |
+| Tier fallback, ranking, id tie-breaker, dedup, limit, truthful truncation | Domain (unit) | `tests/unit/domain/services/substitution-candidates.test.ts` |
 | Use-case guard chains (ownership, enrollment, existence, concurrency) | Application (unit) | `tests/unit/application/use-cases/substitute-session-exercise.test.ts`, `restore-session-exercise.test.ts`, `get-exercise-substitution-candidates.test.ts` |
 | Row mapping, legacy NULL hydration + heal-on-save, FK enforcement, duplicate occurrence identity | Infrastructure (integration) | `tests/integration/database/workout-session-substitution.test.ts` |
 | Completed substituted session still marks its scheduled workout completed; in-progress never counts | Integration | `tests/integration/database/workout-session-substitution.test.ts` |
 | Per-exercise history keys on the PERFORMED exercise (substituted occurrence, detached, duplicates) | Integration | `tests/integration/database/training-history-repository.test.ts` |
 | Progression window keys on the PERFORMED exercise | Integration | `tests/integration/database/training-history-repository.test.ts` |
 | "Originally: …" rendering rules (shown, omitted, positional fallback, chained) | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts` |
+| Affordance consumes the eligibility projection — never re-derives blocking from raw facts | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts`, `tests/unit/features/sessions/active-workout-views.test.ts` |
+| "Originally: …" context on substituted upcoming rows ("Up next") | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | Swap panel copy and affordance states | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts` |
 
 

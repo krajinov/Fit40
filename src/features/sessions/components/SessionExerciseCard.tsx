@@ -6,6 +6,7 @@ import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-sessio
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
+import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 
 interface SessionExerciseCardProps {
   readonly card: SessionExerciseCardView;
@@ -68,6 +69,11 @@ export function SessionExerciseCard({
 
         <div className="min-w-0 flex-1">
           <h2 className="text-[15px] font-semibold text-ink md:text-[17px]">{card.name}</h2>
+          {card.originallyName !== null && (
+            <p className="text-[11px] text-ink-3 md:text-xs">
+              Originally: {card.originallyName}
+            </p>
+          )}
           <p className="text-xs text-ink-2 md:text-sm">
             {card.prescriptionLabel}
             {card.equipmentLabel !== null && ` · ${card.equipmentLabel}`}
@@ -167,6 +173,24 @@ export function SessionExerciseCard({
             </div>
           </details>
         ))}
+
+      {/* M9 substitution affordance: derived entirely from the pure view
+          mapper's state — no substitution rules live in this component. */}
+      {card.substitution.state === 'blocked-logged-sets' && !readOnly && (
+        <p className="text-xs text-ink-3 md:text-[13px]">{card.substitution.blockedLabel}</p>
+      )}
+      {(card.substitution.state === 'replace' ||
+        card.substitution.state === 'restore-available' ||
+        card.substitution.state === 'no-candidates') && (
+        <SessionExerciseSwapPanel
+          sessionId={sessionId}
+          exerciseOrder={log.order}
+          programSlug={programSlug}
+          weekNumber={weekNumber}
+          workoutOrder={workoutOrder}
+          substitution={card.substitution}
+        />
+      )}
     </article>
   );
 }

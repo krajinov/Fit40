@@ -13,6 +13,7 @@
  */
 
 import type { ExerciseTargetDto } from '@/application/dto/exercise';
+import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
   WorkoutSessionExerciseDto,
   WorkoutSessionMetricsDto,
@@ -26,6 +27,10 @@ import {
   buildSessionLoggerView,
   type SessionLoggerView,
 } from '@/features/sessions/active-workout-logger-views';
+import {
+  buildSessionSubstitutionView,
+  type SessionSubstitutionView,
+} from '@/features/sessions/session-substitution-views';
 
 /** How one exercise log is presented on the session screen. */
 export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming';
@@ -48,12 +53,20 @@ export interface SessionExerciseCardView {
   readonly order: number;
   readonly kind: SessionExerciseKind;
   readonly name: string;
+  /**
+   * The authored exercise's name, shown as "Originally: …" when the
+   * occurrence is substituted; null when not substituted, unresolved in the
+   * catalog, or the authored id equals the performed one.
+   */
+  readonly originallyName: string | null;
   readonly equipmentLabel: string | null;
   readonly prescriptionLabel: string;
   readonly badge: SessionExerciseBadgeView;
   readonly setRows: ReadonlyArray<SessionSetRowView>;
   /** Null on a completed session (mutations are in-progress only). */
   readonly logger: SessionLoggerView | null;
+  /** The M9 substitution affordance of this occurrence. */
+  readonly substitution: SessionSubstitutionView;
 }
 
 export interface SessionProgressView {
@@ -129,6 +142,16 @@ export interface SessionExerciseCardsInput {
   /** Position-aligned with `logs`; null when no target resolved. */
   readonly targets: ReadonlyArray<ExerciseTargetDto | null>;
   readonly catalogByExerciseId: ReadonlyMap<string, SessionExerciseCatalogMeta>;
+  /**
+   * Substitution candidates keyed by performed exercise id, from the ONE
+   * catalog read the view assembly performed (see
+   * `active-workout-view.ts`). An absent key (performed exercise no longer
+   * in the catalog) degrades to the honest no-candidates state.
+   */
+  readonly candidatesByPerformedExerciseId: ReadonlyMap<
+    string,
+    ExerciseSubstitutionCandidatesDto
+  >;
   readonly sessionStatus: 'in-progress' | 'completed';
 }
 
@@ -150,6 +173,7 @@ export function buildSessionExerciseCardViews(
 
   return input.logs.map((log, index) => {
     const meta = input.catalogByExerciseId.get(log.performedExerciseId);
+    const authoredMeta = input.catalogByExerciseId.get(log.authoredExerciseId);
     const prescribed = log.prescription.sets;
     const kind: SessionExerciseKind =
       log.sets.length >= prescribed
@@ -164,6 +188,13 @@ export function buildSessionExerciseCardViews(
       order: log.order,
       kind,
       name: meta?.name ?? `Exercise ${log.order}`,
+      // The PERFORMED exercise is the primary identity; the authored name is
+      // subtle context only when the domain says this occurrence is
+      // substituted AND the catalog resolves the authored exercise. A
+      // chained substitution still shows the ORIGINAL authored exercise —
+      // authoredExerciseId is never rewritten.
+      originallyName:
+        log.isSubstituted && authoredMeta !== undefined ? authoredMeta.name : null,
       equipmentLabel: meta === undefined ? null : EQUIPMENT_LABELS[meta.equipment],
       prescriptionLabel: formatPrescription(log.prescription),
       badge: buildBadge(kind, log.sets.length, prescribed),
@@ -172,6 +203,13 @@ export function buildSessionExerciseCardViews(
         input.sessionStatus === 'in-progress'
           ? buildSessionLoggerView(log, input.targets[index] ?? null)
           : null,
+      substitution: buildSessionSubstitutionView({
+        sessionStatus: input.sessionStatus,
+        isSubstituted: log.isSubstituted,
+        hasLoggedSets: log.sets.length > 0,
+        candidates:
+          input.candidatesByPerformedExerciseId.get(log.performedExerciseId) ?? null,
+      }),
     };
   });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
+import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
   WorkoutSessionExerciseDto,
   WorkoutSessionSetDto,
@@ -49,6 +50,7 @@ function log(
   exerciseId: string,
   prescription: RepPrescription,
   sets: WorkoutSessionSetDto[],
+  overrides: Partial<WorkoutSessionExerciseDto> = {},
 ): WorkoutSessionExerciseDto {
   return {
     authoredExerciseId: exerciseId,
@@ -57,6 +59,34 @@ function log(
     order,
     prescription,
     sets,
+    ...overrides,
+  };
+}
+
+/** A substitution candidates DTO built from plain candidate facts. */
+function candidatesDto(
+  sourceExerciseId: string,
+  candidates: ReadonlyArray<{
+    readonly exerciseId: string;
+    readonly name: string;
+    readonly equipment?: 'bodyweight' | 'dumbbell' | 'barbell';
+    readonly primaryMuscle?: 'chest' | 'quadriceps';
+  }>,
+  isLimited = false,
+): ExerciseSubstitutionCandidatesDto {
+  return {
+    sourceExerciseId,
+    isLimited,
+    candidates: candidates.map((candidate) => ({
+      exerciseId: candidate.exerciseId,
+      name: candidate.name,
+      slug: `slug-${candidate.exerciseId}`,
+      equipment: candidate.equipment ?? 'dumbbell',
+      primaryMuscle: candidate.primaryMuscle ?? 'chest',
+      movementPattern: 'push-horizontal',
+      difficulty: 'intermediate',
+      matchTier: 'same-pattern-same-muscle',
+    })),
   };
 }
 
@@ -424,6 +454,9 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
     ['ex-1', { name: 'Bench Press', equipment: 'barbell' as const }],
   ]);
 
+  /** No substitution candidates resolved — the honest empty state. */
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
   it('marks the first under-prescribed log active and the rest by set count', () => {
     const logs = [
       log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 9, 50)]),
@@ -434,6 +467,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null, null, null],
       catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -453,6 +487,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null],
       catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -465,6 +500,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null],
       catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -481,12 +517,160 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null, null],
       catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'completed',
     });
 
     expect(cards[0]?.kind).toBe('partial');
     expect(cards[1]?.kind).toBe('upcoming');
     expect(cards.every((c) => c.logger === null)).toBe(true);
+  });
+
+  describe('substitution display (M9)', () => {
+    const substitutionCatalog = new Map([
+      ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
+      ['ex-db-bench', { name: 'Dumbbell Bench Press', equipment: 'dumbbell' as const }],
+    ]);
+
+    it('shows the performed exercise as the primary name and its equipment, with "Originally" context', () => {
+      const logs = [
+        log(1, 'ex-bench', threeByEightToTen, [], {
+          performedExerciseId: 'ex-db-bench',
+          isSubstituted: true,
+        }),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Dumbbell Bench Press');
+      expect(cards[0]?.equipmentLabel).toBe('Dumbbell');
+      expect(cards[0]?.originallyName).toBe('Bench Press');
+      // The authored prescription snapshot carries over — never converted.
+      expect(cards[0]?.prescriptionLabel).toBe('3 × 8–10');
+    });
+
+    it('omits "Originally" when the occurrence is not substituted', () => {
+      const logs = [log(1, 'ex-bench', threeByEightToTen, [])];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Bench Press');
+      expect(cards[0]?.originallyName).toBeNull();
+    });
+
+    it('omits "Originally" when the authored exercise cannot be resolved', () => {
+      const logs = [
+        log(1, 'ex-gone', threeByEightToTen, [], {
+          performedExerciseId: 'ex-db-bench',
+          isSubstituted: true,
+        }),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog, // ex-gone absent
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Dumbbell Bench Press');
+      expect(cards[0]?.originallyName).toBeNull();
+    });
+
+    it('a chained substitution still shows the ORIGINAL authored exercise', () => {
+      // Bench → DB Bench (order 1), then DB Bench → Push-up: the snapshot's
+      // authoredExerciseId is never rewritten, so "Originally" stays the
+      // original authored exercise.
+      const logs = [
+        log(1, 'ex-bench', threeByEightToTen, [], {
+          performedExerciseId: 'ex-pushup',
+          isSubstituted: true,
+        }),
+      ];
+      const chainedCatalog = new Map([
+        ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
+        ['ex-pushup', { name: 'Push-up', equipment: 'bodyweight' as const }],
+      ]);
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: chainedCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Push-up');
+      expect(cards[0]?.originallyName).toBe('Bench Press');
+    });
+
+    it('maps the affordance states from the pure substitution view', () => {
+      const withCandidates = new Map([
+        ['ex-bench', candidatesDto('ex-bench', [{ exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' }])],
+      ]);
+
+      const base = {
+        targets: [null] as (ExerciseTargetDto | null)[],
+        catalogByExerciseId: substitutionCatalog,
+        sessionStatus: 'in-progress' as const,
+      };
+
+      // replace: no sets, not substituted, candidates available.
+      const replace = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(replace[0]?.substitution.state).toBe('replace');
+      expect(replace[0]?.substitution.candidates[0]?.metaLabel).toBe('Dumbbell · Chest');
+
+      // blocked-logged-sets: same occurrence, one logged set.
+      const blocked = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)])],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(blocked[0]?.substitution.state).toBe('blocked-logged-sets');
+
+      // restore-available: substituted, no logged sets (empty candidates ok).
+      const restore = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(restore[0]?.substitution.state).toBe('restore-available');
+
+      // no-candidates: not substituted, no sets, no matching candidates.
+      const none = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        candidatesByPerformedExerciseId: noCandidates,
+      });
+      expect(none[0]?.substitution.state).toBe('no-candidates');
+
+      // hidden: a completed session never shows mutation controls.
+      const hidden = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        candidatesByPerformedExerciseId: withCandidates,
+        sessionStatus: 'completed',
+      });
+      expect(hidden[0]?.substitution.state).toBe('hidden');
+    });
   });
 });
 

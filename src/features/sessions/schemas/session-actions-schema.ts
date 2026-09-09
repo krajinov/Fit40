@@ -65,3 +65,20 @@ export const startSessionSchema = z.object({
   weekNumber: weekNumberSchema,
   workoutOrder: workoutOrderSchema,
 });
+
+/**
+ * Substitution: the occurrence to swap and the explicitly selected
+ * replacement exercise. No userId — identity comes from the trusted
+ * authenticated session, never from client input.
+ */
+export const substituteExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+  replacementExerciseId: z.string().min(1),
+});
+
+/** Restore: the occurrence returned to performed-as-authored identity. */
+export const restoreExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+});

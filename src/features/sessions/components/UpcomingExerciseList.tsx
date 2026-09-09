@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-session';
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
+import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 
 interface UpcomingExerciseListProps {
   /** Untouched exercise rows, in log order. */
@@ -102,6 +103,23 @@ export function UpcomingExerciseList({
                     quietLabel={logger.quietLabel}
                     hintLabel={logger.hintLabel}
                   />
+                  {/* Untouched rows are the prime substitution moment: the
+                      swap affordance (pure view-mapper state) sits under the
+                      logger inside the same expand. */}
+                  {(exercise.substitution.state === 'replace' ||
+                    exercise.substitution.state === 'restore-available' ||
+                    exercise.substitution.state === 'no-candidates') && (
+                    <div className="pt-3">
+                      <SessionExerciseSwapPanel
+                        sessionId={sessionId}
+                        exerciseOrder={log.order}
+                        programSlug={programSlug}
+                        weekNumber={weekNumber}
+                        workoutOrder={workoutOrder}
+                        substitution={exercise.substitution}
+                      />
+                    </div>
+                  )}
                 </div>
               </details>
             </li>

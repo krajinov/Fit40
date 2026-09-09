@@ -23,7 +23,10 @@ export type SessionActionErrorCode =
   | 'NOT_ENROLLED'
   | 'ENROLLMENT_CHANGED'
   | 'FORBIDDEN'
-  | 'INVALID_INPUT';
+  | 'INVALID_INPUT'
+  | 'EXERCISE_HAS_LOGGED_SETS'
+  | 'SUBSTITUTION_NO_CHANGE'
+  | 'EXERCISE_NOT_FOUND';
 
 export interface SessionActionError {
   readonly code: SessionActionErrorCode;

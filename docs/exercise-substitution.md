@@ -245,7 +245,8 @@ navigation and form submission work with zero extra client state:
   established `router.refresh()` reload/retry pattern.
 - The **substituted occurrence card shows the performed exercise as primary
   identity** with a subtle "Originally: …" line naming the authored
-  exercise — same convention as History (section 9).
+  exercise — same convention as History (section 9) and as the "Up next"
+  upcoming rows (`UpcomingExerciseList.tsx`).
 
 Zod schemas (`session-actions-schema.ts`) guard the action boundary; the
 only trusted form fields are the session id, the occurrence order, and the

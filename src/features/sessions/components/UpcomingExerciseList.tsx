@@ -17,6 +17,31 @@ interface UpcomingExerciseListProps {
 }
 
 /**
+ * Title area of one upcoming row: the performed exercise as the primary
+ * name, with the same subtle "Originally: …" context used elsewhere when the
+ * occurrence is substituted (the view mapper already resolved the authored
+ * name; null renders no line).
+ */
+interface UpcomingExerciseTitleProps {
+  readonly exercise: SessionExerciseCardView;
+}
+
+function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-sm font-semibold text-ink-2 md:text-base">
+        {exercise.name}
+      </span>
+      {exercise.originallyName !== null && (
+        <span className="block truncate text-[11px] text-ink-3 md:text-xs">
+          Originally: {exercise.originallyName}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
  * "Up next" band (locked design): untouched exercises as dimmed compact rows
  * (surface-2 order circle, ink-2 name, ink-3 prescription) in one surface
  * container.
@@ -57,9 +82,7 @@ export function UpcomingExerciseList({
                 >
                   {exercise.order}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-2 md:text-base">
-                  {exercise.name}
-                </span>
+                <UpcomingExerciseTitle exercise={exercise} />
                 <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
                   {exercise.prescriptionLabel}
                 </span>
@@ -77,9 +100,7 @@ export function UpcomingExerciseList({
                   >
                     {exercise.order}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-2 md:text-base">
-                    {exercise.name}
-                  </span>
+                  <UpcomingExerciseTitle exercise={exercise} />
                   <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
                     {exercise.prescriptionLabel}
                   </span>

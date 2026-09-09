@@ -14,6 +14,7 @@ import {
 } from '@/domain/entities/workout-session';
 import {
   restoreSessionExercise,
+  resolveOccurrenceSubstitutionEligibility,
   resolveOccurrenceSubstitutionState,
   substituteSessionExercise,
 } from '@/domain/services/session-exercise-substitution';
@@ -204,6 +205,131 @@ describe('resolveOccurrenceSubstitutionState', () => {
     expect(state.isSubstituted).toBe(true);
     expect(state.authoredExerciseId).toBe('ex-001');
     expect(state.performedExerciseId).toBe('ex-009');
+  });
+});
+
+describe('resolveOccurrenceSubstitutionEligibility', () => {
+  it('reports a mutable, unsubstituted occurrence as unblocked with restore unavailable', () => {
+    const log = session().exerciseLogs[0];
+    if (log === undefined) return;
+
+    expect(resolveOccurrenceSubstitutionEligibility(session(), log)).toEqual({
+      isSubstituted: false,
+      blockedBy: null,
+      canRestore: false,
+    });
+  });
+
+  it('reports a substituted, mutable occurrence as restorable', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const log = substituted.data.exerciseLogs[0];
+    if (log === undefined) return;
+
+    expect(resolveOccurrenceSubstitutionEligibility(substituted.data, log)).toEqual({
+      isSubstituted: true,
+      blockedBy: null,
+      canRestore: true,
+    });
+  });
+
+  it('blocks on logged sets even when the occurrence is substituted', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const logged = logSessionSet(substituted.data, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    const log = logged.data.exerciseLogs[0];
+    if (log === undefined) return;
+
+    const eligibility = resolveOccurrenceSubstitutionEligibility(logged.data, log);
+    expect(eligibility.isSubstituted).toBe(true);
+    expect(eligibility.blockedBy).toBe('logged-sets');
+    // Restore is unavailable the moment ANY logged set exists.
+    expect(eligibility.canRestore).toBe(false);
+  });
+
+  it('blocks on a completed session, outranking logged sets', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    // Sets on order 1 AND completion: the completed-session block wins,
+    // mirroring the mutation guards' SESSION_ALREADY_COMPLETED precedence.
+    const logged = logSessionSet(substituted.data, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    const completed = completeWorkoutSession(logged.data, new Date());
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    const log = completed.data.exerciseLogs[0];
+    if (log === undefined) return;
+
+    expect(resolveOccurrenceSubstitutionEligibility(completed.data, log)).toEqual({
+      isSubstituted: true,
+      blockedBy: 'session-completed',
+      canRestore: false,
+    });
+  });
+
+  it('agrees with the mutation guards on every guard outcome', () => {
+    // The projection and the mutation guards must never disagree: mutable ⇒
+    // substitution succeeds; blocked ⇒ substitution fails with the matching
+    // error code, and restore fails with that same block code (the guards run
+    // before restore's own no-change precondition).
+    const completedSession = (() => {
+      const withSet = logSessionSet(session(), { exerciseOrder: 2, type: 'duration', durationSeconds: 30, weightKg: null, rpe: null });
+      if (!withSet.ok) throw Error();
+      const completed = completeWorkoutSession(withSet.data, new Date());
+      if (!completed.ok) throw Error();
+      return completed.data;
+    })();
+
+    const cases = [
+      { session: session(), expectBlocked: null as string | null },
+      { session: withSetOnOrder1(), expectBlocked: 'logged-sets' },
+      { session: completedSession, expectBlocked: 'session-completed' },
+    ];
+
+    for (const { session: s, expectBlocked } of cases) {
+      const log = s.exerciseLogs[0];
+      if (log === undefined) throw Error();
+      const eligibility = resolveOccurrenceSubstitutionEligibility(s, log);
+
+      const result = substituteSessionExercise(s, { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+      if (expectBlocked === null) {
+        expect(result.ok).toBe(true);
+        expect(eligibility.blockedBy).toBeNull();
+
+        // After the successful swap the occurrence is mutable AND
+        // substituted: restorable, and restore indeed succeeds.
+        if (!result.ok) throw Error();
+        const swappedLog = result.data.exerciseLogs[0];
+        if (swappedLog === undefined) throw Error();
+        const swappedEligibility = resolveOccurrenceSubstitutionEligibility(result.data, swappedLog);
+        expect(swappedEligibility.blockedBy).toBeNull();
+        expect(swappedEligibility.canRestore).toBe(true);
+        expect(restoreSessionExercise(result.data, { exerciseOrder: 1 }).ok).toBe(true);
+      } else {
+        expect(result.ok).toBe(false);
+        expect(eligibility.blockedBy).toBe(expectBlocked);
+        expect(eligibility.canRestore).toBe(false);
+        let expectedCode = '';
+        if (!result.ok) {
+          expectedCode = result.error.code;
+          expect(result.error.code).toBe(
+            expectBlocked === 'logged-sets' ? 'EXERCISE_HAS_LOGGED_SETS' : 'SESSION_ALREADY_COMPLETED',
+          );
+        }
+
+        const restore = restoreSessionExercise(s, { exerciseOrder: 1 });
+        expect(restore.ok).toBe(false);
+        if (!restore.ok) {
+          expect(restore.error.code).toBe(expectedCode);
+        }
+      }
+    }
   });
 });
 

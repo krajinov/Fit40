@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
+import type { OccurrenceSubstitutionEligibilityDto } from '@/application/dto/workout-session';
 import {
   buildSessionSubstitutionView,
   SUBSTITUTION_BLOCKED_LABEL,
@@ -34,6 +35,14 @@ function candidatesDto(
   };
 }
 
+/** The domain-derived eligibility the mapper is expected to consume. */
+function eligibility(
+  blockedBy: OccurrenceSubstitutionEligibilityDto['blockedBy'],
+  canRestore: boolean,
+): OccurrenceSubstitutionEligibilityDto {
+  return { blockedBy, canRestore };
+}
+
 describe('session-substitution-views / buildSessionSubstitutionView', () => {
   const withCandidates = candidatesDto([
     { exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' },
@@ -41,22 +50,18 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
 
   it('derives the replace state for a mutable, unsubstituted occurrence with candidates', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, false),
       candidates: withCandidates,
     });
 
     expect(view.state).toBe('replace');
-    expect(view.isSubstituted).toBe(false);
+    expect(view.canRestore).toBe(false);
     expect(view.blockedLabel).toBeNull();
   });
 
   it('formats candidate labels with equipment and primary muscle', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, false),
       candidates: withCandidates,
     });
 
@@ -65,24 +70,20 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
     expect(view.candidates[0]?.exerciseId).toBe('ex-db-bench');
   });
 
-  it('derives restore-available when substituted with no logged sets, even with empty candidates', () => {
+  it('derives restore-available when substituted and mutable, even with empty candidates', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: true,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, true),
       candidates: candidatesDto([]),
     });
 
     expect(view.state).toBe('restore-available');
-    expect(view.isSubstituted).toBe(true);
+    expect(view.canRestore).toBe(true);
     expect(view.candidates).toEqual([]);
   });
 
   it('keeps the swap affordance in restore-available when a chained substitute has candidates', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: true,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, true),
       candidates: withCandidates,
     });
 
@@ -90,11 +91,9 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
     expect(view.candidates.length).toBeGreaterThan(0);
   });
 
-  it('derives blocked-logged-sets with the truthful muted copy once any set exists', () => {
+  it('derives blocked-logged-sets with the truthful muted copy from the domain block', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: true,
+      eligibility: eligibility('logged-sets', false),
       candidates: withCandidates,
     });
 
@@ -104,15 +103,14 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
     expect(view.candidates).toEqual([]);
   });
 
-  it('blocks restore identically once sets are logged', () => {
+  it('blocks restore identically when the domain blocks a substituted occurrence', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: true,
-      hasLoggedSets: true,
+      eligibility: eligibility('logged-sets', false),
       candidates: withCandidates,
     });
 
     expect(view.state).toBe('blocked-logged-sets');
+    expect(view.canRestore).toBe(false);
   });
 });
 
@@ -123,9 +121,7 @@ describe('session-substitution-views / no-candidates and hidden states', () => {
 
   it('derives no-candidates with the honest empty state for a mutable unsubstituted occurrence', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, false),
       candidates: candidatesDto([]),
     });
 
@@ -136,9 +132,7 @@ describe('session-substitution-views / no-candidates and hidden states', () => {
 
   it('derives no-candidates when the performed exercise no longer resolves (null entry)', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, false),
       candidates: null,
     });
 
@@ -147,9 +141,7 @@ describe('session-substitution-views / no-candidates and hidden states', () => {
 
   it('carries the truthful limit metadata through to the view', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'in-progress',
-      isSubstituted: false,
-      hasLoggedSets: false,
+      eligibility: eligibility(null, false),
       candidates: candidatesDto([{ exerciseId: 'ex-a', name: 'A' }], true),
     });
 
@@ -157,17 +149,27 @@ describe('session-substitution-views / no-candidates and hidden states', () => {
     expect(view.candidatesLimited).toBe(true);
   });
 
-  it('derives hidden for completed sessions regardless of substitution or sets', () => {
+  it('derives hidden for the completed-session block regardless of substitution or restore', () => {
     const view = buildSessionSubstitutionView({
-      sessionStatus: 'completed',
-      isSubstituted: true,
-      hasLoggedSets: false,
+      eligibility: eligibility('session-completed', true),
       candidates: withCandidates,
     });
 
     expect(view.state).toBe('hidden');
+    expect(view.canRestore).toBe(false);
     expect(view.candidates).toEqual([]);
     expect(view.blockedLabel).toBeNull();
+  });
+
+  it('the completed-session block outranks the logged-set block, mirroring the domain guards', () => {
+    // When both blocks apply the domain reports the completed-session one;
+    // the mapper maps it 1:1 instead of re-deriving precedence itself.
+    const view = buildSessionSubstitutionView({
+      eligibility: eligibility('session-completed', false),
+      candidates: withCandidates,
+    });
+
+    expect(view.state).toBe('hidden');
   });
 });
 

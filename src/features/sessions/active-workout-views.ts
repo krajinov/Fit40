@@ -204,9 +204,7 @@ export function buildSessionExerciseCardViews(
           ? buildSessionLoggerView(log, input.targets[index] ?? null)
           : null,
       substitution: buildSessionSubstitutionView({
-        sessionStatus: input.sessionStatus,
-        isSubstituted: log.isSubstituted,
-        hasLoggedSets: log.sets.length > 0,
+        eligibility: log.substitutionEligibility,
         candidates:
           input.candidatesByPerformedExerciseId.get(log.performedExerciseId) ?? null,
       }),

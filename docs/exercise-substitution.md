@@ -104,6 +104,16 @@ swaps only the performed id of the addressed occurrence; everything else
 
 `restoreSessionExercise` mirrors the same guard chain.
 
+**Eligibility projection (read side of the same rules):**
+`resolveOccurrenceSubstitutionEligibility(session, log)` exposes the blocking
+rules as `{ isSubstituted, blockedBy, canRestore }` — `blockedBy` is
+`'session-completed'` or `'logged-sets'` (null when mutable; the
+completed-session block outranks logged sets, mirroring the guards), and
+`canRestore` is true only for a currently substituted, mutable occurrence.
+The session DTOs carry it per log as `substitutionEligibility`
+(`workout-session.ts`, `training-history.ts`), so presentation formats it
+and never re-derives mutability from raw session facts.
+
 Implementation: `src/domain/services/session-exercise-substitution.ts`.
 
 ---
@@ -212,9 +222,15 @@ exercise:**
 ## 8. UI: Active Workout swap panel
 
 `src/features/sessions/session-substitution-views.ts` derives each
-occurrence's substitution affordance server-side (replace /
-restore-available states; hidden and blocked states never render the panel).
-The panel (`src/features/sessions/components/SessionExerciseSwapPanel.tsx`)
+occurrence's substitution affordance server-side. Its ONLY business input is
+the domain-derived eligibility the session DTO carries
+(`substitutionEligibility` from
+`resolveOccurrenceSubstitutionEligibility`): the blocked/hidden states map
+1:1 from `blockedBy`, and restore availability is `canRestore`. The mapper
+never re-derives blocking from logged sets or session status — candidate
+presence (replace vs. the honest no-candidates empty state) is its only
+visual decision. The panel
+(`src/features/sessions/components/SessionExerciseSwapPanel.tsx`)
 is a native `<details>` disclosure with native radio cards — arrow-key
 navigation and form submission work with zero extra client state:
 
@@ -222,7 +238,8 @@ navigation and form submission work with zero extra client state:
   `useActionState`; candidate labels show equipment + difficulty meta; a
   truthful "candidates limited" note renders when truncated.
 - **Restore:** a separate native form posting to `restoreExerciseAction`,
-  rendered only when the occurrence is currently substituted.
+  rendered only when the domain's eligibility says restore is currently
+  possible (`canRestore`).
 - **Expected action errors** surface as user-facing copy via
   `sessionActionErrorLabel`; `SESSION_MODIFIED` additionally triggers the
   established `router.refresh()` reload/retry pattern.

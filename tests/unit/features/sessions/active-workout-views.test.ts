@@ -56,6 +56,7 @@ function log(
     authoredExerciseId: exerciseId,
     performedExerciseId: exerciseId,
     isSubstituted: false,
+    substitutionEligibility: { blockedBy: null, canRestore: false },
     order,
     prescription,
     sets,
@@ -613,7 +614,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       expect(cards[0]?.originallyName).toBe('Bench Press');
     });
 
-    it('maps the affordance states from the pure substitution view', () => {
+    it('maps the affordance states from the domain-derived eligibility projection', () => {
       const withCandidates = new Map([
         ['ex-bench', candidatesDto('ex-bench', [{ exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' }])],
       ]);
@@ -624,7 +625,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
         sessionStatus: 'in-progress' as const,
       };
 
-      // replace: no sets, not substituted, candidates available.
+      // replace: mutable, unsubstituted, candidates available.
       const replace = buildSessionExerciseCardViews({
         ...base,
         logs: [log(1, 'ex-bench', threeByEightToTen, [])],
@@ -633,28 +634,35 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       expect(replace[0]?.substitution.state).toBe('replace');
       expect(replace[0]?.substitution.candidates[0]?.metaLabel).toBe('Dumbbell · Chest');
 
-      // blocked-logged-sets: same occurrence, one logged set.
+      // blocked-logged-sets: the domain's eligibility — NOT the DTO's set
+      // rows — decides (zero sets in the DTO here, blocked anyway).
       const blocked = buildSessionExerciseCardViews({
         ...base,
-        logs: [log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)])],
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: 'logged-sets', canRestore: false },
+          }),
+        ],
         candidatesByPerformedExerciseId: withCandidates,
       });
       expect(blocked[0]?.substitution.state).toBe('blocked-logged-sets');
 
-      // restore-available: substituted, no logged sets (empty candidates ok).
+      // restore-available: substituted and mutable per the domain.
       const restore = buildSessionExerciseCardViews({
         ...base,
         logs: [
           log(1, 'ex-bench', threeByEightToTen, [], {
             performedExerciseId: 'ex-db-bench',
             isSubstituted: true,
+            substitutionEligibility: { blockedBy: null, canRestore: true },
           }),
         ],
         candidatesByPerformedExerciseId: withCandidates,
       });
       expect(restore[0]?.substitution.state).toBe('restore-available');
+      expect(restore[0]?.substitution.canRestore).toBe(true);
 
-      // no-candidates: not substituted, no sets, no matching candidates.
+      // no-candidates: not substituted, mutable, no matching candidates.
       const none = buildSessionExerciseCardViews({
         ...base,
         logs: [log(1, 'ex-bench', threeByEightToTen, [])],
@@ -662,14 +670,107 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       });
       expect(none[0]?.substitution.state).toBe('no-candidates');
 
-      // hidden: a completed session never shows mutation controls.
+      // hidden: the domain's eligibility — NOT the screen's sessionStatus —
+      // decides (an in-progress screen here, hidden anyway).
       const hidden = buildSessionExerciseCardViews({
         ...base,
-        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: 'session-completed', canRestore: false },
+          }),
+        ],
         candidatesByPerformedExerciseId: withCandidates,
-        sessionStatus: 'completed',
       });
       expect(hidden[0]?.substitution.state).toBe('hidden');
+    });
+  });
+
+  // Locks the M9 review fix: the affordance consumes the domain's
+  // eligibility projection and never re-derives blocking from the DTO's raw
+  // facts. Every fixture below deliberately contradicts the eligibility so
+  // any reintroduced hasLoggedSets/sessionStatus logic in the mapper fails.
+  describe('substitution eligibility consumption (M9 regression)', () => {
+    const withCandidates = new Map([
+      ['ex-bench', candidatesDto('ex-bench', [{ exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' }])],
+    ]);
+
+    const base = {
+      targets: [null] as (ExerciseTargetDto | null)[],
+      catalogByExerciseId: new Map<string, { name: string; equipment: 'barbell' }>([
+        ['ex-bench', { name: 'Bench Press', equipment: 'barbell' }],
+        ['ex-db-bench', { name: 'Dumbbell Bench Press', equipment: 'barbell' }],
+      ]),
+      sessionStatus: 'in-progress' as const,
+    };
+
+    it('renders replace — not blocked — when the DTO carries a logged set but the domain says mutable', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)])], // sets present
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      // The mapper must consume eligibility; the raw set rows are not its input.
+      expect(cards[0]?.substitution.state).toBe('replace');
+      expect(cards[0]?.substitution.blockedLabel).toBeNull();
+    });
+
+    it('renders restore-available — not blocked — for a substituted occurrence with a logged set but mutable eligibility', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+            substitutionEligibility: { blockedBy: null, canRestore: true },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      expect(cards[0]?.substitution.state).toBe('restore-available');
+      expect(cards[0]?.substitution.canRestore).toBe(true);
+    });
+
+    it('keeps mutation controls on a completed screen whose eligibility is still mutable', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        sessionStatus: 'completed',
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: null, canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      // The substitution affordance follows the domain eligibility, not the
+      // screen status: a mutable occurrence stays swappable.
+      expect(cards[0]?.substitution.state).toBe('replace');
+    });
+
+    it('restore availability comes only from the domain projection, not from the substituted flag', () => {
+      // Candidates are keyed by the PERFORMED id after the swap.
+      const performedCandidates = new Map([
+        ['ex-db-bench', candidatesDto('ex-db-bench', [{ exerciseId: 'ex-bench', name: 'Bench Press' }])],
+      ]);
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+            // Substituted, but the domain has NOT granted restore.
+            substitutionEligibility: { blockedBy: null, canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: performedCandidates,
+      });
+
+      // With canRestore false the affordance treats the occurrence as
+      // unsubstituted: replace (candidates exist), no restore control.
+      expect(cards[0]?.substitution.state).toBe('replace');
+      expect(cards[0]?.substitution.canRestore).toBe(false);
     });
   });
 });

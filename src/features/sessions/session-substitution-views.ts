@@ -3,21 +3,24 @@
  * affordance (M9): which controls one occurrence exposes, the candidate
  * option labels, and the honest blocked/empty copy.
  *
- * Every state derives from facts the domain and application layers already
- * decided — `isSubstituted` is the domain-derived snapshot flag, and the
- * logged-set block mirrors the domain's substitution precondition. The
- * domain remains the enforcement boundary; this module only chooses UI and
- * never re-implements substitution rules, ranking, or candidate selection.
+ * Business mutability arrives as the domain-derived eligibility projection
+ * (`WorkoutSessionExerciseDto.substitutionEligibility` from
+ * `resolveOccurrenceSubstitutionEligibility`) — this module only formats
+ * the state it is handed and can structurally never re-derive whether sets
+ * block a swap or whether restore is available. What stays purely visual:
+ * candidate presence (candidates vs. empty copy) and which copy/component
+ * renders. The domain remains the enforcement boundary; this module never
+ * re-implements substitution rules, ranking, or candidate selection.
  *
  * Affordance states (locked M9 semantics):
- * - `replace`              in progress · not substituted · no logged sets ·
+ * - `replace`              in progress · not substituted · mutable ·
  *                          candidates available
- * - `restore-available`    in progress · substituted · no logged sets
+ * - `restore-available`    in progress · substituted · mutable
  *                          (candidates may be empty — the swap control then
  *                          shows the honest empty state, and a chained swap
  *                          stays possible whenever candidates exist)
  * - `blocked-logged-sets`  ≥1 logged set · no controls, muted truthful copy
- * - `no-candidates`        in progress · not substituted · no logged sets ·
+ * - `no-candidates`        in progress · not substituted · mutable ·
  *                          no matching candidates (honest empty state, never
  *                          unrelated exercises)
  * - `hidden`               completed/read-only session · no mutation controls
@@ -27,6 +30,7 @@ import type {
   ExerciseSubstitutionCandidatesDto,
   SubstitutionCandidateDto,
 } from '@/application/dto/substitution-candidates';
+import type { OccurrenceSubstitutionEligibilityDto } from '@/application/dto/workout-session';
 import {
   EQUIPMENT_LABELS,
   MUSCLE_GROUP_LABELS,
@@ -63,8 +67,8 @@ export interface SessionSubstitutionCandidateView {
  */
 export interface SessionSubstitutionView {
   readonly state: SessionSubstitutionState;
-  /** The domain-derived snapshot flag, mirrored for the restore control. */
-  readonly isSubstituted: boolean;
+  /** True only when the domain says restore is currently possible. */
+  readonly canRestore: boolean;
   readonly candidates: ReadonlyArray<SessionSubstitutionCandidateView>;
   /** Truthful limit metadata from the candidate DTO. */
   readonly candidatesLimited: boolean;
@@ -83,31 +87,34 @@ function buildCandidateView(
 }
 
 /**
- * Derives one occurrence's substitution affordance from DTO facts. A null
- * `candidates` entry (the performed exercise no longer resolves in the
- * catalog) degrades to the honest no-candidates outcome — never fabricated
- * names or unrelated suggestions.
+ * Derives one occurrence's substitution affordance from the domain-derived
+ * eligibility projection plus the resolved candidate DTOs. The blocking
+ * states map 1:1 from `blockedBy`; the purely visual candidate-presence
+ * distinction (replace vs. no-candidates) is the only decision made here.
+ * A null `candidates` entry (the performed exercise no longer resolves in
+ * the catalog) degrades to the honest no-candidates outcome — never
+ * fabricated names or unrelated suggestions.
  */
 export function buildSessionSubstitutionView(input: {
-  readonly sessionStatus: 'in-progress' | 'completed';
-  readonly isSubstituted: boolean;
-  readonly hasLoggedSets: boolean;
+  readonly eligibility: OccurrenceSubstitutionEligibilityDto;
   readonly candidates: ExerciseSubstitutionCandidatesDto | null;
 }): SessionSubstitutionView {
-  if (input.sessionStatus === 'completed') {
+  // Completed sessions are read-only: no mutation controls render at all.
+  if (input.eligibility.blockedBy === 'session-completed') {
     return {
       state: 'hidden',
-      isSubstituted: input.isSubstituted,
+      canRestore: false,
       candidates: [],
       candidatesLimited: false,
       blockedLabel: null,
     };
   }
 
-  if (input.hasLoggedSets) {
+  // Logged sets block both substitution and restore, with truthful muted copy.
+  if (input.eligibility.blockedBy === 'logged-sets') {
     return {
       state: 'blocked-logged-sets',
-      isSubstituted: input.isSubstituted,
+      canRestore: false,
       candidates: [],
       candidatesLimited: false,
       blockedLabel: SUBSTITUTION_BLOCKED_LABEL,
@@ -119,20 +126,22 @@ export function buildSessionSubstitutionView(input: {
       ? []
       : input.candidates.candidates.map(buildCandidateView);
 
-  if (input.isSubstituted) {
+  // A mutable, substituted occurrence can always restore.
+  if (input.eligibility.canRestore) {
     return {
       state: 'restore-available',
-      isSubstituted: true,
+      canRestore: true,
       candidates,
       candidatesLimited: input.candidates?.isLimited ?? false,
       blockedLabel: null,
     };
   }
 
+  // Visual-only distinction: mutable occurrence, no matching candidates.
   if (candidates.length === 0) {
     return {
       state: 'no-candidates',
-      isSubstituted: false,
+      canRestore: false,
       candidates: [],
       candidatesLimited: false,
       blockedLabel: null,
@@ -141,7 +150,7 @@ export function buildSessionSubstitutionView(input: {
 
   return {
     state: 'replace',
-    isSubstituted: false,
+    canRestore: false,
     candidates,
     candidatesLimited: input.candidates?.isLimited ?? false,
     blockedLabel: null,

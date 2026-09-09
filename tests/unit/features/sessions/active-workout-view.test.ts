@@ -58,6 +58,7 @@ function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]
     authoredExerciseId: 'ex-bench',
     performedExerciseId: 'ex-bench',
     isSubstituted: false,
+    substitutionEligibility: { blockedBy: null, canRestore: false },
     order: 1,
     prescription: rep(),
     sets: [],

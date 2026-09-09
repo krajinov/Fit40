@@ -29,11 +29,12 @@ interface SessionExerciseSwapPanelProps {
   readonly workoutOrder: number;
   /**
    * The substitution affordance data of this occurrence, derived server-side
-   * by the pure view mapper (replace / restore-available states). Hidden and
-   * blocked states never render this panel at all.
+   * from the domain's eligibility projection by the pure view mapper (replace
+   * / restore-available states). Hidden and blocked states never render this
+   * panel at all.
    */
   readonly substitution: {
-    readonly isSubstituted: boolean;
+    readonly canRestore: boolean;
     readonly candidates: ReadonlyArray<SessionSubstitutionCandidateView>;
     readonly candidatesLimited: boolean;
   };
@@ -45,8 +46,9 @@ interface SessionExerciseSwapPanelProps {
  * navigation and form submission work with zero extra client state — and the
  * submit posts to `substituteExerciseAction` through `useActionState`. The
  * restore control is a separate native form posting to
- * `restoreExerciseAction`, rendered only when the occurrence is currently
- * substituted (the pure view mapper already decided that).
+ * `restoreExerciseAction`, rendered only when the domain's eligibility
+ * projection says restore is currently possible (`canRestore`, already
+ * decided upstream of this component).
  *
  * Expected action errors surface as user-facing copy via
  * `sessionActionErrorLabel`; `SESSION_MODIFIED` additionally triggers the
@@ -106,7 +108,7 @@ export function SessionExerciseSwapPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      {substitution.isSubstituted && (
+      {substitution.canRestore && (
         <form action={restoreFormAction}>
           <button
             type="submit"
@@ -173,7 +175,7 @@ export function SessionExerciseSwapPanel({
           }}
         />
       )}
-      {substitution.isSubstituted && !restoreState.ok && (
+      {substitution.canRestore && !restoreState.ok && (
         <SessionActionError
           error={{
             code: restoreState.error.code,

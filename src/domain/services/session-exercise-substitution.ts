@@ -18,6 +18,11 @@
  *   explicitly delete the logged sets first — nothing is silently
  *   discarded or relabeled.
  * - Restore returns the occurrence to performed-as-authored identity.
+ *
+ * The same rules are exposed as a read-only eligibility projection
+ * (`resolveOccurrenceSubstitutionEligibility`): persistence, application
+ * DTOs, and presentation consume it and never re-derive a blocking rule
+ * from raw session facts.
  */
 
 import type { ExerciseLog, WorkoutSession } from '@/domain/entities/workout-session';
@@ -60,6 +65,21 @@ export interface OccurrenceSubstitutionState {
 // ─── Guards ─────────────────────────────────────────────────────────────────
 
 /**
+ * The shared blocking rule: a completed session and an occurrence with ANY
+ * logged set are both immutable for substitution and restore. The mutation
+ * guards and the eligibility projection below consume this single
+ * definition — nobody re-derives it.
+ */
+function occurrenceSubstitutionBlock(
+  session: WorkoutSession,
+  log: ExerciseLog,
+): OccurrenceSubstitutionBlock | null {
+  if (session.completedAt !== null) return 'session-completed';
+  if (log.sets.length > 0) return 'logged-sets';
+  return null;
+}
+
+/**
  * Loads the occurrence and enforces the shared preconditions: the session
  * must be in progress, the occurrence must exist, and it must have zero
  * logged sets.
@@ -81,7 +101,8 @@ function loadMutableOccurrence(
     });
   }
 
-  if (log.sets.length > 0) {
+  // The completed case returned above, so a block here is the logged-set rule.
+  if (occurrenceSubstitutionBlock(session, log) === 'logged-sets') {
     return err({
       code: 'EXERCISE_HAS_LOGGED_SETS',
       exerciseOrder,
@@ -158,5 +179,41 @@ export function resolveOccurrenceSubstitutionState(log: ExerciseLog): Occurrence
     authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId,
     isSubstituted: log.performedExerciseId !== log.authoredExerciseId,
+  };
+}
+
+// ─── Eligibility (read-only projection) ─────────────────────────────────────
+
+/** Why an occurrence's substitution/restore is currently blocked; null = mutable. */
+export type OccurrenceSubstitutionBlock =
+  | 'session-completed'
+  | 'logged-sets';
+
+/** Derived substitution eligibility of one occurrence. Never persisted. */
+export interface OccurrenceSubstitutionEligibility {
+  readonly isSubstituted: boolean;
+  /** Null when the occurrence is currently mutable. */
+  readonly blockedBy: OccurrenceSubstitutionBlock | null;
+  /** True only for a currently substituted, mutable occurrence. */
+  readonly canRestore: boolean;
+}
+
+/**
+ * Derives whether one occurrence may currently be substituted or restored —
+ * the same rules the mutation guards enforce, exposed as a projection. When
+ * both blocks apply, the completed-session block wins, mirroring the guards'
+ * `SESSION_ALREADY_COMPLETED` precedence. Persistence, application DTOs, and
+ * presentation all consume this; nobody re-derives mutability from raw facts.
+ */
+export function resolveOccurrenceSubstitutionEligibility(
+  session: WorkoutSession,
+  log: ExerciseLog,
+): OccurrenceSubstitutionEligibility {
+  const state = resolveOccurrenceSubstitutionState(log);
+  const blockedBy = occurrenceSubstitutionBlock(session, log);
+  return {
+    isSubstituted: state.isSubstituted,
+    blockedBy,
+    canRestore: state.isSubstituted && blockedBy === null,
   };
 }

@@ -27,6 +27,7 @@ export type SessionActionErrorCode =
   | 'EXERCISE_HAS_LOGGED_SETS'
   | 'EXERCISE_OCCURRENCE_SKIPPED'
   | 'SUBSTITUTION_NO_CHANGE'
+  | 'ADJUSTMENT_NO_CHANGE'
   | 'EXERCISE_NOT_FOUND';
 
 export interface SessionActionError {

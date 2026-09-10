@@ -15,6 +15,7 @@ describe('shouldRefreshAfterSessionMutationError', () => {
   it.each([
     'SESSION_MODIFIED',
     'SUBSTITUTION_NO_CHANGE',
+    'ADJUSTMENT_NO_CHANGE',
     'EXERCISE_HAS_LOGGED_SETS',
     'SESSION_ALREADY_COMPLETED',
     'NOT_ENROLLED',

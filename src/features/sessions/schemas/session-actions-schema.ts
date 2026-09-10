@@ -82,3 +82,19 @@ export const restoreExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
 });
+
+/**
+ * Skip (M10): the occurrence marked as explicitly not performed in this
+ * session. No userId — identity comes from the trusted authenticated
+ * session, never from client input.
+ */
+export const skipExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+});
+
+/** Unskip (M10): the occurrence reverted back to not-skipped. */
+export const unskipExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+});

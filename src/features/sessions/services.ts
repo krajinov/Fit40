@@ -6,8 +6,10 @@ import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-se
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { RestoreSessionExerciseUseCase } from '@/application/use-cases/restore-session-exercise';
+import { SkipSessionExerciseUseCase } from '@/application/use-cases/skip-session-exercise';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
 import { SubstituteSessionExerciseUseCase } from '@/application/use-cases/substitute-session-exercise';
+import { UnskipSessionExerciseUseCase } from '@/application/use-cases/unskip-session-exercise';
 import { UpdateSessionSetUseCase } from '@/application/use-cases/update-session-set';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import { getScheduledWorkoutUseCase } from '@/features/programs/services';
@@ -53,6 +55,14 @@ export const substituteSessionExerciseUseCase = new SubstituteSessionExerciseUse
 );
 
 export const restoreSessionExerciseUseCase = new RestoreSessionExerciseUseCase(
+  workoutSessionRepository,
+);
+
+export const skipSessionExerciseUseCase = new SkipSessionExerciseUseCase(
+  workoutSessionRepository,
+);
+
+export const unskipSessionExerciseUseCase = new UnskipSessionExerciseUseCase(
   workoutSessionRepository,
 );
 

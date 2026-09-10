@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema } from '@/features/sessions/schemas/session-actions-schema';
+import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema } from '@/features/sessions/schemas/session-actions-schema';
 
 describe('logSetSchema', () => {
   it('parses valid rep set input', () => {
@@ -136,5 +136,45 @@ describe('restoreExerciseSchema', () => {
   it('rejects a negative exercise order', () => {
     const r = restoreExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: -1 });
     expect(r.success).toBe(false);
+  });
+});
+
+describe.each([
+  ['skipExerciseSchema', skipExerciseSchema],
+  ['unskipExerciseSchema', unskipExerciseSchema],
+] as const)('%s', (_name, schema) => {
+  it('parses valid input', () => {
+    const r = schema.safeParse({ sessionId: 's-1', exerciseOrder: 1 });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects missing values', () => {
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ sessionId: 's-1' }).success).toBe(false);
+    expect(schema.safeParse({ exerciseOrder: 1 }).success).toBe(false);
+  });
+
+  it('rejects an invalid order (zero, negative, non-integer)', () => {
+    expect(schema.safeParse({ sessionId: 's-1', exerciseOrder: 0 }).success).toBe(false);
+    expect(schema.safeParse({ sessionId: 's-1', exerciseOrder: -1 }).success).toBe(false);
+    expect(schema.safeParse({ sessionId: 's-1', exerciseOrder: 2.5 }).success).toBe(false);
+  });
+
+  it('rejects a non-numeric string order instead of coercing it', () => {
+    const r = schema.safeParse({ sessionId: 's-1', exerciseOrder: 'not-a-number' });
+    expect(r.success).toBe(false);
+  });
+
+  it('coerces a numeric-string order the way FormData delivers it', () => {
+    const r = schema.safeParse({ sessionId: 's-1', exerciseOrder: '2' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.exerciseOrder).toBe(2);
+  });
+
+  it('never accepts a userId field as trusted input', () => {
+    const r = schema.safeParse({ sessionId: 's-1', exerciseOrder: 1, userId: 'attacker' });
+    if (!r.success) return;
+    expect('userId' in r.data).toBe(false);
   });
 });

@@ -207,10 +207,13 @@ describe('session-action-labels / sessionActionErrorLabel', () => {
       'This exercise could not be found in the session. Reload the page to see the latest state.',
     );
     expect(sessionActionErrorLabel('EXERCISE_HAS_LOGGED_SETS', 'fallback')).toBe(
-      'This exercise has logged sets. Delete them first to swap the exercise.',
+      'This exercise has logged sets. Delete them first before it can be skipped or swapped.',
     );
     expect(sessionActionErrorLabel('SUBSTITUTION_NO_CHANGE', 'fallback')).toBe(
       'That exercise is already selected here. Reloading the latest state…',
+    );
+    expect(sessionActionErrorLabel('ADJUSTMENT_NO_CHANGE', 'fallback')).toBe(
+      'That exercise is already in this state. Reloading the latest workout…',
     );
     expect(sessionActionErrorLabel('EXERCISE_NOT_FOUND', 'fallback')).toBe(
       'That exercise is no longer available in the exercise catalog.',

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
+  WorkoutSessionDto,
   WorkoutSessionExerciseDto,
+  WorkoutSessionMetricsDto,
   WorkoutSessionSetDto,
 } from '@/application/dto/workout-session';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
@@ -66,6 +68,22 @@ function log(
   };
 }
 
+/**
+ * A skipped occurrence fixture (M10): the persisted flag plus the domain's
+ * eligibility projection of a mutable skipped occurrence.
+ */
+function skippedLog(
+  order: number,
+  exerciseId: string,
+  prescription: RepPrescription = threeByEightToTen,
+): WorkoutSessionExerciseDto {
+  return log(order, exerciseId, prescription, [], {
+    isSkipped: true,
+    substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
+    adjustmentEligibility: { isSkipped: true, blockedBy: null, canSkip: false, canUnskip: true },
+  });
+}
+
 /** A substitution candidates DTO built from plain candidate facts. */
 function candidatesDto(
   sourceExerciseId: string,
@@ -90,6 +108,29 @@ function candidatesDto(
       difficulty: 'intermediate',
       matchTier: 'same-pattern-same-muscle',
     })),
+  };
+}
+
+/** A minimal session DTO around given logs, metrics and domain-owned totals. */
+function sessionDto(
+  logs: WorkoutSessionExerciseDto[],
+  metrics: WorkoutSessionMetricsDto,
+  totals: { prescribedSets: number; skippedExerciseCount: number } = {
+    prescribedSets: 0,
+    skippedExerciseCount: 0,
+  },
+): WorkoutSessionDto {
+  return {
+    sessionId: 's-1',
+    scheduledWorkoutId: 'sw-1',
+    workoutId: 'w-1',
+    status: 'in-progress',
+    startedAt: '2026-09-01T17:00:00.000Z',
+    completedAt: null,
+    exerciseLogs: logs,
+    metrics,
+    prescribedSets: totals.prescribedSets,
+    skippedExerciseCount: totals.skippedExerciseCount,
   };
 }
 
@@ -529,6 +570,142 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
     expect(cards.every((c) => c.logger === null)).toBe(true);
   });
 
+  describe('skip display (M10)', () => {
+    it('gives a skipped occurrence the skipped kind with top precedence', () => {
+      // The skipped fixture sits first in log order with zero sets — the
+      // raw facts would otherwise mark it `active`. Skipped wins, and the
+      // NEXT non-skipped under-prescribed log becomes the active target.
+      const logs = [skippedLog(1, 'ex-1'), log(2, 'ex-2', threeByEightToTen, [])];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null, null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.kind).toBe('skipped');
+      expect(cards[1]?.kind).toBe('active');
+    });
+
+    it('badges a skipped occurrence neutrally with the locked copy', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.badge).toEqual({
+        style: 'neutral',
+        label: 'Skipped',
+        mobileVisible: true,
+      });
+    });
+
+    it('carries no logger on a skipped occurrence — even in progress, even with a target', () => {
+      // The target at the skipped position exists here deliberately: the
+      // mapper must still refuse to render a logger for a skipped log.
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [increaseFrom60],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.logger).toBeNull();
+    });
+
+    it('keeps the skipped card identity, prescription and order intact', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Bench Press');
+      expect(cards[0]?.prescriptionLabel).toBe('3 × 8–10');
+      expect(cards[0]?.order).toBe(1);
+      expect(cards[0]?.equipmentLabel).toBe('Barbell');
+    });
+
+    it('maps the adjustment affordance from the domain eligibility, not raw facts', () => {
+      // The eligibility says blocked — the mapper must not soften it even
+      // though the raw DTO carries zero logged sets.
+      const cards = buildSessionExerciseCardViews({
+        logs: [
+          log(1, 'ex-1', threeByEightToTen, [], {
+            adjustmentEligibility: {
+              isSkipped: false,
+              blockedBy: 'logged-sets',
+              canSkip: false,
+              canUnskip: false,
+            },
+          }),
+        ],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.adjustment.state).toBe('blocked-logged-sets');
+      expect(cards[0]?.adjustment.blockedLabel).toBe(
+        'Delete your logged sets to skip this exercise.',
+      );
+    });
+
+    it('maps the adjustment affordance to skipped for a mutable skipped occurrence', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.adjustment.state).toBe('skipped');
+    });
+
+    it('keeps the substitution affordance hidden for a skipped occurrence', () => {
+      // The domain already blocks substitution while skipped; the view must
+      // not contradict it (M10 F4 — no swap controls on a skipped card).
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.substitution.state).toBe('hidden');
+      expect(cards[0]?.kind).toBe('skipped');
+    });
+
+    it('marks multiple skipped occurrences skipped while a done one stays done', () => {
+      const logs = [
+        skippedLog(1, 'ex-1'),
+        log(2, 'ex-2', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+        skippedLog(3, 'ex-3'),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null, null, null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.kind).toBe('skipped');
+      expect(cards[1]?.kind).toBe('done');
+      expect(cards[2]?.kind).toBe('skipped');
+    });
+  });
+
   describe('substitution display (M9)', () => {
     const substitutionCatalog = new Map([
       ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
@@ -778,21 +955,27 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
 });
 
 describe('active-workout-views / buildSessionProgress', () => {
-  it('sums prescribed sets across logs and computes the percentage', () => {
+  it('uses the domain-owned prescribedSets denominator and computes the percentage', () => {
     const logs = [
       log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 50)]),
       log(2, 'ex-2', threeByFortySeconds, []),
     ];
-    const progress = buildSessionProgress(logs, {
+    const metrics = {
       totalSets: 1,
       totalReps: 10,
       totalDurationSeconds: 0,
       volume: 500,
-    });
+    };
+    // The domain already excluded nothing here: 6 prescribed sets across both
+    // non-skipped occurrences.
+    const progress = buildSessionProgress(
+      sessionDto(logs, metrics, { prescribedSets: 6, skippedExerciseCount: 0 }),
+    );
 
     expect(progress).toEqual({
       loggedSets: 1,
       prescribedSets: 6,
+      skippedCount: 0,
       percentage: 17,
       repsLabel: '10 reps',
       volumeLabel: '500 kg',
@@ -806,25 +989,52 @@ describe('active-workout-views / buildSessionProgress', () => {
       repSet(3, 10, 50),
       repSet(4, 10, 50),
     ])];
-    const progress = buildSessionProgress(logs, {
-      totalSets: 4,
-      totalReps: 40,
-      totalDurationSeconds: 0,
-      volume: 2000,
-    });
+    const progress = buildSessionProgress(
+      sessionDto(logs, {
+        totalSets: 4,
+        totalReps: 40,
+        totalDurationSeconds: 0,
+        volume: 2000,
+      }, { prescribedSets: 3, skippedExerciseCount: 0 }),
+    );
 
     expect(progress.percentage).toBe(100);
     expect(progress.prescribedSets).toBe(3);
   });
 
   it('renders 0% when the snapshot has no logs', () => {
-    const progress = buildSessionProgress([], {
-      totalSets: 0,
-      totalReps: 0,
-      totalDurationSeconds: 0,
-      volume: 0,
-    });
+    const progress = buildSessionProgress(
+      sessionDto([], {
+        totalSets: 0,
+        totalReps: 0,
+        totalDurationSeconds: 0,
+        volume: 0,
+      }),
+    );
 
+    expect(progress.percentage).toBe(0);
+  });
+
+  it('never re-sums per-log prescriptions — the DTO totals are the only source', () => {
+    // Fixture deliberately contradicts the raw log facts: the session DTO
+    // says 4 prescribed sets across the non-skipped occurrences while the
+    // raw logs would sum to 6 (3+3). The mapper must consume the DTO's
+    // domain-owned totals and ignore the logs entirely.
+    const logs = [
+      log(1, 'ex-1', threeByEightToTen, []),
+      log(2, 'ex-2', threeByEightToTen, [], { isSkipped: true }),
+    ];
+    const progress = buildSessionProgress(
+      sessionDto(logs, {
+        totalSets: 0,
+        totalReps: 0,
+        totalDurationSeconds: 0,
+        volume: 0,
+      }, { prescribedSets: 4, skippedExerciseCount: 1 }),
+    );
+
+    expect(progress.prescribedSets).toBe(4);
+    expect(progress.skippedCount).toBe(1);
     expect(progress.percentage).toBe(0);
   });
 });

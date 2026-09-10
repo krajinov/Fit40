@@ -7,6 +7,8 @@ import type { SessionExerciseCardView } from '@/features/sessions/active-workout
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
+import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
+import { SKIPPED_HINT_LABEL } from '@/features/sessions/session-adjustment-views';
 
 interface SessionExerciseCardProps {
   readonly card: SessionExerciseCardView;
@@ -46,6 +48,7 @@ export function SessionExerciseCard({
 }: SessionExerciseCardProps) {
   const logger = card.logger;
   const isDone = card.kind === 'done';
+  const isSkipped = card.kind === 'skipped';
 
   return (
     <article
@@ -67,14 +70,16 @@ export function SessionExerciseCard({
           {isDone ? <Check className="size-3.5 md:size-4" /> : card.order}
         </span>
 
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[15px] font-semibold text-ink md:text-[17px]">{card.name}</h2>
+        <div className={cn('min-w-0 flex-1', isSkipped && 'text-ink-2')}>
+          <h2 className={cn('text-[15px] font-semibold md:text-[17px]', isSkipped ? 'text-ink-2' : 'text-ink')}>
+            {card.name}
+          </h2>
           {card.originallyName !== null && (
             <p className="text-[11px] text-ink-3 md:text-xs">
               Originally: {card.originallyName}
             </p>
           )}
-          <p className="text-xs text-ink-2 md:text-sm">
+          <p className={cn('text-xs md:text-sm', isSkipped ? 'text-ink-3' : 'text-ink-2')}>
             {card.prescriptionLabel}
             {card.equipmentLabel !== null && ` · ${card.equipmentLabel}`}
           </p>
@@ -87,6 +92,10 @@ export function SessionExerciseCard({
           {card.badge.label}
         </Badge>
       </div>
+
+      {isSkipped && (
+        <p className="text-xs text-ink-3 md:text-[13px]">{SKIPPED_HINT_LABEL}</p>
+      )}
 
       {card.setRows.length > 0 && (
         <ul className="flex flex-col gap-1.5 md:gap-2">
@@ -189,6 +198,24 @@ export function SessionExerciseCard({
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}
           substitution={card.substitution}
+        />
+      )}
+
+      {/* M10 skip affordance: derived entirely from the pure view mapper's
+          state — no skip rules live in this component. The domain's
+          eligibility projection already freezes a completed session to
+          `hidden`, so read-only rendering needs no extra guard here. */}
+      {card.adjustment.state === 'blocked-logged-sets' && (
+        <p className="text-xs text-ink-3 md:text-[13px]">{card.adjustment.blockedLabel}</p>
+      )}
+      {(card.adjustment.state === 'open' || card.adjustment.state === 'skipped') && (
+        <SessionExerciseAdjustPanel
+          sessionId={sessionId}
+          exerciseOrder={log.order}
+          programSlug={programSlug}
+          weekNumber={weekNumber}
+          workoutOrder={workoutOrder}
+          state={card.adjustment.state}
         />
       )}
     </article>

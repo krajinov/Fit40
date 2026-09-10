@@ -10,13 +10,15 @@
  * - Rx lines omit rest seconds: the session snapshot does not expose
  *   `restSeconds` (reported gap, never fabricated).
  * - A completed session renders no logger (mutations are in-progress only).
+ * - A skipped occurrence renders as its own card kind — muted, badged
+ *   "Skipped", no logger — and is never the active logger target (M10).
  */
 
 import type { ExerciseTargetDto } from '@/application/dto/exercise';
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
+  WorkoutSessionDto,
   WorkoutSessionExerciseDto,
-  WorkoutSessionMetricsDto,
   WorkoutSessionSetDto,
 } from '@/application/dto/workout-session';
 import type { EquipmentType } from '@/domain/types/exercise';
@@ -31,9 +33,14 @@ import {
   buildSessionSubstitutionView,
   type SessionSubstitutionView,
 } from '@/features/sessions/session-substitution-views';
+import {
+  buildSessionAdjustmentView,
+  type SessionAdjustmentView,
+  SKIPPED_BADGE_LABEL,
+} from '@/features/sessions/session-adjustment-views';
 
 /** How one exercise log is presented on the session screen. */
-export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming';
+export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming' | 'skipped';
 
 export interface SessionSetRowView {
   readonly setNumber: number;
@@ -67,11 +74,15 @@ export interface SessionExerciseCardView {
   readonly logger: SessionLoggerView | null;
   /** The M9 substitution affordance of this occurrence. */
   readonly substitution: SessionSubstitutionView;
+  /** The M10 skip affordance of this occurrence. */
+  readonly adjustment: SessionAdjustmentView;
 }
 
 export interface SessionProgressView {
   readonly loggedSets: number;
   readonly prescribedSets: number;
+  /** How many occurrences are skipped; "· N skipped" renders only when > 0. */
+  readonly skippedCount: number;
   readonly percentage: number;
   readonly repsLabel: string;
   readonly volumeLabel: string;
@@ -128,6 +139,8 @@ function buildBadge(
       };
     case 'upcoming':
       return { style: 'neutral', label: 'Upcoming', mobileVisible: false };
+    case 'skipped':
+      return { style: 'neutral', label: SKIPPED_BADGE_LABEL, mobileVisible: true };
   }
 }
 
@@ -139,7 +152,11 @@ export interface SessionExerciseCatalogMeta {
 
 export interface SessionExerciseCardsInput {
   readonly logs: ReadonlyArray<WorkoutSessionExerciseDto>;
-  /** Position-aligned with `logs`; null when no target resolved. */
+  /**
+   * Position-aligned with `logs`; null when no target resolved or the
+   * occurrence is skipped (a target is never requested for one — see
+   * `resolveSnapshotTargets` in `active-workout-view.ts`).
+   */
   readonly targets: ReadonlyArray<ExerciseTargetDto | null>;
   readonly catalogByExerciseId: ReadonlyMap<string, SessionExerciseCatalogMeta>;
   /**
@@ -158,25 +175,36 @@ export interface SessionExerciseCardsInput {
 /**
  * Builds one card view per session exercise log, in log order.
  *
- * `active` is the FIRST log with fewer logged sets than prescribed (an
- * in-progress session only); `partial` covers out-of-order or unfinished
- * work; `upcoming` is untouched. A completed session never marks anything
- * active and carries no logger (mutations are in-progress only).
+ * `active` is the FIRST non-skipped log with fewer logged sets than
+ * prescribed (an in-progress session only); `partial` covers out-of-order or
+ * unfinished work; `upcoming` is untouched. A skipped occurrence is its own
+ * kind with TOP precedence — never active, never carrying a logger. A
+ * completed session never marks anything active and carries no logger
+ * (mutations are in-progress only).
  */
 export function buildSessionExerciseCardViews(
   input: SessionExerciseCardsInput,
 ): ReadonlyArray<SessionExerciseCardView> {
+  // The active logger target is the FIRST non-skipped log with fewer logged
+  // sets than prescribed — the persisted skip decision (`log.isSkipped`,
+  // never a zero-set inference) keeps skipped occurrences out of this search.
   const activeOrder =
     input.sessionStatus === 'in-progress'
-      ? (input.logs.find((log) => log.sets.length < log.prescription.sets)?.order ?? null)
+      ? (input.logs.find(
+          (log) => !log.isSkipped && log.sets.length < log.prescription.sets,
+        )?.order ?? null)
       : null;
 
   return input.logs.map((log, index) => {
     const meta = input.catalogByExerciseId.get(log.performedExerciseId);
     const authoredMeta = input.catalogByExerciseId.get(log.authoredExerciseId);
     const prescribed = log.prescription.sets;
-    const kind: SessionExerciseKind =
-      log.sets.length >= prescribed
+    // A skipped occurrence is its own kind with top precedence: it renders
+    // skipped regardless of order (and, in invariant-violating fixtures,
+    // logged sets) — done/active/partial/upcoming only apply to the rest.
+    const kind: SessionExerciseKind = log.isSkipped
+      ? 'skipped'
+      : log.sets.length >= prescribed
         ? 'done'
         : log.order === activeOrder
           ? 'active'
@@ -199,8 +227,11 @@ export function buildSessionExerciseCardViews(
       prescriptionLabel: formatPrescription(log.prescription),
       badge: buildBadge(kind, log.sets.length, prescribed),
       setRows: log.sets.map(formatSetRowView),
+      // A skipped occurrence carries no logger — and no recommendation
+      // callout inside it — even on an in-progress screen: there is nothing
+      // to log on a skipped occurrence.
       logger:
-        input.sessionStatus === 'in-progress'
+        input.sessionStatus === 'in-progress' && !log.isSkipped
           ? buildSessionLoggerView(log, input.targets[index] ?? null)
           : null,
       substitution: buildSessionSubstitutionView({
@@ -208,22 +239,24 @@ export function buildSessionExerciseCardViews(
         candidates:
           input.candidatesByPerformedExerciseId.get(log.performedExerciseId) ?? null,
       }),
+      adjustment: buildSessionAdjustmentView(log.adjustmentEligibility),
     };
   });
 }
 
 /**
- * Builds the session progress summary from the snapshot prescriptions (the
- * denominator) and the session metrics (the numerator).
+ * Builds the session progress summary from the DOMAIN-OWNED snapshot totals
+ * and the session metrics (the numerator).
+ *
+ * The denominator is `session.prescribedSets` — prescribed sets across the
+ * NON-skipped occurrences, computed by the domain
+ * (`resolveSessionPrescriptionTotals`) — never re-summed here (F5). The
+ * skipped count likewise comes straight from `session.skippedExerciseCount`.
+ * Logged metrics and completion semantics are unchanged by skip decisions:
+ * a skipped occurrence logs no sets and adds nothing to the numerator.
  */
-export function buildSessionProgress(
-  logs: ReadonlyArray<WorkoutSessionExerciseDto>,
-  metrics: WorkoutSessionMetricsDto,
-): SessionProgressView {
-  let prescribedSets = 0;
-  for (const log of logs) {
-    prescribedSets += log.prescription.sets;
-  }
+export function buildSessionProgress(session: WorkoutSessionDto): SessionProgressView {
+  const { prescribedSets, skippedExerciseCount, metrics } = session;
 
   const percentage =
     prescribedSets === 0
@@ -233,6 +266,7 @@ export function buildSessionProgress(
   return {
     loggedSets: metrics.totalSets,
     prescribedSets,
+    skippedCount: skippedExerciseCount,
     percentage,
     repsLabel: `${metrics.totalReps} reps`,
     volumeLabel: formatVolumeLabel(metrics.volume),

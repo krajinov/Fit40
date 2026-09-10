@@ -23,6 +23,12 @@ vi.mock('@/features/sessions/actions/substitute-exercise', () => ({
 vi.mock('@/features/sessions/actions/restore-exercise', () => ({
   restoreExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/skip-exercise', () => ({
+  skipExerciseAction: vi.fn(),
+}));
+vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
+  unskipExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -34,6 +40,7 @@ import type {
   SessionSubstitutionCandidateView,
   SessionSubstitutionView,
 } from '@/features/sessions/session-substitution-views';
+import type { SessionAdjustmentView } from '@/features/sessions/session-adjustment-views';
 import { UpcomingExerciseList } from '@/features/sessions/components/UpcomingExerciseList';
 
 declare global {
@@ -96,6 +103,8 @@ const mutableSubstitution: SessionSubstitutionView = {
   blockedLabel: null,
 };
 
+const openAdjustment: SessionAdjustmentView = { state: 'open', blockedLabel: null };
+
 function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): SessionExerciseCardView {
   return {
     order: 2,
@@ -108,6 +117,7 @@ function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): Session
     setRows: [],
     logger,
     substitution: mutableSubstitution,
+    adjustment: openAdjustment,
     ...overrides,
   };
 }

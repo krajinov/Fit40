@@ -4,6 +4,7 @@ import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-sessio
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
+import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
 
 interface UpcomingExerciseListProps {
   /** Untouched exercise rows, in log order. */
@@ -50,7 +51,8 @@ function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
  * pre-redesign screen offered a logger on every exercise. The locked frames
  * show these rows quiet, so each row keeps a subtle expand affordance that
  * reveals the same set logger — the visual stays as designed while
- * out-of-order logging remains possible.
+ * out-of-order logging remains possible. Skipped occurrences never appear
+ * here (they render as their own muted card kind in the main list, M10).
  */
 export function UpcomingExerciseList({
   upcoming,
@@ -140,6 +142,21 @@ export function UpcomingExerciseList({
                         substitution={exercise.substitution}
                       />
                     </div>
+                  )}
+                  {/* …and the prime skip moment (M10): untouched occurrences
+                      are exactly the ones the domain lets the user skip, so
+                      the Skip control (pure view-mapper state) sits in the
+                      same expand. */}
+                  {(exercise.adjustment.state === 'open' ||
+                    exercise.adjustment.state === 'skipped') && (
+                    <SessionExerciseAdjustPanel
+                      sessionId={sessionId}
+                      exerciseOrder={log.order}
+                      programSlug={programSlug}
+                      weekNumber={weekNumber}
+                      workoutOrder={workoutOrder}
+                      state={exercise.adjustment.state}
+                    />
                   )}
                 </div>
               </details>

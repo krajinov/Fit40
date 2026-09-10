@@ -9,6 +9,11 @@ import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 import type { WorkoutSession, WorkoutSessionStatus } from '@/domain/entities/workout-session';
 import { getSessionStatus } from '@/domain/entities/workout-session';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import {
+  resolveOccurrenceSubstitutionEligibility,
+  resolveOccurrenceSubstitutionState,
+  type OccurrenceSubstitutionBlock,
+} from '@/domain/services/session-exercise-substitution';
 
 export type WorkoutSessionSetDto =
   | {
@@ -27,7 +32,23 @@ export type WorkoutSessionSetDto =
     };
 
 export interface WorkoutSessionExerciseDto {
-  readonly exerciseId: string;
+  /** The exercise the program's template authored for this occurrence. */
+  readonly authoredExerciseId: string;
+  /** The exercise actually performed (equals authored when not substituted). */
+  readonly performedExerciseId: string;
+  /**
+   * Derived: the performed identity diverged from the authored one. The
+   * domain owns this derivation (`resolveOccurrenceSubstitutionState`);
+   * it is never persisted or stored alongside the session.
+   */
+  readonly isSubstituted: boolean;
+  /**
+   * Whether the occurrence may currently be substituted or restored — the
+   * domain's mutation rules, projected by
+   * `resolveOccurrenceSubstitutionEligibility`. Presentation consumes this
+   * instead of re-deriving blocking from raw session facts.
+   */
+  readonly substitutionEligibility: OccurrenceSubstitutionEligibilityDto;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly sets: ReadonlyArray<WorkoutSessionSetDto>;
@@ -38,6 +59,17 @@ export interface WorkoutSessionMetricsDto {
   readonly totalReps: number;
   readonly totalDurationSeconds: number;
   readonly volume: number;
+}
+
+/**
+ * The domain's substitution-mutation eligibility of one occurrence, stripped
+ * of branded ids and fully serializable. `blockedBy` is null when the
+ * occurrence is currently mutable; `canRestore` is true only for a currently
+ * substituted, mutable occurrence.
+ */
+export interface OccurrenceSubstitutionEligibilityDto {
+  readonly blockedBy: OccurrenceSubstitutionBlock | null;
+  readonly canRestore: boolean;
 }
 
 export interface WorkoutSessionDto {
@@ -89,12 +121,22 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     status: getSessionStatus(session),
     startedAt: session.startedAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
-    exerciseLogs: session.exerciseLogs.map((log) => ({
-      exerciseId: log.exerciseId as string,
-      order: log.order,
-      prescription: log.prescription,
-      sets: log.sets.map(serializeSetLog),
-    })),
+    exerciseLogs: session.exerciseLogs.map((log) => {
+      const substitution = resolveOccurrenceSubstitutionState(log);
+      const eligibility = resolveOccurrenceSubstitutionEligibility(session, log);
+      return {
+        authoredExerciseId: substitution.authoredExerciseId as string,
+        performedExerciseId: substitution.performedExerciseId as string,
+        isSubstituted: substitution.isSubstituted,
+        substitutionEligibility: {
+          blockedBy: eligibility.blockedBy,
+          canRestore: eligibility.canRestore,
+        },
+        order: log.order,
+        prescription: log.prescription,
+        sets: log.sets.map(serializeSetLog),
+      };
+    }),
     metrics: {
       totalSets: metrics.totalSets,
       totalReps: metrics.totalReps,

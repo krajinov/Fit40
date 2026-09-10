@@ -1,10 +1,13 @@
 import { CompleteWorkoutSessionUseCase } from '@/application/use-cases/complete-workout-session';
 import { DeleteSessionSetUseCase } from '@/application/use-cases/delete-session-set';
+import { GetActiveWorkoutExerciseDataUseCase } from '@/application/use-cases/get-active-workout-exercise-data';
 import { GetNextExerciseTargetsUseCase } from '@/application/use-cases/get-next-exercise-targets';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
+import { RestoreSessionExerciseUseCase } from '@/application/use-cases/restore-session-exercise';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
+import { SubstituteSessionExerciseUseCase } from '@/application/use-cases/substitute-session-exercise';
 import { UpdateSessionSetUseCase } from '@/application/use-cases/update-session-set';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import { getScheduledWorkoutUseCase } from '@/features/programs/services';
@@ -42,6 +45,19 @@ export const completeWorkoutSessionUseCase = new CompleteWorkoutSessionUseCase(
 export const getNextExerciseTargetsUseCase = new GetNextExerciseTargetsUseCase(
   exerciseRepository,
   trainingHistoryRepository,
+);
+
+export const substituteSessionExerciseUseCase = new SubstituteSessionExerciseUseCase(
+  workoutSessionRepository,
+  exerciseRepository,
+);
+
+export const restoreSessionExerciseUseCase = new RestoreSessionExerciseUseCase(
+  workoutSessionRepository,
+);
+
+export const getActiveWorkoutExerciseDataUseCase = new GetActiveWorkoutExerciseDataUseCase(
+  exerciseRepository,
 );
 
 export const resolveNextWorkoutUseCase = new ResolveNextWorkoutUseCase(

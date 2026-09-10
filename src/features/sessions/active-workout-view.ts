@@ -14,13 +14,17 @@
  * computed under the snapshot prescriptions; they read only the latest
  * COMPLETED performance, so they stay stable mid-session.
  *
- * Exercise names/equipment are resolved server-side from the exercise
- * catalog by the snapshot's exercise ids. The session DTO carries neither
+ * Exercise metadata (M9): names, equipment, authored context and
+ * substitution candidates ALL resolve from ONE exercise-catalog read per
+ * request (GetActiveWorkoutExerciseDataUseCase) — performed ids, authored
+ * ids, and every distinct performed source's candidate set, with no
+ * per-source repository reads (no N+1). The session DTO carries neither
  * names nor equipment; a catalog entry that no longer exists renders the
- * truthful fallback "Exercise N" and omits equipment — never fabricated.
+ * truthful fallback "Exercise N", omits equipment, and omits the
+ * "Originally" line — never fabricated.
  */
 
-import type { ExerciseTargetDto } from '@/application/dto/exercise';
+import type { ExerciseSummaryDto, ExerciseTargetDto } from '@/application/dto/exercise';
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type { UserDto } from '@/application/dto/user';
 import type { WorkoutSessionDto } from '@/application/dto/workout-session';
@@ -33,7 +37,11 @@ import {
   type SessionProgressView,
 } from '@/features/sessions/active-workout-views';
 import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
-import { getNextExerciseTargetsUseCase, getWorkoutSessionUseCase } from '@/features/sessions/services';
+import {
+  getActiveWorkoutExerciseDataUseCase,
+  getNextExerciseTargetsUseCase,
+  getWorkoutSessionUseCase,
+} from '@/features/sessions/services';
 
 export type ActiveWorkoutScreenState =
   | 'not-enrolled'
@@ -77,7 +85,7 @@ async function resolveSnapshotTargets(
     readonly prescription: WorkoutSessionDto['exerciseLogs'][number]['prescription'];
   }[] = [];
   for (const log of session.exerciseLogs) {
-    const idResult = createExerciseId(log.exerciseId);
+    const idResult = createExerciseId(log.performedExerciseId);
     if (!idResult.ok) {
       // Defensive: catalog ids are non-empty by the schema's constraints, so
       // this is unreachable — treat like a personalization failure and omit.
@@ -102,33 +110,32 @@ async function resolveSnapshotTargets(
 
 /**
  * Resolves catalog metadata (name, equipment) for the session snapshot's
- * exercise logs — from the scheduled workout DTO already loaded for the
- * screen, by exercise id. No extra data access: the session DTO carries
- * neither names nor equipment, but the occurrence's exercise list does.
+ * exercise logs — performed AND authored ids — from the summaries map the
+ * ONE catalog read already produced.
  *
- * A log whose exercise is absent from the scheduled workout (the catalog or
- * the program changed since the snapshot) renders the truthful "Exercise N"
- * fallback and omits equipment — never fabricated.
+ * A log whose performed exercise is absent from the catalog (the catalog
+ * changed since the snapshot) renders the truthful "Exercise N" fallback
+ * and omits equipment — never fabricated.
  */
 function resolveCatalogMeta(
   session: WorkoutSessionDto,
-  workout: ScheduledWorkoutDetailDto,
+  summariesByExerciseId: ReadonlyMap<string, ExerciseSummaryDto>,
 ): ReadonlyMap<string, SessionExerciseCatalogMeta> {
-  const byExerciseId = new Map<string, SessionExerciseCatalogMeta>();
-  for (const exercise of workout.workout.exercises) {
-    if (!byExerciseId.has(exercise.exerciseId)) {
-      byExerciseId.set(exercise.exerciseId, {
-        name: exercise.exerciseName,
-        equipment: exercise.equipment,
-      });
-    }
-  }
-
   const resolved = new Map<string, SessionExerciseCatalogMeta>();
   for (const log of session.exerciseLogs) {
-    const match = byExerciseId.get(log.exerciseId);
-    if (match !== undefined) {
-      resolved.set(log.exerciseId, match);
+    const performed = summariesByExerciseId.get(log.performedExerciseId);
+    if (performed !== undefined) {
+      resolved.set(log.performedExerciseId, {
+        name: performed.name,
+        equipment: performed.equipment,
+      });
+    }
+    const authored = summariesByExerciseId.get(log.authoredExerciseId);
+    if (authored !== undefined) {
+      resolved.set(log.authoredExerciseId, {
+        name: authored.name,
+        equipment: authored.equipment,
+      });
     }
   }
   return resolved;
@@ -188,7 +195,19 @@ export async function buildActiveWorkoutView(
   }
 
   const targets = await resolveSnapshotTargets(user.id, session);
-  const catalogByExerciseId = resolveCatalogMeta(session, workout);
+
+  // THE ONE exercise-catalog read of this request: performed metadata,
+  // authored metadata, and the substitution candidates of every distinct
+  // performed exercise all resolve from it (see the use case). A subsequent
+  // re-render of this view performs its own single read.
+  const exerciseData = await getActiveWorkoutExerciseDataUseCase.execute({
+    displayExerciseIds: session.exerciseLogs.flatMap((log) => [
+      log.performedExerciseId,
+      log.authoredExerciseId,
+    ]),
+    performedExerciseIds: session.exerciseLogs.map((log) => log.performedExerciseId),
+  });
+  const catalogByExerciseId = resolveCatalogMeta(session, exerciseData.summariesByExerciseId);
 
   const screenState: ActiveWorkoutScreenState =
     session.status === 'completed' ? 'completed' : 'in-progress';
@@ -200,6 +219,7 @@ export async function buildActiveWorkoutView(
       logs: session.exerciseLogs,
       targets,
       catalogByExerciseId,
+      candidatesByPerformedExerciseId: exerciseData.candidatesByPerformedExerciseId,
       sessionStatus: screenState,
     }),
     progress: buildSessionProgress(session.exerciseLogs, session.metrics),

@@ -68,7 +68,7 @@ async function completeSession(
     id: sessionId, userId: uid(userId), enrollmentId,
     scheduledWorkoutId: swid(scheduledWorkoutId), workoutId: wId,
     startedAt: new Date('2026-01-02T10:00:00Z'),
-    exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
+    exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!sr.ok) throw Error();
   const logged = logSessionSet(sr.data, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
@@ -208,7 +208,7 @@ describe('GetProgramEnrollmentUseCase', () => {
       id: 's-ip', userId: uid('user-a'), enrollmentId: enid('enr-a'),
       scheduledWorkoutId: swid('sched-w1'), workoutId: createWorkoutIdForTest('wo-1'),
       startedAt: new Date('2026-01-02T10:00:00Z'),
-      exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
+      exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
     });
     if (!sr.ok) throw Error();
     await sessionRepo.save(sr.data);

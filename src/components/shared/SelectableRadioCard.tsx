@@ -11,6 +11,8 @@ export interface SelectableRadioCardProps {
   readonly name: string;
   readonly value: string;
   readonly label: string;
+  /** Optional muted secondary line under the label (e.g. "Dumbbell · Chest"). */
+  readonly hint?: string;
   readonly defaultChecked?: boolean;
   readonly className?: string;
 }
@@ -19,6 +21,7 @@ export function SelectableRadioCard({
   name,
   value,
   label,
+  hint,
   defaultChecked,
   className,
 }: SelectableRadioCardProps) {
@@ -45,7 +48,12 @@ export function SelectableRadioCard({
       >
         <span className="size-2.5 scale-0 rounded-pill bg-primary transition-transform group-has-checked/radio:scale-100" />
       </span>
-      <span>{label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block">{label}</span>
+        {hint !== undefined && (
+          <span className="mt-0.5 block text-[13px] font-normal text-ink-3">{hint}</span>
+        )}
+      </span>
     </label>
   );
 }

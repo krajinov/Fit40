@@ -292,6 +292,8 @@ npx drizzle-kit migrate
 | `workout_sessions` | `workout_id` | Find sessions by workout |
 | `workout_sessions` | `started_at` | Time-range queries |
 | `exercise_logs` | `session_id` | Load logs for a session |
+| `exercise_logs` | `exercise_id` | FK restrict checks against `exercises` |
+| `exercise_logs` | `authored_exercise_id` | FK restrict checks against `exercises` (authored exercise) |
 | `set_logs` | `exercise_log_id` | Load sets for a log |
 | `program_enrollments` | `user_id` | Find enrollments by user |
 | `program_enrollments` | `program_id` | Find enrollments by program |
@@ -342,9 +344,28 @@ ALTER TABLE set_logs ADD CONSTRAINT chk_reps CHECK (reps > 0);
 | `workout_sessions.user_id` | `users.id` | CASCADE |
 | `workout_sessions.workout_id` | `workouts.id` | RESTRICT |
 | `exercise_logs.session_id` | `workout_sessions.id` | CASCADE |
+| `exercise_logs.exercise_id` | `exercises.id` | RESTRICT |
+| `exercise_logs.authored_exercise_id` | `exercises.id` | RESTRICT |
 | `set_logs.exercise_log_id` | `exercise_logs.id` | CASCADE |
 | `program_enrollments.user_id` | `users.id` | CASCADE |
 | `program_enrollments.program_id` | `training_programs.id` | RESTRICT |
+
+### Exercise identity on `exercise_logs` (authored vs. performed)
+
+Each exercise log carries two exercise identities, both snapshotted at
+session start:
+
+- **`exercise_id` (PERFORMED)** — the exercise actually trained. Substitution
+  (M9) rewrites only this column. History and progression queries key on it.
+- **`authored_exercise_id` (AUTHORED)** — the exercise the workout template
+  prescribed; the occurrence contract. Nullable only for pre-M9 legacy rows,
+  where the performed id *is* the authored id (hydration falls back, and the
+  next save heals the NULL).
+
+The pair `(session_id, exercise_order)` — not the exercise id — is the
+occurrence identity, so the same exercise can appear as two distinct
+occurrences in one session. Full substitution semantics:
+[`docs/exercise-substitution.md`](exercise-substitution.md).
 
 ---
 

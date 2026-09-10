@@ -145,7 +145,11 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
   const logInputs = orderedLogs.map((row) => {
     const context = `exercise_logs (session_id=${row.sessionId}, exercise_order=${row.exerciseOrder})`;
     return {
-      exerciseId: parseExerciseId(row.exerciseId, context),
+      // exercise_id persists the PERFORMED exercise; authored_exercise_id
+      // persists the AUTHORED one. Rows written before the authored column
+      // existed store NULL, so authored falls back to the performed id.
+      performedExerciseId: parseExerciseId(row.exerciseId, context),
+      authoredExerciseId: parseExerciseId(row.authoredExerciseId ?? row.exerciseId, context),
       order: row.exerciseOrder,
       prescription: prescriptionFromColumns(row, context),
       restSeconds: row.restSeconds,
@@ -210,7 +214,10 @@ export function mapExerciseLogToRow(
   return {
     sessionId,
     exerciseOrder: log.order,
-    exerciseId: log.exerciseId,
+    // exercise_id persists the PERFORMED exercise; authored_exercise_id
+    // persists the AUTHORED one (the occurrence contract from the template).
+    exerciseId: log.performedExerciseId,
+    authoredExerciseId: log.authoredExerciseId,
     ...prescriptionToColumns(log.prescription),
     restSeconds: log.restSeconds,
   };

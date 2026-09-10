@@ -50,7 +50,7 @@ function makeCompletedSession(id: string, completedAt: Date) {
     scheduledWorkoutId: swid('sched-wo1'),
     workoutId: wid('wo-1'),
     startedAt: new Date('2026-01-01T10:00:00Z'),
-    exerciseLogs: [{ exerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
+    exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!created.ok) throw new Error(created.error.message);
   const withSet = logSessionSet(created.data, {

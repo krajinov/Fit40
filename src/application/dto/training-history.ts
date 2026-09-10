@@ -23,6 +23,10 @@ import type {
   TrainingHistoryEntry,
 } from '@/application/ports/training-history-repository';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import {
+  resolveOccurrenceSubstitutionEligibility,
+  resolveOccurrenceSubstitutionState,
+} from '@/domain/services/session-exercise-substitution';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -232,12 +236,22 @@ export function toTrainingHistorySessionDto(
     programName: entry.programName,
     startedAt: entry.session.startedAt.toISOString(),
     completedAt: entry.session.completedAt.toISOString(),
-    exerciseLogs: entry.session.exerciseLogs.map((log) => ({
-      exerciseId: log.exerciseId,
-      order: log.order,
-      prescription: log.prescription,
-      sets: log.sets.map(serializeSetLog),
-    })),
+    exerciseLogs: entry.session.exerciseLogs.map((log) => {
+      const substitution = resolveOccurrenceSubstitutionState(log);
+      const eligibility = resolveOccurrenceSubstitutionEligibility(entry.session, log);
+      return {
+        authoredExerciseId: substitution.authoredExerciseId,
+        performedExerciseId: substitution.performedExerciseId,
+        isSubstituted: substitution.isSubstituted,
+        substitutionEligibility: {
+          blockedBy: eligibility.blockedBy,
+          canRestore: eligibility.canRestore,
+        },
+        order: log.order,
+        prescription: log.prescription,
+        sets: log.sets.map(serializeSetLog),
+      };
+    }),
     metrics: calculateSessionMetrics(entry.session),
   };
 }

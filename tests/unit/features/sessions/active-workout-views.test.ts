@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
+import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
   WorkoutSessionExerciseDto,
   WorkoutSessionSetDto,
@@ -49,8 +50,45 @@ function log(
   exerciseId: string,
   prescription: RepPrescription,
   sets: WorkoutSessionSetDto[],
+  overrides: Partial<WorkoutSessionExerciseDto> = {},
 ): WorkoutSessionExerciseDto {
-  return { exerciseId, order, prescription, sets };
+  return {
+    authoredExerciseId: exerciseId,
+    performedExerciseId: exerciseId,
+    isSubstituted: false,
+    substitutionEligibility: { blockedBy: null, canRestore: false },
+    order,
+    prescription,
+    sets,
+    ...overrides,
+  };
+}
+
+/** A substitution candidates DTO built from plain candidate facts. */
+function candidatesDto(
+  sourceExerciseId: string,
+  candidates: ReadonlyArray<{
+    readonly exerciseId: string;
+    readonly name: string;
+    readonly equipment?: 'bodyweight' | 'dumbbell' | 'barbell';
+    readonly primaryMuscle?: 'chest' | 'quadriceps';
+  }>,
+  isLimited = false,
+): ExerciseSubstitutionCandidatesDto {
+  return {
+    sourceExerciseId,
+    isLimited,
+    candidates: candidates.map((candidate) => ({
+      exerciseId: candidate.exerciseId,
+      name: candidate.name,
+      slug: `slug-${candidate.exerciseId}`,
+      equipment: candidate.equipment ?? 'dumbbell',
+      primaryMuscle: candidate.primaryMuscle ?? 'chest',
+      movementPattern: 'push-horizontal',
+      difficulty: 'intermediate',
+      matchTier: 'same-pattern-same-muscle',
+    })),
+  };
 }
 
 function loadedSets(reps: number[], load: number): PreviousExerciseSetDto[] {
@@ -417,6 +455,9 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
     ['ex-1', { name: 'Bench Press', equipment: 'barbell' as const }],
   ]);
 
+  /** No substitution candidates resolved — the honest empty state. */
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
   it('marks the first under-prescribed log active and the rest by set count', () => {
     const logs = [
       log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 9, 50)]),
@@ -427,6 +468,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null, null, null],
       catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -446,6 +488,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null],
       catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -458,6 +501,7 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null],
       catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'in-progress',
     });
 
@@ -474,12 +518,260 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
       logs,
       targets: [null, null],
       catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
       sessionStatus: 'completed',
     });
 
     expect(cards[0]?.kind).toBe('partial');
     expect(cards[1]?.kind).toBe('upcoming');
     expect(cards.every((c) => c.logger === null)).toBe(true);
+  });
+
+  describe('substitution display (M9)', () => {
+    const substitutionCatalog = new Map([
+      ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
+      ['ex-db-bench', { name: 'Dumbbell Bench Press', equipment: 'dumbbell' as const }],
+    ]);
+
+    it('shows the performed exercise as the primary name and its equipment, with "Originally" context', () => {
+      const logs = [
+        log(1, 'ex-bench', threeByEightToTen, [], {
+          performedExerciseId: 'ex-db-bench',
+          isSubstituted: true,
+        }),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Dumbbell Bench Press');
+      expect(cards[0]?.equipmentLabel).toBe('Dumbbell');
+      expect(cards[0]?.originallyName).toBe('Bench Press');
+      // The authored prescription snapshot carries over — never converted.
+      expect(cards[0]?.prescriptionLabel).toBe('3 × 8–10');
+    });
+
+    it('omits "Originally" when the occurrence is not substituted', () => {
+      const logs = [log(1, 'ex-bench', threeByEightToTen, [])];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Bench Press');
+      expect(cards[0]?.originallyName).toBeNull();
+    });
+
+    it('omits "Originally" when the authored exercise cannot be resolved', () => {
+      const logs = [
+        log(1, 'ex-gone', threeByEightToTen, [], {
+          performedExerciseId: 'ex-db-bench',
+          isSubstituted: true,
+        }),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: substitutionCatalog, // ex-gone absent
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Dumbbell Bench Press');
+      expect(cards[0]?.originallyName).toBeNull();
+    });
+
+    it('a chained substitution still shows the ORIGINAL authored exercise', () => {
+      // Bench → DB Bench (order 1), then DB Bench → Push-up: the snapshot's
+      // authoredExerciseId is never rewritten, so "Originally" stays the
+      // original authored exercise.
+      const logs = [
+        log(1, 'ex-bench', threeByEightToTen, [], {
+          performedExerciseId: 'ex-pushup',
+          isSubstituted: true,
+        }),
+      ];
+      const chainedCatalog = new Map([
+        ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
+        ['ex-pushup', { name: 'Push-up', equipment: 'bodyweight' as const }],
+      ]);
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null],
+        catalogByExerciseId: chainedCatalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Push-up');
+      expect(cards[0]?.originallyName).toBe('Bench Press');
+    });
+
+    it('maps the affordance states from the domain-derived eligibility projection', () => {
+      const withCandidates = new Map([
+        ['ex-bench', candidatesDto('ex-bench', [{ exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' }])],
+      ]);
+
+      const base = {
+        targets: [null] as (ExerciseTargetDto | null)[],
+        catalogByExerciseId: substitutionCatalog,
+        sessionStatus: 'in-progress' as const,
+      };
+
+      // replace: mutable, unsubstituted, candidates available.
+      const replace = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(replace[0]?.substitution.state).toBe('replace');
+      expect(replace[0]?.substitution.candidates[0]?.metaLabel).toBe('Dumbbell · Chest');
+
+      // blocked-logged-sets: the domain's eligibility — NOT the DTO's set
+      // rows — decides (zero sets in the DTO here, blocked anyway).
+      const blocked = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: 'logged-sets', canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(blocked[0]?.substitution.state).toBe('blocked-logged-sets');
+
+      // restore-available: substituted and mutable per the domain.
+      const restore = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+            substitutionEligibility: { blockedBy: null, canRestore: true },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(restore[0]?.substitution.state).toBe('restore-available');
+      expect(restore[0]?.substitution.canRestore).toBe(true);
+
+      // no-candidates: not substituted, mutable, no matching candidates.
+      const none = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [])],
+        candidatesByPerformedExerciseId: noCandidates,
+      });
+      expect(none[0]?.substitution.state).toBe('no-candidates');
+
+      // hidden: the domain's eligibility — NOT the screen's sessionStatus —
+      // decides (an in-progress screen here, hidden anyway).
+      const hidden = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: 'session-completed', canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+      expect(hidden[0]?.substitution.state).toBe('hidden');
+    });
+  });
+
+  // Locks the M9 review fix: the affordance consumes the domain's
+  // eligibility projection and never re-derives blocking from the DTO's raw
+  // facts. Every fixture below deliberately contradicts the eligibility so
+  // any reintroduced hasLoggedSets/sessionStatus logic in the mapper fails.
+  describe('substitution eligibility consumption (M9 regression)', () => {
+    const withCandidates = new Map([
+      ['ex-bench', candidatesDto('ex-bench', [{ exerciseId: 'ex-db-bench', name: 'Dumbbell Bench Press' }])],
+    ]);
+
+    const base = {
+      targets: [null] as (ExerciseTargetDto | null)[],
+      catalogByExerciseId: new Map<string, { name: string; equipment: 'barbell' }>([
+        ['ex-bench', { name: 'Bench Press', equipment: 'barbell' }],
+        ['ex-db-bench', { name: 'Dumbbell Bench Press', equipment: 'barbell' }],
+      ]),
+      sessionStatus: 'in-progress' as const,
+    };
+
+    it('renders replace — not blocked — when the DTO carries a logged set but the domain says mutable', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)])], // sets present
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      // The mapper must consume eligibility; the raw set rows are not its input.
+      expect(cards[0]?.substitution.state).toBe('replace');
+      expect(cards[0]?.substitution.blockedLabel).toBeNull();
+    });
+
+    it('renders restore-available — not blocked — for a substituted occurrence with a logged set but mutable eligibility', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [repSet(1, 10, 50)], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+            substitutionEligibility: { blockedBy: null, canRestore: true },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      expect(cards[0]?.substitution.state).toBe('restore-available');
+      expect(cards[0]?.substitution.canRestore).toBe(true);
+    });
+
+    it('keeps mutation controls on a completed screen whose eligibility is still mutable', () => {
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        sessionStatus: 'completed',
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            substitutionEligibility: { blockedBy: null, canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: withCandidates,
+      });
+
+      // The substitution affordance follows the domain eligibility, not the
+      // screen status: a mutable occurrence stays swappable.
+      expect(cards[0]?.substitution.state).toBe('replace');
+    });
+
+    it('restore availability comes only from the domain projection, not from the substituted flag', () => {
+      // Candidates are keyed by the PERFORMED id after the swap.
+      const performedCandidates = new Map([
+        ['ex-db-bench', candidatesDto('ex-db-bench', [{ exerciseId: 'ex-bench', name: 'Bench Press' }])],
+      ]);
+      const cards = buildSessionExerciseCardViews({
+        ...base,
+        logs: [
+          log(1, 'ex-bench', threeByEightToTen, [], {
+            performedExerciseId: 'ex-db-bench',
+            isSubstituted: true,
+            // Substituted, but the domain has NOT granted restore.
+            substitutionEligibility: { blockedBy: null, canRestore: false },
+          }),
+        ],
+        candidatesByPerformedExerciseId: performedCandidates,
+      });
+
+      // With canRestore false the affordance treats the occurrence as
+      // unsubstituted: replace (candidates exist), no restore control.
+      expect(cards[0]?.substitution.state).toBe('replace');
+      expect(cards[0]?.substitution.canRestore).toBe(false);
+    });
   });
 });
 

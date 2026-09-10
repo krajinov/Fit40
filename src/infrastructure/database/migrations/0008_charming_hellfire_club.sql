@@ -1,0 +1,3 @@
+ALTER TABLE "exercise_logs" ADD COLUMN "authored_exercise_id" text;--> statement-breakpoint
+ALTER TABLE "exercise_logs" ADD CONSTRAINT "exercise_logs_authored_exercise_id_exercises_id_fk" FOREIGN KEY ("authored_exercise_id") REFERENCES "public"."exercises"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "exercise_logs_authored_exercise_id_idx" ON "exercise_logs" USING btree ("authored_exercise_id");

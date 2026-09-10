@@ -119,8 +119,8 @@ function makeSession(
     workoutId: workoutId(overrides.workoutId ?? 'wo-beginner-strength-a'),
     startedAt: new Date(overrides.startedAt ?? '2025-01-01T10:00:00Z'),
     exerciseLogs: [
-      { exerciseId: exerciseId('ex-002'), order: 1, prescription: reps(), restSeconds: 90 },
-      { exerciseId: exerciseId('ex-015'), order: 2, prescription: duration(), restSeconds: 60 },
+      { authoredExerciseId: exerciseId('ex-002'), order: 1, prescription: reps(), restSeconds: 90 },
+      { authoredExerciseId: exerciseId('ex-015'), order: 2, prescription: duration(), restSeconds: 60 },
     ],
   });
   if (!result.ok) throw new Error(result.error.message);

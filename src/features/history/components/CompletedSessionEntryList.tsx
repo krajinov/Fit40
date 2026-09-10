@@ -14,7 +14,10 @@ interface CompletedSessionEntryListProps {
  * (e.g. a finisher repeat) render as separate cards and never collapse.
  * Historical truth: set lines render the persisted snapshot; current catalog
  * data only supplies the name/equipment labels, with positional fallbacks
- * when an exercise can no longer be resolved.
+ * when an exercise can no longer be resolved. The PERFORMED exercise is the
+ * primary identity; a substituted occurrence carries the read-only
+ * "Originally: …" authored-exercise context line (history has no
+ * substitution controls).
  */
 export function CompletedSessionEntryList({ entries }: CompletedSessionEntryListProps) {
   if (entries.length === 0) {
@@ -43,6 +46,9 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
             )}
             <p className="text-sm text-ink-3">{entry.prescriptionLabel}</p>
           </div>
+          {entry.originallyName !== null && (
+            <p className="mt-0.5 text-xs text-ink-3">Originally: {entry.originallyName}</p>
+          )}
           {entry.equipmentLabel !== null && (
             <p className="mt-0.5 text-sm text-ink-2">{entry.equipmentLabel}</p>
           )}

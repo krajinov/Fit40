@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-session';
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
+import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 
 interface UpcomingExerciseListProps {
   /** Untouched exercise rows, in log order. */
@@ -13,6 +14,31 @@ interface UpcomingExerciseListProps {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+}
+
+/**
+ * Title area of one upcoming row: the performed exercise as the primary
+ * name, with the same subtle "Originally: …" context used elsewhere when the
+ * occurrence is substituted (the view mapper already resolved the authored
+ * name; null renders no line).
+ */
+interface UpcomingExerciseTitleProps {
+  readonly exercise: SessionExerciseCardView;
+}
+
+function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-sm font-semibold text-ink-2 md:text-base">
+        {exercise.name}
+      </span>
+      {exercise.originallyName !== null && (
+        <span className="block truncate text-[11px] text-ink-3 md:text-xs">
+          Originally: {exercise.originallyName}
+        </span>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -56,9 +82,7 @@ export function UpcomingExerciseList({
                 >
                   {exercise.order}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-2 md:text-base">
-                  {exercise.name}
-                </span>
+                <UpcomingExerciseTitle exercise={exercise} />
                 <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
                   {exercise.prescriptionLabel}
                 </span>
@@ -76,9 +100,7 @@ export function UpcomingExerciseList({
                   >
                     {exercise.order}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-2 md:text-base">
-                    {exercise.name}
-                  </span>
+                  <UpcomingExerciseTitle exercise={exercise} />
                   <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
                     {exercise.prescriptionLabel}
                   </span>
@@ -102,6 +124,23 @@ export function UpcomingExerciseList({
                     quietLabel={logger.quietLabel}
                     hintLabel={logger.hintLabel}
                   />
+                  {/* Untouched rows are the prime substitution moment: the
+                      swap affordance (pure view-mapper state) sits under the
+                      logger inside the same expand. */}
+                  {(exercise.substitution.state === 'replace' ||
+                    exercise.substitution.state === 'restore-available' ||
+                    exercise.substitution.state === 'no-candidates') && (
+                    <div className="pt-3">
+                      <SessionExerciseSwapPanel
+                        sessionId={sessionId}
+                        exerciseOrder={log.order}
+                        programSlug={programSlug}
+                        weekNumber={weekNumber}
+                        workoutOrder={workoutOrder}
+                        substitution={exercise.substitution}
+                      />
+                    </div>
+                  )}
                 </div>
               </details>
             </li>

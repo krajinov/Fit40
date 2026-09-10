@@ -12,6 +12,7 @@ import { substituteExerciseAction } from '@/features/sessions/actions/substitute
 import { restoreExerciseAction } from '@/features/sessions/actions/restore-exercise';
 import { SessionActionError } from '@/features/sessions/components/SessionActionError';
 import { sessionActionErrorLabel } from '@/features/sessions/session-action-labels';
+import { shouldRefreshAfterSessionMutationError } from '@/features/sessions/session-mutation-refresh';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
 import {
   SUBSTITUTION_EMPTY_CANDIDATES_LABEL,
@@ -20,21 +21,6 @@ import {
 } from '@/features/sessions/session-substitution-views';
 
 const initialState: SessionActionState = { ok: true };
-
-/**
- * Stale-state outcomes of a substitution/restore submit: the page's view of
- * the occurrence no longer matches the persisted session, so the caller must
- * reload the latest state. `SESSION_MODIFIED` means another tab changed the
- * session (optimistic-concurrency version); `SUBSTITUTION_NO_CHANGE` means
- * another tab already applied the same swap/restore, so this tab still shows
- * an outdated exercise identity. Ordinary validation/business errors (e.g.
- * `EXERCISE_HAS_LOGGED_SETS`, `VALIDATION_ERROR`) are about the persisted
- * state itself, not staleness, and must NOT trigger a reload.
- */
-function isStaleSessionState(state: SessionActionState): boolean {
-  if (state.ok) return false;
-  return state.error.code === 'SESSION_MODIFIED' || state.error.code === 'SUBSTITUTION_NO_CHANGE';
-}
 
 interface SessionExerciseSwapPanelProps {
   readonly sessionId: string;
@@ -66,10 +52,14 @@ interface SessionExerciseSwapPanelProps {
  * decided upstream of this component).
  *
  * Expected action errors surface as user-facing copy via
- * `sessionActionErrorLabel`; stale-state outcomes (`SESSION_MODIFIED`,
- * `SUBSTITUTION_NO_CHANGE` — another tab already changed/applied the same
- * swap) additionally trigger the established reload/retry pattern
- * (`router.refresh()`), matching every other session mutation.
+ * `sessionActionErrorLabel`; whether a failed submit must additionally
+ * trigger the established reload/retry pattern (`router.refresh()`, matching
+ * every other session mutation) is decided centrally by
+ * `shouldRefreshAfterSessionMutationError` (`session-mutation-refresh.ts`):
+ * the stale server-state codes (`SESSION_MODIFIED`,
+ * `SUBSTITUTION_NO_CHANGE`, `EXERCISE_HAS_LOGGED_SETS`,
+ * `SESSION_ALREADY_COMPLETED`, `NOT_ENROLLED`) reload; ordinary
+ * request/input failures never do.
  */
 export function SessionExerciseSwapPanel({
   sessionId,
@@ -91,7 +81,7 @@ export function SessionExerciseSwapPanel({
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
     const state = await substituteExerciseAction(formData);
-    if (isStaleSessionState(state)) {
+    if (!state.ok && shouldRefreshAfterSessionMutationError(state.error.code)) {
       router.refresh();
     }
     return state;
@@ -107,7 +97,7 @@ export function SessionExerciseSwapPanel({
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
     const state = await restoreExerciseAction(formData);
-    if (isStaleSessionState(state)) {
+    if (!state.ok && shouldRefreshAfterSessionMutationError(state.error.code)) {
       router.refresh();
     }
     return state;

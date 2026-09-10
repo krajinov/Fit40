@@ -1,14 +1,18 @@
 /**
  * @vitest-environment jsdom
  *
- * Regression tests for the stale-tab fix (PR #12 Codex P2): the swap panel
- * must reload the latest state not only on `SESSION_MODIFIED` but also on
- * `SUBSTITUTION_NO_CHANGE` — another tab may have already applied the same
- * substitution or restore, leaving this tab's exercise identity outdated.
- * Ordinary validation/business errors and successes must never reload.
- * Rendered with react-dom (React 19 act) because the behavior under test is
- * the form action wiring (`useActionState` + `router.refresh()`), which a
- * pure function test cannot cover.
+ * Wiring tests for the swap panel's stale-state reload (PR #12 Codex P2):
+ * both the substitute and the restore path must apply the centralized
+ * predicate `shouldRefreshAfterSessionMutationError`
+ * (`session-mutation-refresh.ts`) — reloading on all five stale server-state
+ * outcomes (`SESSION_MODIFIED`, `SUBSTITUTION_NO_CHANGE`,
+ * `EXERCISE_HAS_LOGGED_SETS`, `SESSION_ALREADY_COMPLETED`, `NOT_ENROLLED`)
+ * and never on ordinary request/input failures or success. The
+ * code-by-code matrix of the predicate itself lives in
+ * `session-mutation-refresh.test.ts`. Rendered with react-dom (React 19 act)
+ * because the behavior under test is the form action wiring
+ * (`useActionState` + `router.refresh()`), which a pure function test cannot
+ * cover.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -133,26 +137,22 @@ afterEach(async () => {
 });
 
 describe('SessionExerciseSwapPanel stale-state reload (substitute path)', () => {
-  it('reloads on SESSION_MODIFIED (another tab changed the session)', async () => {
-    substituteExecute.mockResolvedValue(errorState('SESSION_MODIFIED', 'stale version'));
+  it.each([
+    'SESSION_MODIFIED',
+    'SUBSTITUTION_NO_CHANGE',
+    'EXERCISE_HAS_LOGGED_SETS',
+    'SESSION_ALREADY_COMPLETED',
+    'NOT_ENROLLED',
+  ] as const)('reloads on stale server-state outcome %s', async (code) => {
+    substituteExecute.mockResolvedValue(errorState(code, 'stale server state'));
     const panel = await renderPanel();
     await panel.submitSubstitute();
     expect(substituteExecute).toHaveBeenCalledTimes(1);
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reloads on SUBSTITUTION_NO_CHANGE (another tab applied the same swap)', async () => {
-    substituteExecute.mockResolvedValue(
-      errorState('SUBSTITUTION_NO_CHANGE', 'already the performed exercise'),
-    );
-    const panel = await renderPanel();
-    await panel.submitSubstitute();
-    expect(substituteExecute).toHaveBeenCalledTimes(1);
-    expect(refreshMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not reload on an ordinary business error (EXERCISE_HAS_LOGGED_SETS)', async () => {
-    substituteExecute.mockResolvedValue(errorState('EXERCISE_HAS_LOGGED_SETS', 'sets logged'));
+  it('does not reload on an ordinary request failure (EXERCISE_LOG_NOT_FOUND)', async () => {
+    substituteExecute.mockResolvedValue(errorState('EXERCISE_LOG_NOT_FOUND', 'no such occurrence'));
     const panel = await renderPanel();
     await panel.submitSubstitute();
     expect(substituteExecute).toHaveBeenCalledTimes(1);
@@ -176,26 +176,22 @@ describe('SessionExerciseSwapPanel stale-state reload (substitute path)', () => 
 });
 
 describe('SessionExerciseSwapPanel stale-state reload (restore path)', () => {
-  it('reloads on SESSION_MODIFIED (another tab changed the session)', async () => {
-    restoreExecute.mockResolvedValue(errorState('SESSION_MODIFIED', 'stale version'));
+  it.each([
+    'SESSION_MODIFIED',
+    'SUBSTITUTION_NO_CHANGE',
+    'EXERCISE_HAS_LOGGED_SETS',
+    'SESSION_ALREADY_COMPLETED',
+    'NOT_ENROLLED',
+  ] as const)('reloads on stale server-state outcome %s', async (code) => {
+    restoreExecute.mockResolvedValue(errorState(code, 'stale server state'));
     const panel = await renderPanel();
     await panel.submitRestore();
     expect(restoreExecute).toHaveBeenCalledTimes(1);
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reloads on SUBSTITUTION_NO_CHANGE (another tab restored first)', async () => {
-    restoreExecute.mockResolvedValue(
-      errorState('SUBSTITUTION_NO_CHANGE', 'already performed as authored'),
-    );
-    const panel = await renderPanel();
-    await panel.submitRestore();
-    expect(restoreExecute).toHaveBeenCalledTimes(1);
-    expect(refreshMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not reload on an ordinary business error (EXERCISE_HAS_LOGGED_SETS)', async () => {
-    restoreExecute.mockResolvedValue(errorState('EXERCISE_HAS_LOGGED_SETS', 'sets logged'));
+  it('does not reload on an ordinary request failure (EXERCISE_LOG_NOT_FOUND)', async () => {
+    restoreExecute.mockResolvedValue(errorState('EXERCISE_LOG_NOT_FOUND', 'no such occurrence'));
     const panel = await renderPanel();
     await panel.submitRestore();
     expect(restoreExecute).toHaveBeenCalledTimes(1);

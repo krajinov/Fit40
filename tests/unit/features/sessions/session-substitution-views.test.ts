@@ -183,7 +183,7 @@ describe('session-substitution-views / honest copy constants', () => {
 describe('session-action-labels / sessionActionErrorLabel', () => {
   it('maps every expected substitution error to user-facing copy', () => {
     expect(sessionActionErrorLabel('SESSION_NOT_FOUND', 'fallback')).toBe(
-      'This session no longer exists. Reloading the latest state…',
+      'This session no longer exists. Reload the page to see the latest state.',
     );
     expect(sessionActionErrorLabel('NOT_ENROLLED', 'fallback')).toBe(
       'You are no longer enrolled in this program, so this session can no longer be modified.',
@@ -192,7 +192,7 @@ describe('session-action-labels / sessionActionErrorLabel', () => {
       'This workout is already completed, so its exercises can no longer be changed.',
     );
     expect(sessionActionErrorLabel('EXERCISE_LOG_NOT_FOUND', 'fallback')).toBe(
-      'This exercise could not be found in the session. Reloading the latest state…',
+      'This exercise could not be found in the session. Reload the page to see the latest state.',
     );
     expect(sessionActionErrorLabel('EXERCISE_HAS_LOGGED_SETS', 'fallback')).toBe(
       'This exercise has logged sets. Delete them first to swap the exercise.',

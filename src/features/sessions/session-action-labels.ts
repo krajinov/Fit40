@@ -5,7 +5,10 @@
  *
  * Raw error codes never reach users. `SESSION_MODIFIED` is intentionally NOT
  * mapped here — `SessionActionError` already renders its reload/retry
- * message, and callers additionally trigger `router.refresh()` on it.
+ * message, and callers additionally trigger `router.refresh()` on it. Copy
+ * may only promise an automatic reload for codes the swap panel actually
+ * refreshes on (see `session-mutation-refresh.ts`); every other label points
+ * the user at a manual reload instead.
  *
  * This module is the single home of substitution failure copy so the two
  * actions and their tests share one deterministic mapping.
@@ -16,13 +19,13 @@ import type { SessionActionErrorCode } from '@/features/sessions/types/session-a
 export function sessionActionErrorLabel(code: SessionActionErrorCode, fallback: string): string {
   switch (code) {
     case 'SESSION_NOT_FOUND':
-      return 'This session no longer exists. Reloading the latest state…';
+      return 'This session no longer exists. Reload the page to see the latest state.';
     case 'NOT_ENROLLED':
       return 'You are no longer enrolled in this program, so this session can no longer be modified.';
     case 'SESSION_ALREADY_COMPLETED':
       return 'This workout is already completed, so its exercises can no longer be changed.';
     case 'EXERCISE_LOG_NOT_FOUND':
-      return 'This exercise could not be found in the session. Reloading the latest state…';
+      return 'This exercise could not be found in the session. Reload the page to see the latest state.';
     case 'EXERCISE_HAS_LOGGED_SETS':
       return 'This exercise has logged sets. Delete them first to swap the exercise.';
     case 'SUBSTITUTION_NO_CHANGE':

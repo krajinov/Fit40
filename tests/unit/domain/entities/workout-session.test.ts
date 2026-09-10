@@ -10,6 +10,7 @@ import {
   getSessionStatus,
   logSessionSet,
 } from '@/domain/entities/workout-session';
+import { skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -238,6 +239,35 @@ describe('createWorkoutSession', () => {
     expect(result.data.exerciseLogs[0]?.authoredExerciseId).toBe('ex-001');
     expect(result.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-009');
   });
+
+  it('defaults isSkipped to false (skip is never inferred from zero sets)', () => {
+    const result = createWorkoutSession(makeValidInput());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const log of result.data.exerciseLogs) {
+      expect(log.isSkipped).toBe(false);
+    }
+  });
+
+  it('preserves an explicit isSkipped (rehydrated skip decision)', () => {
+    const result = createWorkoutSession({
+      ...makeValidInput(),
+      exerciseLogs: [
+        {
+          authoredExerciseId: validExerciseId('ex-001'),
+          order: 1,
+          prescription: validRepScheme(),
+          restSeconds: 60,
+          isSkipped: true,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs[0]?.isSkipped).toBe(true);
+  });
 });
 
 describe('completeWorkoutSession', () => {
@@ -298,5 +328,68 @@ describe('completeWorkoutSession', () => {
     const logs = result.data.exerciseLogs;
     expect(logs[0]?.sets).toHaveLength(1);
     expect(logs[1]?.sets).toHaveLength(0);
+  });
+});
+
+describe('logSessionSet skip guard (M10)', () => {
+  it('rejects logging onto a skipped occurrence with EXERCISE_OCCURRENCE_SKIPPED', () => {
+    const skipped = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+
+    const result = logSessionSet(skipped.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 7,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('EXERCISE_OCCURRENCE_SKIPPED');
+  });
+});
+
+describe('completeWorkoutSession with skipped occurrences (M10)', () => {
+  it('rejects an all-skipped session through the unchanged completion gate', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const allSkipped = skipSessionExercise(first.data, { exerciseOrder: 2 });
+    expect(allSkipped.ok).toBe(true);
+    if (!allSkipped.ok) return;
+
+    // Skipped occurrences carry no sets, so the ≥1-logged-set gate —
+    // unchanged by M10 — keeps an all-skipped session non-completable.
+    const result = completeWorkoutSession(allSkipped.data, new Date('2025-01-01T11:00:00Z'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('CANNOT_COMPLETE_EMPTY_SESSION');
+  });
+
+  it('completes a session with one set logged while another occurrence is skipped', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 2 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const withSet = logSessionSet(first.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 7,
+    });
+    expect(withSet.ok).toBe(true);
+    if (!withSet.ok) return;
+
+    const result = completeWorkoutSession(withSet.data, new Date('2025-01-01T11:00:00Z'));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(getSessionStatus(result.data)).toBe('completed');
+    // The skip decision is frozen as part of the completed history.
+    expect(result.data.exerciseLogs[0]?.isSkipped).toBe(false);
+    expect(result.data.exerciseLogs[1]?.isSkipped).toBe(true);
   });
 });

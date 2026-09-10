@@ -153,6 +153,10 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
       order: row.exerciseOrder,
       prescription: prescriptionFromColumns(row, context),
       restSeconds: row.restSeconds,
+      // TRANSITIONAL (M10 Slice 1): the is_skipped column arrives with
+      // migration 0009 in Slice 2; until then every persisted occurrence
+      // rehydrates as not skipped. Slice 2 replaces this with row.isSkipped.
+      isSkipped: false,
     };
   });
 

@@ -18,6 +18,10 @@ import {
   resolveOccurrenceSubstitutionState,
   substituteSessionExercise,
 } from '@/domain/services/session-exercise-substitution';
+import {
+  skipSessionExercise,
+  unskipSessionExercise,
+} from '@/domain/services/session-exercise-adjustment';
 import { createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -118,6 +122,30 @@ describe('substituteSessionExercise', () => {
     if (r.ok) return;
     expect(r.error.code).toBe('SUBSTITUTION_NO_CHANGE');
   });
+
+  it('rejects a skipped occurrence: the user must unskip first (M10 F4)', () => {
+    const skipped = skipSessionExercise(session(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+
+    const r = substituteSessionExercise(skipped.data, { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_OCCURRENCE_SKIPPED');
+  });
+
+  it('allows skipping a substituted occurrence; the performed identity survives', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+
+    const r = skipSessionExercise(substituted.data, { exerciseOrder: 1 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.exerciseLogs[0]?.isSkipped).toBe(true);
+    expect(r.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-009');
+    expect(r.data.exerciseLogs[0]?.authoredExerciseId).toBe('ex-001');
+  });
 });
 
 describe('restoreSessionExercise', () => {
@@ -176,6 +204,37 @@ describe('restoreSessionExercise', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('EXERCISE_LOG_NOT_FOUND');
+  });
+
+  it('rejects restore of a skipped occurrence: the user must unskip first (M10 F4)', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const skipped = skipSessionExercise(substituted.data, { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+
+    const r = restoreSessionExercise(skipped.data, { exerciseOrder: 1 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_OCCURRENCE_SKIPPED');
+  });
+
+  it('re-enables restore after an unskip', () => {
+    const substituted = substituteSessionExercise(session(), { exerciseOrder: 1, replacementExerciseId: eid('ex-009') });
+    expect(substituted.ok).toBe(true);
+    if (!substituted.ok) return;
+    const skipped = skipSessionExercise(substituted.data, { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+    const unskipped = unskipSessionExercise(skipped.data, { exerciseOrder: 1 });
+    expect(unskipped.ok).toBe(true);
+    if (!unskipped.ok) return;
+
+    const r = restoreSessionExercise(unskipped.data, { exerciseOrder: 1 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-001');
   });
 });
 
@@ -268,6 +327,37 @@ describe('resolveOccurrenceSubstitutionEligibility', () => {
 
     expect(resolveOccurrenceSubstitutionEligibility(completed.data, log)).toEqual({
       isSubstituted: true,
+      blockedBy: 'session-completed',
+      canRestore: false,
+    });
+  });
+
+  it('blocks a skipped occurrence as skipped, and completion outranks it (M10 F4)', () => {
+    const skipped = skipSessionExercise(session(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+    const log = skipped.data.exerciseLogs[0];
+    if (log === undefined) return;
+
+    expect(resolveOccurrenceSubstitutionEligibility(skipped.data, log)).toEqual({
+      isSubstituted: false,
+      blockedBy: 'skipped',
+      canRestore: false,
+    });
+
+    // Once completed, the completed-session block outranks the skip block,
+    // mirroring the mutation guards' SESSION_ALREADY_COMPLETED precedence.
+    const withSetOnOther = logSessionSet(skipped.data, { exerciseOrder: 2, type: 'duration', durationSeconds: 30, weightKg: null, rpe: null });
+    expect(withSetOnOther.ok).toBe(true);
+    if (!withSetOnOther.ok) return;
+    const completed = completeWorkoutSession(withSetOnOther.data, new Date());
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    const completedLog = completed.data.exerciseLogs[0];
+    if (completedLog === undefined) return;
+
+    expect(resolveOccurrenceSubstitutionEligibility(completed.data, completedLog)).toEqual({
+      isSubstituted: false,
       blockedBy: 'session-completed',
       canRestore: false,
     });

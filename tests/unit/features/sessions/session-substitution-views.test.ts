@@ -112,6 +112,18 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
     expect(view.state).toBe('blocked-logged-sets');
     expect(view.canRestore).toBe(false);
   });
+
+  it('hides the swap affordance entirely for a skipped occurrence (M10 F4)', () => {
+    const view = buildSessionSubstitutionView({
+      eligibility: eligibility('skipped', true),
+      candidates: withCandidates,
+    });
+
+    expect(view.state).toBe('hidden');
+    expect(view.canRestore).toBe(false);
+    expect(view.candidates).toEqual([]);
+    expect(view.blockedLabel).toBeNull();
+  });
 });
 
 describe('session-substitution-views / no-candidates and hidden states', () => {

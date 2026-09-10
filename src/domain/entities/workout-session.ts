@@ -17,6 +17,7 @@
  */
 
 import { err, ok, type Result } from '@/domain/types/result';
+import { resolveSessionCompletionReadiness } from '@/domain/services/session-exercise-adjustment';
 
 import type {
   EnrollmentId,
@@ -67,6 +68,17 @@ export interface ExerciseLog {
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
+  /**
+   * The persisted user decision to not perform this occurrence in this
+   * session (M10). Never inferred from zero sets: an untouched occurrence
+   * is skipped only when this flag says so. Mutually exclusive with logged
+   * sets in both directions and enforced by the domain alone —
+   * `skipSessionExercise` requires zero sets and `logSessionSet` rejects a
+   * skipped occurrence; there is deliberately no database CHECK/trigger for
+   * this cross-table rule, so direct SQL could violate it. Reversible
+   * while the session is in progress; frozen at completion.
+   */
+  readonly isSkipped: boolean;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -110,6 +122,13 @@ export interface CreateExerciseLogInput {
    * performed := authored (performed-as-authored).
    */
   readonly performedExerciseId?: ExerciseId;
+  /**
+   * The persisted skip decision for rehydrating a possibly-skipped
+   * occurrence. Fresh sessions omit it: the factory then defaults to
+   * false (not skipped) — skip is a persisted fact, never inferred from
+   * zero sets.
+   */
+  readonly isSkipped?: boolean;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -182,7 +201,8 @@ export type SessionMutationError =
   | { readonly code: 'SET_NOT_FOUND'; readonly setNumber: number; readonly message: string }
   | { readonly code: 'INVALID_SET_TYPE'; readonly message: string }
   | { readonly code: 'INVALID_SET_DATA'; readonly message: string; readonly field?: string }
-  | { readonly code: 'CANNOT_COMPLETE_EMPTY_SESSION'; readonly message: string };
+  | { readonly code: 'CANNOT_COMPLETE_EMPTY_SESSION'; readonly message: string }
+  | { readonly code: 'EXERCISE_OCCURRENCE_SKIPPED'; readonly exerciseOrder: number; readonly message: string };
 
 // ─── Status ──────────────────────────────────────────────────────────────────
 
@@ -303,6 +323,7 @@ export function createWorkoutSession(
     order: log.order,
     prescription: log.prescription,
     restSeconds: log.restSeconds,
+    isSkipped: log.isSkipped ?? false,
     sets: [],
   }));
 
@@ -334,6 +355,17 @@ export function logSessionSet(
       code: 'EXERCISE_LOG_NOT_FOUND',
       exerciseOrder: input.exerciseOrder,
       message: `Exercise log with order ${input.exerciseOrder} not found in session`,
+    });
+  }
+
+  // Skip and logged sets are mutually exclusive in BOTH directions (M10):
+  // a skipped occurrence accepts no sets. The domain is the only
+  // enforcement boundary for this rule.
+  if (log.isSkipped) {
+    return err({
+      code: 'EXERCISE_OCCURRENCE_SKIPPED',
+      exerciseOrder: input.exerciseOrder,
+      message: `Exercise order ${input.exerciseOrder} is skipped; unskip it before logging sets`,
     });
   }
 
@@ -518,8 +550,13 @@ export function completeWorkoutSession(
     return err({ code: 'SESSION_ALREADY_COMPLETED', message: 'Session is already completed' });
   }
 
-  const hasAnySet = session.exerciseLogs.some((log) => log.sets.length > 0);
-  if (!hasAnySet) {
+  // The completion gate is domain-owned by the adjustment service (M10 F6,
+  // unchanged): at least one logged set anywhere in the session. Skipped
+  // occurrences carry no sets, so an all-skipped session stays
+  // non-completable through this same gate — no stricter
+  // every-non-skipped-exercise rule exists.
+  const readiness = resolveSessionCompletionReadiness(session);
+  if (!readiness.canComplete) {
     return err({
       code: 'CANNOT_COMPLETE_EMPTY_SESSION',
       message: 'Cannot complete a session with zero logged sets',

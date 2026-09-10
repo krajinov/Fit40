@@ -38,6 +38,7 @@ export function sessionActionErrorLabel(code: SessionActionErrorCode, fallback: 
     case 'SESSION_MODIFIED':
     case 'SESSION_ALREADY_EXISTS':
     case 'SET_NOT_FOUND':
+    case 'EXERCISE_OCCURRENCE_SKIPPED':
     case 'INVALID_SET_TYPE':
     case 'INVALID_SET_DATA':
     case 'CANNOT_COMPLETE_EMPTY_SESSION':

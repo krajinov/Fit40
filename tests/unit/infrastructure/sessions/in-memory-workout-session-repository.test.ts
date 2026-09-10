@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionAlreadyExistsError, SessionEnrollmentChangedError } from '@/application/ports/workout-session-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { createWorkoutSession, logSessionSet, completeWorkoutSession } from '@/domain/entities/workout-session';
+import { skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -186,5 +187,46 @@ describe('InMemoryWorkoutSessionRepository', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
     expect(await repo.findByEnrollmentAndScheduledWorkout(enid('enr-1'), sid('x'))).toBeNull();
+  });
+
+  it('round-trips a valid skipped occurrence (M10: skip is a persisted fact)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const skipped = skipSessionExercise(createTestSession(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+    await repo.save(skipped.data);
+
+    const stored = await repo.findById(skipped.data.id);
+    expect(stored?.exerciseLogs[0]?.isSkipped).toBe(true);
+    // A valid skipped occurrence round-trips with zero sets — the
+    // skip⇔sets invariant survives the save/load boundary.
+    expect(stored?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('never persists the skip+sets combination through supported mutation paths (M10)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const base = createTestSession();
+
+    // Path 1: log first — a subsequent skip is refused by the domain.
+    const logged = logSessionSet(base, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    expect(skipSessionExercise(logged.data, { exerciseOrder: 1 }).ok).toBe(false);
+
+    // Path 2: skip first — a subsequent log is refused by the domain.
+    const skipped = skipSessionExercise(base, { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+    expect(logSessionSet(skipped.data, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null }).ok).toBe(false);
+
+    // Only the valid aggregates were saved; the stored state keeps the
+    // invariant on every occurrence.
+    await repo.save(logged.data);
+    await repo.save(skipped.data);
+    for (const session of [await repo.findById(logged.data.id), await repo.findById(skipped.data.id)]) {
+      for (const log of session?.exerciseLogs ?? []) {
+        expect(!(log.isSkipped && log.sets.length > 0)).toBe(true);
+      }
+    }
   });
 });

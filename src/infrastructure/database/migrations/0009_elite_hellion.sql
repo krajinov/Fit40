@@ -1,0 +1,1 @@
+ALTER TABLE "exercise_logs" ADD COLUMN "is_skipped" boolean DEFAULT false NOT NULL;

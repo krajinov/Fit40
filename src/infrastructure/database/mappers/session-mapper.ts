@@ -153,10 +153,9 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
       order: row.exerciseOrder,
       prescription: prescriptionFromColumns(row, context),
       restSeconds: row.restSeconds,
-      // TRANSITIONAL (M10 Slice 1): the is_skipped column arrives with
-      // migration 0009 in Slice 2; until then every persisted occurrence
-      // rehydrates as not skipped. Slice 2 replaces this with row.isSkipped.
-      isSkipped: false,
+      // The persisted skip decision (M10). The column is NOT NULL DEFAULT
+      // false, so rows written before it existed hydrate as not skipped.
+      isSkipped: row.isSkipped,
     };
   });
 
@@ -224,6 +223,8 @@ export function mapExerciseLogToRow(
     authoredExerciseId: log.authoredExerciseId,
     ...prescriptionToColumns(log.prescription),
     restSeconds: log.restSeconds,
+    // The persisted skip decision rides along on every whole-aggregate save.
+    isSkipped: log.isSkipped,
   };
 }
 

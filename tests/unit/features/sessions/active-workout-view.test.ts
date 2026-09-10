@@ -58,7 +58,9 @@ function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]
     authoredExerciseId: 'ex-bench',
     performedExerciseId: 'ex-bench',
     isSubstituted: false,
+    isSkipped: false,
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    adjustmentEligibility: { isSkipped: false, blockedBy: null, canSkip: true, canUnskip: false },
     order: 1,
     prescription: rep(),
     sets: [],
@@ -91,6 +93,10 @@ function sessionDto(logs: WorkoutSessionDto['exerciseLogs']): WorkoutSessionDto 
     completedAt: null,
     exerciseLogs: logs,
     metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+    // Skip-adjusted session totals are not consumed by the view layer yet
+    // (M10 Slice 4); neutral fixture values keep this mock minimal.
+    prescribedSets: 0,
+    skippedExerciseCount: 0,
   };
 }
 

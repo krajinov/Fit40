@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -124,6 +125,15 @@ export const exerciseLogs = pgTable(
     maxReps: integer('max_reps'),
     durationSeconds: integer('duration_seconds'),
     restSeconds: integer('rest_seconds').notNull(),
+    /**
+     * The persisted user decision to not perform this occurrence in this
+     * session (M10). NOT NULL DEFAULT false: rows written before the column
+     * existed (pre-M10 legacy data) hydrate as not skipped — skip is a
+     * stored fact, never inferred from zero logged sets. The skip⇔logged-sets
+     * mutual exclusion is enforced by the domain alone; there is deliberately
+     * no database CHECK for that cross-table rule.
+     */
+    isSkipped: boolean('is_skipped').notNull().default(false),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.sessionId, table.exerciseOrder] }),

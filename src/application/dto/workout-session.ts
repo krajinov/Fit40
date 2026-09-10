@@ -8,6 +8,11 @@
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 import type { WorkoutSession, WorkoutSessionStatus } from '@/domain/entities/workout-session';
 import { getSessionStatus } from '@/domain/entities/workout-session';
+import {
+  resolveOccurrenceAdjustmentEligibility,
+  resolveSessionPrescriptionTotals,
+  type OccurrenceAdjustmentBlock,
+} from '@/domain/services/session-exercise-adjustment';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
 import {
   resolveOccurrenceSubstitutionEligibility,
@@ -43,6 +48,20 @@ export interface WorkoutSessionExerciseDto {
    */
   readonly isSubstituted: boolean;
   /**
+   * The persisted skip decision for this occurrence (M10): the user's
+   * explicit choice to not perform it in this session, never inferred from
+   * zero logged sets. Projected straight from the aggregate, like
+   * `isSubstituted` above.
+   */
+  readonly isSkipped: boolean;
+  /**
+   * Whether the occurrence's skip decision may currently change — the
+   * domain's mutation rules, projected by
+   * `resolveOccurrenceAdjustmentEligibility`. Presentation consumes this
+   * instead of re-deriving blocking from raw session facts.
+   */
+  readonly adjustmentEligibility: OccurrenceAdjustmentEligibilityDto;
+  /**
    * Whether the occurrence may currently be substituted or restored — the
    * domain's mutation rules, projected by
    * `resolveOccurrenceSubstitutionEligibility`. Presentation consumes this
@@ -72,6 +91,19 @@ export interface OccurrenceSubstitutionEligibilityDto {
   readonly canRestore: boolean;
 }
 
+/**
+ * The domain's skip-mutation eligibility of one occurrence, stripped of
+ * branded ids and fully serializable: the persisted skip decision, why it is
+ * currently frozen (`blockedBy` null = adjustable), and whether skip/unskip
+ * may run right now.
+ */
+export interface OccurrenceAdjustmentEligibilityDto {
+  readonly isSkipped: boolean;
+  readonly blockedBy: OccurrenceAdjustmentBlock | null;
+  readonly canSkip: boolean;
+  readonly canUnskip: boolean;
+}
+
 export interface WorkoutSessionDto {
   readonly sessionId: string;
   readonly scheduledWorkoutId: string;
@@ -81,6 +113,14 @@ export interface WorkoutSessionDto {
   readonly completedAt: string | null;
   readonly exerciseLogs: ReadonlyArray<WorkoutSessionExerciseDto>;
   readonly metrics: WorkoutSessionMetricsDto;
+  /**
+   * Prescribed sets across the NON-skipped occurrences — the progress
+   * denominator (F5). Domain-owned via `resolveSessionPrescriptionTotals`;
+   * never re-summed independently in this mapper.
+   */
+  readonly prescribedSets: number;
+  /** How many authored occurrences are currently skipped (domain-owned). */
+  readonly skippedExerciseCount: number;
 }
 
 // ─── Mapper ──────────────────────────────────────────────────────────────────
@@ -113,6 +153,7 @@ export function serializeSetLog(
 
 export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto {
   const metrics = calculateSessionMetrics(session);
+  const totals = resolveSessionPrescriptionTotals(session);
 
   return {
     sessionId: session.id as string,
@@ -124,24 +165,36 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     exerciseLogs: session.exerciseLogs.map((log) => {
       const substitution = resolveOccurrenceSubstitutionState(log);
       const eligibility = resolveOccurrenceSubstitutionEligibility(session, log);
+      const adjustment = resolveOccurrenceAdjustmentEligibility(session, log);
       return {
         authoredExerciseId: substitution.authoredExerciseId as string,
         performedExerciseId: substitution.performedExerciseId as string,
         isSubstituted: substitution.isSubstituted,
+        isSkipped: log.isSkipped,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,
+        },
+        adjustmentEligibility: {
+          isSkipped: adjustment.isSkipped,
+          blockedBy: adjustment.blockedBy,
+          canSkip: adjustment.canSkip,
+          canUnskip: adjustment.canUnskip,
         },
         order: log.order,
         prescription: log.prescription,
         sets: log.sets.map(serializeSetLog),
       };
     }),
+    // Metrics describe actual logged work only: a skipped occurrence carries
+    // zero sets by invariant, so it contributes nothing here by construction.
     metrics: {
       totalSets: metrics.totalSets,
       totalReps: metrics.totalReps,
       totalDurationSeconds: metrics.totalDurationSeconds,
       volume: metrics.volume,
     },
+    prescribedSets: totals.prescribedSets,
+    skippedExerciseCount: totals.skippedOccurrences,
   };
 }

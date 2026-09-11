@@ -98,3 +98,20 @@ export const unskipExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
 });
+
+/**
+ * Which adjacent neighbor an occurrence swaps with (M10 reordering) — the
+ * wire counterpart of the domain's `MoveDirection`.
+ */
+export const moveDirectionSchema = z.enum(['up', 'down']);
+
+/**
+ * Move (M10): the occurrence swapped with its adjacent neighbor. No userId
+ * — identity comes from the trusted authenticated session, never from
+ * client input.
+ */
+export const moveExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+  direction: moveDirectionSchema,
+});

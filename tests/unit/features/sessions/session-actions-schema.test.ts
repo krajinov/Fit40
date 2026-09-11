@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema } from '@/features/sessions/schemas/session-actions-schema';
+import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema, moveExerciseSchema } from '@/features/sessions/schemas/session-actions-schema';
 
 describe('logSetSchema', () => {
   it('parses valid rep set input', () => {
@@ -174,6 +174,37 @@ describe.each([
 
   it('never accepts a userId field as trusted input', () => {
     const r = schema.safeParse({ sessionId: 's-1', exerciseOrder: 1, userId: 'attacker' });
+    if (!r.success) return;
+    expect('userId' in r.data).toBe(false);
+  });
+});
+
+describe('moveExerciseSchema', () => {
+  it('parses valid input in both directions', () => {
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 2, direction: 'up' }).success).toBe(true);
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, direction: 'down' }).success).toBe(true);
+  });
+
+  it('coerces numeric-string exercise order the way FormData delivers it', () => {
+    const r = moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: '2', direction: 'up' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.exerciseOrder).toBe(2);
+  });
+
+  it('rejects an unknown or missing direction', () => {
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, direction: 'sideways' }).success).toBe(false);
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1 }).success).toBe(false);
+  });
+
+  it('rejects an invalid order (zero, negative, non-integer)', () => {
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 0, direction: 'up' }).success).toBe(false);
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: -1, direction: 'up' }).success).toBe(false);
+    expect(moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 2.5, direction: 'up' }).success).toBe(false);
+  });
+
+  it('never accepts a userId field as trusted input', () => {
+    const r = moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, direction: 'up', userId: 'attacker' });
     if (!r.success) return;
     expect('userId' in r.data).toBe(false);
   });

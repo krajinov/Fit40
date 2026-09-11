@@ -4,6 +4,7 @@ import { GetActiveWorkoutExerciseDataUseCase } from '@/application/use-cases/get
 import { GetNextExerciseTargetsUseCase } from '@/application/use-cases/get-next-exercise-targets';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
+import { MoveSessionExerciseUseCase } from '@/application/use-cases/move-session-exercise';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { RestoreSessionExerciseUseCase } from '@/application/use-cases/restore-session-exercise';
 import { SkipSessionExerciseUseCase } from '@/application/use-cases/skip-session-exercise';
@@ -63,6 +64,10 @@ export const skipSessionExerciseUseCase = new SkipSessionExerciseUseCase(
 );
 
 export const unskipSessionExerciseUseCase = new UnskipSessionExerciseUseCase(
+  workoutSessionRepository,
+);
+
+export const moveSessionExerciseUseCase = new MoveSessionExerciseUseCase(
   workoutSessionRepository,
 );
 

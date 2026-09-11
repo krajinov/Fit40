@@ -60,7 +60,14 @@ function log(
     isSubstituted: false,
     isSkipped: false,
     substitutionEligibility: { blockedBy: null, canRestore: false },
-    adjustmentEligibility: { isSkipped: false, blockedBy: null, canSkip: true, canUnskip: false },
+    adjustmentEligibility: {
+      isSkipped: false,
+      blockedBy: null,
+      canSkip: true,
+      canUnskip: false,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
     order,
     prescription,
     sets,
@@ -80,7 +87,14 @@ function skippedLog(
   return log(order, exerciseId, prescription, [], {
     isSkipped: true,
     substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
-    adjustmentEligibility: { isSkipped: true, blockedBy: null, canSkip: false, canUnskip: true },
+    adjustmentEligibility: {
+      isSkipped: true,
+      blockedBy: null,
+      canSkip: false,
+      canUnskip: true,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
   });
 }
 
@@ -644,6 +658,9 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
               blockedBy: 'logged-sets',
               canSkip: false,
               canUnskip: false,
+              // Logged sets block the skip decision only — moves stay open.
+              canMoveUp: true,
+              canMoveDown: true,
             },
           }),
         ],

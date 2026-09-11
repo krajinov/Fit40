@@ -255,6 +255,8 @@ export function toTrainingHistorySessionDto(
           blockedBy: adjustment.blockedBy,
           canSkip: adjustment.canSkip,
           canUnskip: adjustment.canUnskip,
+          canMoveUp: adjustment.canMoveUp,
+          canMoveDown: adjustment.canMoveDown,
         },
         order: log.order,
         prescription: log.prescription,

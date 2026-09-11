@@ -1,7 +1,7 @@
 /**
  * PURE user-facing copy for session action errors (M9/M10): deterministic
- * error-code → sentence mapping for the substitution/restore and
- * skip/unskip controls, in the existing Fit40 session-action tone.
+ * error-code → sentence mapping for the substitution/restore, skip/unskip
+ * and move controls, in the existing Fit40 session-action tone.
  *
  * Raw error codes never reach users. `SESSION_MODIFIED` is intentionally NOT
  * mapped here — `SessionActionError` already renders its reload/retry
@@ -35,6 +35,11 @@ export function sessionActionErrorLabel(code: SessionActionErrorCode, fallback: 
       return 'That exercise is already selected here. Reloading the latest state…';
     case 'ADJUSTMENT_NO_CHANGE':
       return 'That exercise is already in this state. Reloading the latest workout…';
+    case 'MOVE_OUT_OF_RANGE':
+      // The move controls only render when the page believes the occurrence
+      // has a neighbor in that direction; this code means that belief is
+      // stale, and the move path refreshes on it.
+      return 'That exercise can no longer be moved in that direction. Reloading the latest workout…';
     case 'EXERCISE_NOT_FOUND':
       return 'That exercise is no longer available in the exercise catalog.';
     case 'INVALID_INPUT':

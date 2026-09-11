@@ -60,7 +60,14 @@ function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]
     isSubstituted: false,
     isSkipped: false,
     substitutionEligibility: { blockedBy: null, canRestore: false },
-    adjustmentEligibility: { isSkipped: false, blockedBy: null, canSkip: true, canUnskip: false },
+    adjustmentEligibility: {
+      isSkipped: false,
+      blockedBy: null,
+      canSkip: true,
+      canUnskip: false,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
     order: 1,
     prescription: rep(),
     sets: [],
@@ -109,7 +116,14 @@ function skippedSessionLog(order: number, exerciseId: string) {
     performedExerciseId: exerciseId,
     isSkipped: true,
     substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
-    adjustmentEligibility: { isSkipped: true, blockedBy: null, canSkip: false, canUnskip: true },
+    adjustmentEligibility: {
+      isSkipped: true,
+      blockedBy: null,
+      canSkip: false,
+      canUnskip: true,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
   });
 }
 

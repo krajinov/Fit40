@@ -28,6 +28,7 @@ export type SessionActionErrorCode =
   | 'EXERCISE_OCCURRENCE_SKIPPED'
   | 'SUBSTITUTION_NO_CHANGE'
   | 'ADJUSTMENT_NO_CHANGE'
+  | 'MOVE_OUT_OF_RANGE'
   | 'EXERCISE_NOT_FOUND';
 
 export interface SessionActionError {

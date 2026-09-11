@@ -215,6 +215,9 @@ describe('session-action-labels / sessionActionErrorLabel', () => {
     expect(sessionActionErrorLabel('ADJUSTMENT_NO_CHANGE', 'fallback')).toBe(
       'That exercise is already in this state. Reloading the latest workout…',
     );
+    expect(sessionActionErrorLabel('MOVE_OUT_OF_RANGE', 'fallback')).toBe(
+      'That exercise can no longer be moved in that direction. Reloading the latest workout…',
+    );
     expect(sessionActionErrorLabel('EXERCISE_NOT_FOUND', 'fallback')).toBe(
       'That exercise is no longer available in the exercise catalog.',
     );

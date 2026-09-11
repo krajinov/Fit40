@@ -1,7 +1,8 @@
 /**
  * Domain service: session-scoped occurrence adjustment (M10) — skipping an
- * authored exercise occurrence inside an in-progress session, plus the
- * derived session-level facts that depend on that persisted decision.
+ * authored exercise occurrence inside an in-progress session, reordering
+ * occurrences with adjacent moves (M10), plus the derived session-level
+ * facts that depend on those persisted decisions.
  *
  * PRODUCT SEMANTICS — skip is a persisted fact, never an inference:
  * - `ExerciseLog.isSkipped` records the user's explicit decision to not
@@ -16,6 +17,19 @@
  *   invalid combination; no supported write path can.
  * - The decision is reversible while the session is in progress and frozen
  *   at completion (completed sessions are immutable).
+ *
+ * REORDER SEMANTICS — `moveSessionExercise` swaps adjacent occurrences:
+ * - Occurrence identity is (sessionId, exerciseOrder): a move targets the
+ *   occurrence at that order, never "the exercise with that id" (the same
+ *   exercise may appear twice in a session).
+ * - Only adjacent moves exist (one slot up or down) and orders stay dense
+ *   1..N after every move.
+ * - The WHOLE `ExerciseLog` occurrence — authored/performed ids,
+ *   prescription, restSeconds, isSkipped and its logged sets — moves as
+ *   one unit, so reordering never reassigns sets between exercises.
+ * - Logged sets never block a move (unlike skip), and skipped or
+ *   substituted occurrences are freely movable; only completion freezes
+ *   reordering.
  *
  * The mutation rules are exposed as a read-only eligibility projection
  * (`resolveOccurrenceAdjustmentEligibility`) — persistence, application
@@ -42,12 +56,13 @@ import { err, ok, type Result } from '@/domain/types/result';
  * Expected adjustment failures. `SESSION_ALREADY_COMPLETED`,
  * `EXERCISE_LOG_NOT_FOUND` and `EXERCISE_HAS_LOGGED_SETS` mirror the shapes
  * used by the entity mutations and the substitution service; the no-change
- * code is unique to this service.
+ * and move-boundary codes are unique to this service.
  */
 export type SessionAdjustmentError =
   | { readonly code: 'SESSION_ALREADY_COMPLETED'; readonly message: string }
   | { readonly code: 'EXERCISE_LOG_NOT_FOUND'; readonly exerciseOrder: number; readonly message: string }
   | { readonly code: 'EXERCISE_HAS_LOGGED_SETS'; readonly exerciseOrder: number; readonly message: string }
+  | { readonly code: 'MOVE_OUT_OF_RANGE'; readonly exerciseOrder: number; readonly message: string }
   | { readonly code: 'ADJUSTMENT_NO_CHANGE'; readonly message: string };
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
@@ -59,6 +74,16 @@ export interface SkipSessionExerciseInput {
 
 export interface UnskipSessionExerciseInput {
   readonly exerciseOrder: number;
+}
+
+/** Which adjacent neighbor an occurrence swaps with. */
+export type MoveDirection = 'up' | 'down';
+
+export interface MoveSessionExerciseInput {
+  /** Identifies the occurrence within its session. */
+  readonly exerciseOrder: number;
+  /** Swaps the occurrence with the neighbor above ('up') or below ('down'). */
+  readonly direction: MoveDirection;
 }
 
 // ─── Guards ─────────────────────────────────────────────────────────────────
@@ -80,11 +105,11 @@ function occurrenceAdjustmentBlock(
 }
 
 /**
- * Loads the occurrence and enforces the shared preconditions: the session
- * must be in progress, the occurrence must exist, and it must have zero
- * logged sets (skip is mutually exclusive with performed work).
+ * Loads the occurrence and enforces the preconditions every adjustment
+ * mutation shares: the session must be in progress and the occurrence must
+ * exist. Skip/unskip additionally require zero logged sets; moves never do.
  */
-function loadAdjustableOccurrence(
+function loadInProgressOccurrence(
   session: WorkoutSession,
   exerciseOrder: number,
 ): Result<ExerciseLog, SessionAdjustmentError> {
@@ -101,8 +126,23 @@ function loadAdjustableOccurrence(
     });
   }
 
+  return ok(log);
+}
+
+/**
+ * The skip/unskip loader: the shared in-progress/existence preconditions plus
+ * the zero-logged-sets rule (skip is mutually exclusive with performed
+ * work).
+ */
+function loadAdjustableOccurrence(
+  session: WorkoutSession,
+  exerciseOrder: number,
+): Result<ExerciseLog, SessionAdjustmentError> {
+  const result = loadInProgressOccurrence(session, exerciseOrder);
+  if (!result.ok) return result;
+
   // The completed case returned above, so a block here is the logged-set rule.
-  if (occurrenceAdjustmentBlock(session, log) === 'logged-sets') {
+  if (occurrenceAdjustmentBlock(session, result.data) === 'logged-sets') {
     return err({
       code: 'EXERCISE_HAS_LOGGED_SETS',
       exerciseOrder,
@@ -110,7 +150,7 @@ function loadAdjustableOccurrence(
     });
   }
 
-  return ok(log);
+  return result;
 }
 
 // ─── Skip & Unskip ──────────────────────────────────────────────────────────
@@ -163,6 +203,48 @@ export function unskipSessionExercise(
   return ok({ ...session, exerciseLogs });
 }
 
+// ─── Move (reorder) ──────────────────────────────────────────────────────────
+
+/**
+ * Swaps one occurrence with its adjacent neighbor (up or down). Guards run
+ * in the locked order: completed session → unknown occurrence → boundary.
+ *
+ * The WHOLE occurrence — authored/performed identity, prescription and rest
+ * snapshot, skip decision and its logged sets — moves as one unit, so a
+ * reorder can never reassign sets between exercises. Only the two swapped
+ * occurrences change order, so the sequence stays dense 1..N.
+ */
+export function moveSessionExercise(
+  session: WorkoutSession,
+  input: MoveSessionExerciseInput,
+): Result<WorkoutSession, SessionAdjustmentError> {
+  const log = loadInProgressOccurrence(session, input.exerciseOrder);
+  if (!log.ok) return log;
+
+  const atBoundary =
+    input.direction === 'up'
+      ? log.data.order === 1
+      : log.data.order === session.exerciseLogs.length;
+  if (atBoundary) {
+    return err({
+      code: 'MOVE_OUT_OF_RANGE',
+      exerciseOrder: input.exerciseOrder,
+      message: `Exercise order ${input.exerciseOrder} cannot move ${input.direction} any further`,
+    });
+  }
+
+  // Adjacent swap: the mover takes the neighbor's order and vice versa; every
+  // other occurrence keeps its order.
+  const neighborOrder = input.direction === 'up' ? log.data.order - 1 : log.data.order + 1;
+  const exerciseLogs = session.exerciseLogs.map((e) => {
+    if (e.order === input.exerciseOrder) return { ...e, order: neighborOrder };
+    if (e.order === neighborOrder) return { ...e, order: input.exerciseOrder };
+    return e;
+  });
+
+  return ok({ ...session, exerciseLogs });
+}
+
 // ─── Eligibility (read-only projection) ─────────────────────────────────────
 
 /** Why an occurrence's skip decision is currently blocked; null = adjustable. */
@@ -179,6 +261,14 @@ export interface OccurrenceAdjustmentEligibility {
   readonly canSkip: boolean;
   /** True only for an in-progress, skipped occurrence (frozen at completion). */
   readonly canUnskip: boolean;
+  /**
+   * True only for an in-progress occurrence with a neighbor above
+   * (order > 1). Logged sets, the skip decision and substitutions never
+   * block moves — the whole occurrence swaps as one unit.
+   */
+  readonly canMoveUp: boolean;
+  /** True only for an in-progress occurrence with a neighbor below (order < N). */
+  readonly canMoveDown: boolean;
 }
 
 /**
@@ -192,11 +282,17 @@ export function resolveOccurrenceAdjustmentEligibility(
   log: ExerciseLog,
 ): OccurrenceAdjustmentEligibility {
   const blockedBy = occurrenceAdjustmentBlock(session, log);
+  // Reordering is frozen only by completion: logged sets, the skip decision
+  // and substitutions never block a move — the whole occurrence (sets
+  // included) swaps with its neighbor.
+  const frozen = blockedBy === 'session-completed';
   return {
     isSkipped: log.isSkipped,
     blockedBy,
     canSkip: !log.isSkipped && blockedBy === null,
     canUnskip: log.isSkipped && blockedBy === null,
+    canMoveUp: !frozen && log.order > 1,
+    canMoveDown: !frozen && log.order < session.exerciseLogs.length,
   };
 }
 

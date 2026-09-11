@@ -108,6 +108,9 @@ describe('toWorkoutSessionDto — skip projection (M10 Slice 2)', () => {
       blockedBy: null,
       canSkip: false,
       canUnskip: true,
+      // Order 2 of 2: movable up only.
+      canMoveUp: true,
+      canMoveDown: false,
     });
   });
 
@@ -119,6 +122,9 @@ describe('toWorkoutSessionDto — skip projection (M10 Slice 2)', () => {
       blockedBy: 'session-completed',
       canSkip: false,
       canUnskip: false,
+      // Completion freezes reordering too — both move directions die.
+      canMoveUp: false,
+      canMoveDown: false,
     });
   });
 
@@ -166,6 +172,9 @@ describe('toTrainingHistorySessionDto — completed-session isSkipped (M10 Slice
       blockedBy: 'session-completed',
       canSkip: false,
       canUnskip: false,
+      // Frozen at completion, history included: both move directions die.
+      canMoveUp: false,
+      canMoveDown: false,
     });
   });
 });
@@ -184,5 +193,51 @@ describe('toCompletedSessionDto — detail entries carry the skip fact (M10 Slic
     );
 
     expect(dto.entries.map((entry) => entry.isSkipped)).toEqual([false, true]);
+  });
+});
+
+describe('toWorkoutSessionDto — move projection (M10 Slice 5)', () => {
+  it('exposes one movable direction per boundary occurrence', () => {
+    const dto = toWorkoutSessionDto(baseSession());
+
+    expect(dto.exerciseLogs[0]?.adjustmentEligibility).toEqual({
+      isSkipped: false,
+      blockedBy: null,
+      canSkip: true,
+      canUnskip: false,
+      canMoveUp: false,
+      canMoveDown: true,
+    });
+    expect(dto.exerciseLogs[1]?.adjustmentEligibility).toEqual({
+      isSkipped: false,
+      blockedBy: null,
+      canSkip: true,
+      canUnskip: false,
+      canMoveUp: true,
+      canMoveDown: false,
+    });
+  });
+
+  it('keeps a logged-set occurrence movable — only completion freezes moves', () => {
+    const withSet = logSessionSet(baseSession(), {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!withSet.ok) throw Error(withSet.error.message);
+    const dto = toWorkoutSessionDto(withSet.data);
+
+    // Logged sets block the skip decision only; the occurrence keeps its
+    // move direction — the whole occurrence swaps with its sets.
+    expect(dto.exerciseLogs[0]?.adjustmentEligibility).toEqual({
+      isSkipped: false,
+      blockedBy: 'logged-sets',
+      canSkip: false,
+      canUnskip: false,
+      canMoveUp: false,
+      canMoveDown: true,
+    });
   });
 });

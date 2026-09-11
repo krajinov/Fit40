@@ -92,16 +92,24 @@ export interface OccurrenceSubstitutionEligibilityDto {
 }
 
 /**
- * The domain's skip-mutation eligibility of one occurrence, stripped of
- * branded ids and fully serializable: the persisted skip decision, why it is
- * currently frozen (`blockedBy` null = adjustable), and whether skip/unskip
- * may run right now.
+ * The domain's skip/reorder-mutation eligibility of one occurrence, stripped
+ * of branded ids and fully serializable: the persisted skip decision, why it
+ * is currently frozen (`blockedBy` null = adjustable), and whether
+ * skip/unskip and adjacent moves may run right now.
  */
 export interface OccurrenceAdjustmentEligibilityDto {
   readonly isSkipped: boolean;
   readonly blockedBy: OccurrenceAdjustmentBlock | null;
   readonly canSkip: boolean;
   readonly canUnskip: boolean;
+  /**
+   * True only for an in-progress occurrence with a neighbor above
+   * (order > 1). Logged sets, the skip decision and substitutions never
+   * block moves — the whole occurrence swaps as one unit.
+   */
+  readonly canMoveUp: boolean;
+  /** True only for an in-progress occurrence with a neighbor below (order < N). */
+  readonly canMoveDown: boolean;
 }
 
 export interface WorkoutSessionDto {
@@ -180,6 +188,8 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
           blockedBy: adjustment.blockedBy,
           canSkip: adjustment.canSkip,
           canUnskip: adjustment.canUnskip,
+          canMoveUp: adjustment.canMoveUp,
+          canMoveDown: adjustment.canMoveDown,
         },
         order: log.order,
         prescription: log.prescription,

@@ -31,6 +31,11 @@ function eligibility(
     blockedBy: null,
     canSkip: true,
     canUnskip: false,
+    // The move flags ride along on the projection (M10 Slice 5); the skip
+    // view consumes none of them, so neutral mid-list values keep every
+    // fixture freely movable.
+    canMoveUp: true,
+    canMoveDown: true,
     ...overrides,
   };
 }

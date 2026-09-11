@@ -87,8 +87,22 @@ function sessionLog(order: number, isSkipped = false): WorkoutSessionExerciseDto
     isSkipped,
     substitutionEligibility: { blockedBy: isSkipped ? 'skipped' : null, canRestore: false },
     adjustmentEligibility: isSkipped
-      ? { isSkipped: true, blockedBy: null, canSkip: false, canUnskip: true }
-      : { isSkipped: false, blockedBy: null, canSkip: true, canUnskip: false },
+      ? {
+          isSkipped: true,
+          blockedBy: null,
+          canSkip: false,
+          canUnskip: true,
+          canMoveUp: true,
+          canMoveDown: true,
+        }
+      : {
+          isSkipped: false,
+          blockedBy: null,
+          canSkip: true,
+          canUnskip: false,
+          canMoveUp: true,
+          canMoveDown: true,
+        },
     order,
     prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
     sets: [],

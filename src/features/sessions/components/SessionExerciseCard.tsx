@@ -201,21 +201,22 @@ export function SessionExerciseCard({
         />
       )}
 
-      {/* M10 skip affordance: derived entirely from the pure view mapper's
-          state — no skip rules live in this component. The domain's
-          eligibility projection already freezes a completed session to
-          `hidden`, so read-only rendering needs no extra guard here. */}
-      {card.adjustment.state === 'blocked-logged-sets' && (
-        <p className="text-xs text-ink-3 md:text-[13px]">{card.adjustment.blockedLabel}</p>
-      )}
-      {(card.adjustment.state === 'open' || card.adjustment.state === 'skipped') && (
+      {/* M10 adjustment affordance (skip + adjacent move): derived entirely
+          from the pure view mapper's state — no skip or move rules live in
+          this component. The domain's eligibility projection already freezes
+          a completed session to `hidden`, so read-only rendering needs no
+          extra guard here. One shared affordance covers every non-hidden
+          state: `blocked-logged-sets` renders its truthful copy AND the move
+          controls (logged sets freeze only the skip decision, never a
+          reorder), and a skipped occurrence still moves. */}
+      {card.adjustment.state !== 'hidden' && (
         <SessionExerciseAdjustPanel
           sessionId={sessionId}
           exerciseOrder={log.order}
           programSlug={programSlug}
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}
-          state={card.adjustment.state}
+          adjustment={card.adjustment}
         />
       )}
     </article>

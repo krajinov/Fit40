@@ -143,19 +143,20 @@ export function UpcomingExerciseList({
                       />
                     </div>
                   )}
-                  {/* …and the prime skip moment (M10): untouched occurrences
-                      are exactly the ones the domain lets the user skip, so
-                      the Skip control (pure view-mapper state) sits in the
-                      same expand. */}
-                  {(exercise.adjustment.state === 'open' ||
-                    exercise.adjustment.state === 'skipped') && (
+                  {/* …and the prime skip/move moment (M10): untouched
+                      occurrences are exactly the ones the domain lets the
+                      user skip, so the adjustment affordance (pure
+                      view-mapper state) sits in the same expand — the same
+                      shared panel the main card uses, no separate movement
+                      rule for upcoming rows. */}
+                  {exercise.adjustment.state !== 'hidden' && (
                     <SessionExerciseAdjustPanel
                       sessionId={sessionId}
                       exerciseOrder={log.order}
                       programSlug={programSlug}
                       weekNumber={weekNumber}
                       workoutOrder={workoutOrder}
-                      state={exercise.adjustment.state}
+                      adjustment={exercise.adjustment}
                     />
                   )}
                 </div>

@@ -971,6 +971,138 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
   });
 });
 
+// ─── Reorder display (M10 Slice 6) ────────────────────────────────────────────
+//
+// The Slice 5 invariant hands Presentation a canonical aggregate:
+// exerciseLogs[index].order === index + 1. The card mapper must consume the
+// array AS RECEIVED — never sorting by order, exercise identity or name. The
+// flagship fixture below is deliberately non-alphabetical (B, A, C): any
+// sort by name/id would render A, B, C and fail these tests.
+describe('active-workout-views / reorder display (M10 Slice 6)', () => {
+  const reorderCatalog = new Map([
+    ['ex-b', { name: 'Exercise B', equipment: 'barbell' as const }],
+    ['ex-a', { name: 'Exercise A', equipment: 'dumbbell' as const }],
+    ['ex-c', { name: 'Exercise C', equipment: 'barbell' as const }],
+    ['ex-c-alt', { name: 'Exercise C Alt', equipment: 'dumbbell' as const }],
+  ]);
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
+  it('renders cards in the DTO array order — B, A, C — never sorted by identity', () => {
+    // A canonically reordered snapshot: B moved to the front (order 1),
+    // A took order 2, C stays at 3.
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40)]),
+      log(3, 'ex-c', threeByEightToTen, []),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    expect(cards.map((card) => card.name)).toEqual(['Exercise B', 'Exercise A', 'Exercise C']);
+    expect(cards.map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('follows the reordered array for the active exercise and per-set state', () => {
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40)]),
+      log(3, 'ex-c', threeByEightToTen, []),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    // B is done; the FIRST under-prescribed occurrence in the reordered
+    // array — A at order 2 — is the active logger target.
+    expect(cards[0]?.kind).toBe('done');
+    expect(cards[1]?.kind).toBe('active');
+    expect(cards[2]?.kind).toBe('upcoming');
+    // Logged-set state stays attached to its own occurrence.
+    expect(cards[1]?.setRows).toHaveLength(1);
+    expect(cards[1]?.logger).not.toBeNull();
+  });
+
+  it('keeps skipped and substituted identity attached through the reorder', () => {
+    const logs = [
+      skippedLog(1, 'ex-b'),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40), repSet(2, 9, 40)]),
+      log(3, 'ex-c-alt', threeByEightToTen, [], {
+        authoredExerciseId: 'ex-c',
+        performedExerciseId: 'ex-c-alt',
+        isSubstituted: true,
+      }),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    // The skipped decision, the substituted identity and the logged-set
+    // state all stay attached to their own occurrences in the new
+    // positions. (B is skipped, so A — with 2 of 3 sets — is the FIRST
+    // under-prescribed occurrence: `active`, still carrying its rows.)
+    expect(cards[0]?.kind).toBe('skipped');
+    expect(cards[0]?.adjustment.state).toBe('skipped');
+    expect(cards[1]?.kind).toBe('active');
+    expect(cards[1]?.setRows).toHaveLength(2);
+    expect(cards[2]?.name).toBe('Exercise C Alt');
+    expect(cards[2]?.originallyName).toBe('Exercise C');
+  });
+
+  it('maps the move flags from the DTO eligibility, never from the array position', () => {
+    // Contradictory fixture: the MID-list occurrence (order 2) carries a
+    // domain projection that says it cannot move at all, while the FIRST
+    // occurrence (order 1) projects canMoveUp: true. Position logic would
+    // say the opposite; only DTO consumption produces these flags.
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [], {
+        adjustmentEligibility: {
+          isSkipped: false,
+          blockedBy: null,
+          canSkip: true,
+          canUnskip: false,
+          canMoveUp: true,
+          canMoveDown: true,
+        },
+      }),
+      log(2, 'ex-a', threeByEightToTen, [], {
+        adjustmentEligibility: {
+          isSkipped: false,
+          blockedBy: null,
+          canSkip: true,
+          canUnskip: false,
+          canMoveUp: false,
+          canMoveDown: false,
+        },
+      }),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    expect(cards[0]?.adjustment.canMoveUp).toBe(true);
+    expect(cards[0]?.adjustment.canMoveDown).toBe(true);
+    expect(cards[1]?.adjustment.canMoveUp).toBe(false);
+    expect(cards[1]?.adjustment.canMoveDown).toBe(false);
+  });
+});
+
 describe('active-workout-views / buildSessionProgress', () => {
   it('uses the domain-owned prescribedSets denominator and computes the percentage', () => {
     const logs = [

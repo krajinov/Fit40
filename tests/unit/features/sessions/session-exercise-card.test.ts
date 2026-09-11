@@ -29,6 +29,9 @@ vi.mock('@/features/sessions/actions/skip-exercise', () => ({
 vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
   unskipExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/move-exercise', () => ({
+  moveExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -121,7 +124,7 @@ function cardView(overrides: Partial<SessionExerciseCardView> = {}): SessionExer
     setRows: [],
     logger,
     substitution: noCandidatesSubstitution,
-    adjustment: { state: 'open', blockedLabel: null },
+    adjustment: { state: 'open', blockedLabel: null, canMoveUp: true, canMoveDown: true },
     ...overrides,
   };
 }
@@ -132,7 +135,7 @@ function skippedCardView(): SessionExerciseCardView {
     badge: { style: 'neutral', label: 'Skipped', mobileVisible: true },
     logger: null,
     substitution: hiddenSubstitution,
-    adjustment: { state: 'skipped', blockedLabel: null },
+    adjustment: { state: 'skipped', blockedLabel: null, canMoveUp: true, canMoveDown: true },
   });
 }
 
@@ -214,11 +217,14 @@ describe('SessionExerciseCard / skipped rendering (M10)', () => {
     expect(container.textContent).not.toContain('Log set');
     expect(container.textContent).not.toContain('Swap exercise');
     expect(container.textContent).not.toContain('Restore original exercise');
-    // The only form on a skipped card is the Undo-skip control itself —
-    // no set-logger form exists.
+    // The only forms on a skipped card are the adjustment controls —
+    // Undo skip and the two move controls (a skipped occurrence may still
+    // move, M10 Slice 6) — no set-logger form exists.
     const forms = Array.from(container.querySelectorAll('form'));
-    expect(forms).toHaveLength(1);
+    expect(forms).toHaveLength(3);
     expect(forms[0]?.textContent).toContain('Undo skip');
+    expect(forms[1]?.textContent).toContain('Move up');
+    expect(forms[2]?.textContent).toContain('Move down');
   });
 
   it('renders the Undo-skip control on a skipped card while mutable', async () => {
@@ -235,7 +241,7 @@ describe('SessionExerciseCard / skipped rendering (M10)', () => {
         logger: null,
         substitution: hiddenSubstitution,
         // The domain freezes the completed session: hidden, no control.
-        adjustment: { state: 'hidden', blockedLabel: null },
+        adjustment: { state: 'hidden', blockedLabel: null, canMoveUp: false, canMoveDown: false },
       }),
       sessionLog(1, true),
       true,
@@ -253,7 +259,7 @@ describe('SessionExerciseCard / skipped rendering (M10)', () => {
         badge: { style: 'neutral', label: '1 of 3 sets', mobileVisible: true },
         logger,
         substitution: noCandidatesSubstitution,
-        adjustment: { state: 'blocked-logged-sets', blockedLabel: 'Delete your logged sets to skip this exercise.' },
+        adjustment: { state: 'blocked-logged-sets', blockedLabel: 'Delete your logged sets to skip this exercise.', canMoveUp: true, canMoveDown: true },
       }),
       sessionLog(1, false),
     );
@@ -267,6 +273,111 @@ describe('SessionExerciseCard / skipped rendering (M10)', () => {
     const container = await renderCard(cardView(), sessionLog(1, false));
 
     expect(container.textContent).toContain('Skip exercise');
+  });
+});
+
+describe('SessionExerciseCard / adjacent move rendering (M10 Slice 6)', () => {
+  it('renders both move controls on a mid-list open card', async () => {
+    const container = await renderCard(cardView(), sessionLog(1, false));
+
+    expect(container.textContent).toContain('Move up');
+    expect(container.textContent).toContain('Move down');
+  });
+
+  it('renders only Move down when the view mapper says there is no neighbor above', async () => {
+    const container = await renderCard(
+      cardView({
+        adjustment: { state: 'open', blockedLabel: null, canMoveUp: false, canMoveDown: true },
+      }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).not.toContain('Move up');
+    expect(container.textContent).toContain('Move down');
+  });
+
+  it('renders only Move up when the view mapper says there is no neighbor below', async () => {
+    const container = await renderCard(
+      cardView({
+        adjustment: { state: 'open', blockedLabel: null, canMoveUp: true, canMoveDown: false },
+      }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).toContain('Move up');
+    expect(container.textContent).not.toContain('Move down');
+  });
+
+  it('renders no move controls for a single-occurrence card', async () => {
+    const container = await renderCard(
+      cardView({
+        adjustment: { state: 'open', blockedLabel: null, canMoveUp: false, canMoveDown: false },
+      }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).toContain('Skip exercise');
+    expect(container.textContent).not.toContain('Move up');
+    expect(container.textContent).not.toContain('Move down');
+  });
+
+  it('keeps move controls on a skipped card — only the skip decision is tied to it', async () => {
+    const container = await renderCard(skippedCardView(), sessionLog(1, true));
+
+    expect(container.textContent).toContain('Undo skip');
+    expect(container.textContent).toContain('Move up');
+    expect(container.textContent).toContain('Move down');
+  });
+
+  it('keeps move controls on a logged-set-blocked card while showing the blocked copy', async () => {
+    // Logged sets block the SKIP decision only — never a reorder.
+    const container = await renderCard(
+      cardView({
+        kind: 'partial',
+        badge: { style: 'neutral', label: '1 of 3 sets', mobileVisible: true },
+        logger,
+        substitution: noCandidatesSubstitution,
+        adjustment: { state: 'blocked-logged-sets', blockedLabel: 'Delete your logged sets to skip this exercise.', canMoveUp: true, canMoveDown: false },
+      }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).toContain('Delete your logged sets to skip this exercise.');
+    expect(container.textContent).toContain('Move up');
+    expect(container.textContent).not.toContain('Move down');
+  });
+
+  it('renders no move controls on a completed (read-only) card', async () => {
+    const container = await renderCard(
+      cardView({
+        kind: 'done',
+        badge: { style: 'done', label: 'Completed', mobileVisible: true },
+        logger: null,
+        substitution: hiddenSubstitution,
+        adjustment: { state: 'hidden', blockedLabel: null, canMoveUp: false, canMoveDown: false },
+      }),
+      sessionLog(1, false),
+      true,
+    );
+
+    expect(container.textContent).not.toContain('Move up');
+    expect(container.textContent).not.toContain('Move down');
+    expect(container.textContent).not.toContain('Skip exercise');
+  });
+
+  it('substituted occurrences move normally and keep their identity lines', async () => {
+    const container = await renderCard(
+      cardView({
+        name: 'Dumbbell Bench Press',
+        originallyName: 'Bench Press',
+      }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).toContain('Move up');
+    expect(container.textContent).toContain('Move down');
+    expect(container.textContent).toContain('Dumbbell Bench Press');
+    expect(container.textContent).toContain('Originally: Bench Press');
   });
 });
 

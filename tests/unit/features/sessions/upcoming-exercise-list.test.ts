@@ -29,6 +29,9 @@ vi.mock('@/features/sessions/actions/skip-exercise', () => ({
 vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
   unskipExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/move-exercise', () => ({
+  moveExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -103,7 +106,12 @@ const mutableSubstitution: SessionSubstitutionView = {
   blockedLabel: null,
 };
 
-const openAdjustment: SessionAdjustmentView = { state: 'open', blockedLabel: null };
+const openAdjustment: SessionAdjustmentView = {
+  state: 'open',
+  blockedLabel: null,
+  canMoveUp: true,
+  canMoveDown: true,
+};
 
 function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): SessionExerciseCardView {
   return {
@@ -192,5 +200,63 @@ describe('UpcomingExerciseList / substituted occurrence context (M9)', () => {
     const row = rowByName(container, 'Dumbbell Bench Press');
     expect(row?.textContent).toContain('Dumbbell Bench Press');
     expect(row?.textContent).toContain('Originally: Bench Press');
+  });
+});
+
+describe('UpcomingExerciseList / adjacent move affordance (M10 Slice 6)', () => {
+  it('renders the shared move controls inside the upcoming expand, consistent with the main card', async () => {
+    // One shared adjustment affordance: upcoming rows consume the same
+    // panel the main card uses — no separate movement rule for them.
+    const card = upcomingCard();
+    const container = await renderList([card], new Map([[card.order, sessionLog(card.order)]]));
+
+    const row = rowByName(container, 'Dumbbell Bench Press');
+    expect(row?.textContent).toContain('Skip exercise');
+    expect(row?.textContent).toContain('Move up');
+    expect(row?.textContent).toContain('Move down');
+  });
+
+  it('renders no move controls when the domain says the occurrence cannot move', async () => {
+    const card = upcomingCard({
+      adjustment: { state: 'open', blockedLabel: null, canMoveUp: false, canMoveDown: false },
+    });
+    const container = await renderList([card], new Map([[card.order, sessionLog(card.order)]]));
+
+    const row = rowByName(container, 'Dumbbell Bench Press');
+    expect(row?.textContent).toContain('Skip exercise');
+    expect(row?.textContent).not.toContain('Move up');
+    expect(row?.textContent).not.toContain('Move down');
+  });
+
+  it('renders the blocked copy with move controls when logged sets block the skip', async () => {
+    const card = upcomingCard({
+      kind: 'partial',
+      adjustment: {
+        state: 'blocked-logged-sets',
+        blockedLabel: 'Delete your logged sets to skip this exercise.',
+        canMoveUp: true,
+        canMoveDown: true,
+      },
+    });
+    const container = await renderList([card], new Map([[card.order, sessionLog(card.order)]]));
+
+    const row = rowByName(container, 'Dumbbell Bench Press');
+    expect(row?.textContent).toContain('Delete your logged sets to skip this exercise.');
+    expect(row?.textContent).not.toContain('Skip exercise');
+    expect(row?.textContent).toContain('Move up');
+    expect(row?.textContent).toContain('Move down');
+  });
+
+  it('renders no adjustment controls at all for a hidden occurrence', async () => {
+    const card = upcomingCard({
+      adjustment: { state: 'hidden', blockedLabel: null, canMoveUp: false, canMoveDown: false },
+    });
+    const container = await renderList([card], new Map([[card.order, sessionLog(card.order)]]));
+
+    const row = rowByName(container, 'Dumbbell Bench Press');
+    expect(row?.textContent).not.toContain('Skip exercise');
+    expect(row?.textContent).not.toContain('Undo skip');
+    expect(row?.textContent).not.toContain('Move up');
+    expect(row?.textContent).not.toContain('Move down');
   });
 });

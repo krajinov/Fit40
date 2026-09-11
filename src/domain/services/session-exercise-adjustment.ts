@@ -23,7 +23,10 @@
  *   occurrence at that order, never "the exercise with that id" (the same
  *   exercise may appear twice in a session).
  * - Only adjacent moves exist (one slot up or down) and orders stay dense
- *   1..N after every move.
+ *   1..N after every move, and the returned aggregate is canonical: array
+ *   position agrees with order (exerciseLogs[index].order === index + 1),
+ *   because Active Workout and progression consumers read
+ *   session.exerciseLogs positionally.
  * - The WHOLE `ExerciseLog` occurrence — authored/performed ids,
  *   prescription, restSeconds, isSkipped and its logged sets — moves as
  *   one unit, so reordering never reassigns sets between exercises.
@@ -213,6 +216,11 @@ export function unskipSessionExercise(
  * snapshot, skip decision and its logged sets — moves as one unit, so a
  * reorder can never reassign sets between exercises. Only the two swapped
  * occurrences change order, so the sequence stays dense 1..N.
+ *
+ * The returned aggregate is canonical: `exerciseLogs` is physically
+ * arranged in the new session order (exerciseLogs[index].order ===
+ * index + 1), because Active Workout and progression consumers read the
+ * collection positionally.
  */
 export function moveSessionExercise(
   session: WorkoutSession,
@@ -236,11 +244,21 @@ export function moveSessionExercise(
   // Adjacent swap: the mover takes the neighbor's order and vice versa; every
   // other occurrence keeps its order.
   const neighborOrder = input.direction === 'up' ? log.data.order - 1 : log.data.order + 1;
-  const exerciseLogs = session.exerciseLogs.map((e) => {
+  const swapped = session.exerciseLogs.map((e) => {
     if (e.order === input.exerciseOrder) return { ...e, order: neighborOrder };
     if (e.order === neighborOrder) return { ...e, order: input.exerciseOrder };
     return e;
   });
+
+  // Canonical form: array position must agree with ExerciseLog.order —
+  // exerciseLogs[index].order === index + 1 — after every successful move,
+  // because Active Workout and progression code reads session.exerciseLogs
+  // positionally. The aggregate factory guarantees the orders are exactly
+  // the dense 1..N sequence, so arranging the swapped array by order IS the
+  // physical session order and its dense renumbering; the whole occurrence
+  // — identities, prescription, rest, skip decision and its logged sets —
+  // travels as one untouched unit, and the source session is never mutated.
+  const exerciseLogs = swapped.slice().sort((a, b) => a.order - b.order);
 
   return ok({ ...session, exerciseLogs });
 }

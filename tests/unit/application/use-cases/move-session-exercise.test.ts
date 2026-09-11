@@ -71,15 +71,22 @@ describe('MoveSessionExerciseUseCase', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    // The DTO reflects the swap; the untouched third occurrence stays put.
-    expect(r.data.exerciseLogs.find((e) => e.order === 1)?.authoredExerciseId).toBe('ex-002');
-    expect(r.data.exerciseLogs.find((e) => e.order === 2)?.authoredExerciseId).toBe('ex-001');
-    expect(r.data.exerciseLogs.find((e) => e.order === 3)?.authoredExerciseId).toBe('ex-003');
+    // The DTO is canonical — position agrees with order — and reflects the
+    // swap; the untouched third occurrence stays put.
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
+    expect(r.data.exerciseLogs.map((e) => e.authoredExerciseId)).toEqual([
+      'ex-002',
+      'ex-001',
+      'ex-003',
+    ]);
 
-    // And the swap persisted.
+    // And the canonical swap persisted.
     const stored = await repo.findById(sid('s-1'));
-    expect(stored?.exerciseLogs.find((e) => e.order === 1)?.authoredExerciseId).toBe('ex-002');
-    expect(stored?.exerciseLogs.find((e) => e.order === 3)?.authoredExerciseId).toBe('ex-003');
+    expect(stored?.exerciseLogs.map((e) => [e.order, e.authoredExerciseId])).toEqual([
+      [1, 'ex-002'],
+      [2, 'ex-001'],
+      [3, 'ex-003'],
+    ]);
   });
 
   it('rejects invalid input before touching the repository', async () => {
@@ -196,11 +203,19 @@ describe('MoveSessionExerciseUseCase', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    // Canonical: the mover physically sits at index 2 (order 3).
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
+    expect(r.data.exerciseLogs.map((e) => e.authoredExerciseId)).toEqual([
+      'ex-001',
+      'ex-003',
+      'ex-002',
+    ]);
     // The whole occurrence — its logged set included — moved to order 3.
     const moved = r.data.exerciseLogs.find((e) => e.order === 3);
     expect(moved?.authoredExerciseId).toBe('ex-002');
     expect(moved?.sets).toHaveLength(1);
     const stored = await repo.findById(sid('s-1'));
+    expect(stored?.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
     expect(stored?.exerciseLogs.find((e) => e.order === 3)?.sets).toHaveLength(1);
   });
 
@@ -217,10 +232,18 @@ describe('MoveSessionExerciseUseCase', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    // Canonical: the skipped mover physically sits at index 1 (order 2).
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
+    expect(r.data.exerciseLogs.map((e) => e.authoredExerciseId)).toEqual([
+      'ex-001',
+      'ex-003',
+      'ex-002',
+    ]);
     const moved = r.data.exerciseLogs.find((e) => e.order === 2);
     expect(moved?.isSkipped).toBe(true);
     expect(moved?.authoredExerciseId).toBe('ex-003');
     const stored = await repo.findById(sid('s-1'));
+    expect(stored?.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
     expect(stored?.exerciseLogs.find((e) => e.order === 2)?.isSkipped).toBe(true);
   });
 

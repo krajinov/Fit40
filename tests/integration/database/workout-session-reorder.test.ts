@@ -165,6 +165,14 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
     if (!loaded) throw new Error('session not found');
     const moved = moveSessionExercise(loaded, { exerciseOrder: 2, direction: 'down' });
     if (!moved.ok) throw new Error(moved.error.message);
+    // The domain result itself is canonical: array position agrees with
+    // order (exerciseLogs[index].order === index + 1).
+    expect(moved.data.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
+    expect(moved.data.exerciseLogs.map((log) => log.authoredExerciseId)).toEqual([
+      'ex-002',
+      'ex-010',
+      'ex-015',
+    ]);
     await workoutSessionRepository.save(moved.data);
 
     // exercise_logs swapped; orders stay dense 1..N.
@@ -186,8 +194,9 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
       expect(logOrders.has(row.exerciseOrder)).toBe(true);
     }
 
-    // The hydrated aggregate agrees with the raw rows.
+    // The hydrated aggregate agrees with the raw rows — and is canonical.
     const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(reloaded?.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
     expect(reloaded?.exerciseLogs.map((log) => log.performedExerciseId)).toEqual([
       'ex-002',
       'ex-010',
@@ -206,6 +215,13 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
     if (!loaded) throw new Error('session not found');
     const up = moveSessionExercise(loaded, { exerciseOrder: 2, direction: 'up' });
     if (!up.ok) throw new Error(up.error.message);
+    // Canonical result: ex-015 physically moves above ex-002.
+    expect(up.data.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
+    expect(up.data.exerciseLogs.map((log) => log.authoredExerciseId)).toEqual([
+      'ex-015',
+      'ex-002',
+      'ex-010',
+    ]);
     await workoutSessionRepository.save(up.data);
 
     let logRows = await loadLogRows('session-reorder-up');
@@ -240,6 +256,8 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
     if (!loaded) throw new Error('session not found');
     const concurrent = moveSessionExercise(loaded, { exerciseOrder: 2, direction: 'down' });
     if (!concurrent.ok) throw new Error(concurrent.error.message);
+    // The concurrent mover's result is canonical too.
+    expect(concurrent.data.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
     await workoutSessionRepository.save(concurrent.data);
 
     // Saving the original stale snapshot must fail, not silently revert the

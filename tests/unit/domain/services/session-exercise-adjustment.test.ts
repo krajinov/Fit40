@@ -1,7 +1,9 @@
 /**
  * Tests for the session-exercise-adjustment domain service (M10): the skip /
- * unskip mutations and their guards, the read-only eligibility projection,
- * the skip-adjusted prescription totals, and the completion-readiness gate.
+ * unskip mutations and their guards, the adjacent-move reordering (and its
+ * canonical aggregate contract: array position always agrees with order),
+ * the read-only eligibility projection, the skip-adjusted prescription
+ * totals, and the completion-readiness gate.
  *
  * The skip⇔sets mutual exclusion is enforced by the domain alone — these
  * tests prove both rejection directions (skip with sets; log onto skipped)
@@ -197,17 +199,28 @@ describe('unskipSessionExercise', () => {
 });
 
 describe('moveSessionExercise', () => {
-  it('swaps the occurrence with its neighbor and keeps orders dense 1..N', () => {
-    const r = moveSessionExercise(threeSession(), { exerciseOrder: 2, direction: 'up' });
+  it('physically reorders the array so position agrees with order', () => {
+    const before = threeSession();
+    const r = moveSessionExercise(before, { exerciseOrder: 2, direction: 'up' });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    // The domain swaps order values in place; sort by order to assert the
-    // dense 1..N arrangement the swap must leave behind.
-    const byOrder = [...r.data.exerciseLogs].sort((a, b) => a.order - b.order);
-    expect(byOrder.map((e) => [e.order, e.authoredExerciseId])).toEqual([
+    // The returned aggregate itself is canonical — asserted directly with
+    // no re-sorting: array position agrees with order
+    // (exerciseLogs[index].order === index + 1), and the mover physically
+    // precedes its former neighbor.
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
+    expect(r.data.exerciseLogs.map((e) => [e.order, e.authoredExerciseId])).toEqual([
       [1, 'ex-002'],
       [2, 'ex-001'],
+      [3, 'ex-003'],
+    ]);
+
+    // The input session is never mutated — the move rearranged a copy, not
+    // the source aggregate.
+    expect(before.exerciseLogs.map((e) => [e.order, e.authoredExerciseId])).toEqual([
+      [1, 'ex-001'],
+      [2, 'ex-002'],
       [3, 'ex-003'],
     ]);
   });
@@ -217,6 +230,14 @@ describe('moveSessionExercise', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    // Canonical: positions agree with orders after the move, and the mover
+    // physically sits at index 2 (order 3).
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
+    expect(r.data.exerciseLogs.map((e) => e.authoredExerciseId)).toEqual([
+      'ex-001',
+      'ex-003',
+      'ex-002',
+    ]);
     // The mover carries both of its sets to the new order.
     const moved = r.data.exerciseLogs.find((e) => e.authoredExerciseId === eid('ex-002'));
     expect(moved?.order).toBe(3);
@@ -236,6 +257,7 @@ describe('moveSessionExercise', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
     const moved = r.data.exerciseLogs.find((e) => e.order === 2);
     expect(moved?.isSkipped).toBe(true);
     expect(moved?.authoredExerciseId).toBe('ex-003');
@@ -253,6 +275,7 @@ describe('moveSessionExercise', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
     const moved = r.data.exerciseLogs.find((e) => e.order === 1);
     expect(moved?.authoredExerciseId).toBe('ex-002');
     expect(moved?.performedExerciseId).toBe('ex-009');
@@ -265,6 +288,7 @@ describe('moveSessionExercise', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.version).toBe(s.version);
+    expect(r.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2, 3]);
     const untouched = r.data.exerciseLogs.find((e) => e.order === 3);
     expect(untouched?.authoredExerciseId).toBe('ex-003');
     expect(untouched?.restSeconds).toBe(90);
@@ -325,6 +349,14 @@ describe('moveSessionExercise', () => {
       // The projection and the mutation guard must never disagree.
       expect(move.ok).toBe(movable);
       expect(movable).toBe(expectMove);
+
+      // Every successful move returns a canonical aggregate: array position
+      // agrees with order for every occurrence (index + 1).
+      if (move.ok) {
+        expect(move.data.exerciseLogs.map((e) => e.order)).toEqual(
+          Array.from({ length: move.data.exerciseLogs.length }, (_, index) => index + 1),
+        );
+      }
     }
   });
 });

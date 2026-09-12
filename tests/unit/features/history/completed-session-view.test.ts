@@ -193,6 +193,149 @@ describe('toCompletedSessionView', () => {
     expect(unresolvedView.entries[0]?.historyHref).toBeNull();
   });
 
+  // ─── Skipped occurrences (M10 Slice 7) ────────────────────────────────────
+  //
+  // The persisted isSkipped flag is authoritative; zero logged sets never
+  // implies skipped. Skipped occurrences keep their persisted identity, lose
+  // the performance-history link, and (when substituted) keep the
+  // "Originally: …" authored context without implying performance.
+
+  function skippedEntry(overrides?: {
+    readonly performedExerciseId?: string;
+    readonly exerciseName?: string | null;
+    readonly authoredExerciseName?: string | null;
+    readonly isSubstituted?: boolean;
+    readonly exerciseSlug?: string | null;
+    readonly exerciseOrder?: number;
+  }): CompletedSessionDto['entries'][number] {
+    return {
+      authoredExerciseId: 'ex-002',
+      performedExerciseId: overrides?.performedExerciseId ?? 'ex-008',
+      isSubstituted: overrides?.isSubstituted ?? true,
+      isSkipped: true,
+      exerciseOrder: overrides?.exerciseOrder ?? 2,
+      exerciseName:
+        overrides?.exerciseName === undefined ? 'Dumbbell Bench Press' : overrides.exerciseName,
+      authoredExerciseName:
+        overrides?.authoredExerciseName === undefined
+          ? 'Bench Press'
+          : overrides.authoredExerciseName,
+      exerciseSlug:
+        overrides?.exerciseSlug === undefined ? 'dumbbell-bench-press' : overrides.exerciseSlug,
+      equipment: 'dumbbell',
+      restSeconds: 90,
+      prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+      sets: [],
+    };
+  }
+
+  it('keeps a substituted+skipped occurrence truthful: original context, no performance, no link', () => {
+    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }));
+    const entry = view.entries[0];
+    expect(entry?.isSkipped).toBe(true);
+    // Occurrence identity: the currently selected exercise stays primary.
+    expect(entry?.name).toBe('Dumbbell Bench Press');
+    // Substituted: the authored identity remains available as context.
+    expect(entry?.originallyName).toBe('Bench Press');
+    // No performance: zero sets, no history-link affordance.
+    expect(entry?.sets).toEqual([]);
+    expect(entry?.historyHref).toBeNull();
+  });
+
+  it('renders a plain skipped occurrence without a redundant original label', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [
+          skippedEntry({
+            performedExerciseId: 'ex-002',
+            exerciseName: 'Bench Press',
+            authoredExerciseName: 'Bench Press',
+            isSubstituted: false,
+            exerciseSlug: 'bench-press',
+          }),
+        ],
+      }),
+    );
+    const entry = view.entries[0];
+    expect(entry?.isSkipped).toBe(true);
+    expect(entry?.name).toBe('Bench Press');
+    // Not substituted → no "Originally: …" line, per existing conventions.
+    expect(entry?.originallyName).toBeNull();
+    expect(entry?.historyHref).toBeNull();
+    expect(entry?.sets).toEqual([]);
+  });
+
+  it('never infers skipped from zero logged sets (defensive empty occurrence)', () => {
+    const zeroSet = skippedEntry({
+      performedExerciseId: 'ex-002',
+      exerciseName: 'Bench Press',
+      authoredExerciseName: 'Bench Press',
+      isSubstituted: false,
+    });
+    const notSkipped: CompletedSessionDto['entries'][number] = { ...zeroSet, isSkipped: false };
+    const view = toCompletedSessionView(sessionDto({ entries: [notSkipped] }));
+    const entry = view.entries[0];
+    // Explicit skip state stays distinct from absence of logged work.
+    expect(entry?.isSkipped).toBe(false);
+    // A genuine (non-skipped) completed performance keeps its history link
+    // even with zero sets — the skip gate is the flag, not the set count.
+    expect(entry?.historyHref).toBe('/history/exercises/dumbbell-bench-press');
+    expect(entry?.sets).toEqual([]);
+  });
+
+  it('suppresses the history link for a skipped occurrence even with a valid slug', () => {
+    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }));
+    // Slug is valid — the skip gate, not slug resolution, removed the link.
+    expect(view.entries[0]?.historyHref).toBeNull();
+  });
+
+  it('renders a reordered session in DTO array order without sorting', () => {
+    // Final persisted order after "move B up": B(1), A(2), C(3). The view
+    // model must pass the canonical array through untouched.
+    const entries: CompletedSessionDto['entries'] = [
+      { ...skippedEntry({ exerciseName: 'Dumbbell Bench Press' }), exerciseOrder: 1 },
+      {
+        authoredExerciseId: 'ex-001',
+        performedExerciseId: 'ex-001',
+        isSubstituted: false,
+        isSkipped: false,
+        exerciseOrder: 2,
+        exerciseName: 'Goblet Squat',
+        authoredExerciseName: 'Goblet Squat',
+        exerciseSlug: 'goblet-squat',
+        equipment: 'kettlebell',
+        restSeconds: 90,
+        prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+        sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 50, rpe: 7 }],
+      },
+      {
+        authoredExerciseId: 'ex-015',
+        performedExerciseId: 'ex-015',
+        isSubstituted: false,
+        isSkipped: false,
+        exerciseOrder: 3,
+        exerciseName: 'Plank',
+        authoredExerciseName: 'Plank',
+        exerciseSlug: 'dead-bug',
+        equipment: 'bodyweight',
+        restSeconds: 60,
+        prescription: { type: 'duration', sets: 3, seconds: 45 },
+        sets: [{ type: 'duration', setNumber: 1, durationSeconds: 45, weightKg: null, rpe: null }],
+      },
+    ];
+    const view = toCompletedSessionView(sessionDto({ entries }));
+    expect(view.entries.map((entry) => entry.name)).toEqual([
+      'Dumbbell Bench Press',
+      'Goblet Squat',
+      'Plank',
+    ]);
+    // The array passed through untouched — persisted orders 1..3 in position.
+    expect(view.entries.map((entry) => entry.exerciseOrder)).toEqual([1, 2, 3]);
+    // The skipped occurrence keeps its neutral state at its new position.
+    expect(view.entries[0]?.isSkipped).toBe(true);
+    expect(view.entries[0]?.historyHref).toBeNull();
+  });
+
   // ─── Substitution display (M9) ────────────────────────────────────────────
 
   describe('substitution context (M9)', () => {

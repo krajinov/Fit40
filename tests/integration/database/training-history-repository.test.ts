@@ -16,6 +16,10 @@ import {
   createWorkoutSessionId,
 } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
+import {
+  moveSessionExercise,
+  skipSessionExercise,
+} from '@/domain/services/session-exercise-adjustment';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
 import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';
@@ -117,6 +121,8 @@ interface HistoryLogSpec {
    * performed-as-authored. `exerciseId` remains the AUTHORED id.
    */
   readonly performedExerciseId?: string;
+  /** Marks the occurrence explicitly skipped (M10) — never inferred. */
+  readonly isSkipped?: boolean;
   readonly type: 'reps' | 'duration';
   readonly sets: ReadonlyArray<HistorySetSpec>;
 }
@@ -179,6 +185,11 @@ function historySession(spec: {
       });
       if (!logged.ok) throw new Error(logged.error.message);
       session = logged.data;
+    }
+    if (log.isSkipped === true) {
+      const skipped = skipSessionExercise(session, { exerciseOrder: index + 1 });
+      if (!skipped.ok) throw new Error(skipped.error.message);
+      session = skipped.data;
     }
   }
   if (spec.completedAt !== undefined) {
@@ -1647,6 +1658,327 @@ describe('training history — progression performance windows', () => {
     expect(performances[0]?.sets).toEqual([
       { type: 'reps', setNumber: 1, reps: 10, weightKg: 30, rpe: 7 },
     ]);
+  });
+
+  // ─── Skipped occurrences and reordered sessions (M10 Slice 7) ─────────────
+  //
+  // Regression proof at the read-model layer: the explicit persisted
+  // isSkipped flag keeps a zero-set occurrence out of per-exercise
+  // performance history and progression inputs while completed-session
+  // detail still shows it truthfully; a completed session that was
+  // reordered before completion renders its persisted final order.
+
+  describe('skipped occurrences and reordered sessions (M10)', () => {
+    function skippedSubstitutedSession(
+      id: string,
+      occurrence: number,
+    ): WorkoutSession {
+      return historySession({
+        id,
+        occurrence,
+        startedAt: '2025-01-06T10:00:00Z',
+        completedAt: '2025-01-06T11:00:00Z',
+        logs: [
+          {
+            // Authored ex-002, performed-as ex-008, skipped BEFORE
+            // completion — substitution can validly precede skip.
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            isSkipped: true,
+            type: 'reps',
+            sets: [],
+          },
+          // A genuine logged occurrence so the completion rule (>=1 logged
+          // set somewhere) is satisfied alongside the skipped one.
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+        ],
+      });
+    }
+
+    it('excludes a substituted+skipped zero-set occurrence from exercise performance history', async () => {
+      await saveAll(
+        skippedSubstitutedSession('session-m10-skipped', 0),
+        // Genuine logged ex-008 work in a later session — must remain.
+        historySession({
+          id: 'session-m10-genuine',
+          occurrence: 1,
+          startedAt: '2025-02-06T10:00:00Z',
+          completedAt: '2025-02-06T11:00:00Z',
+          logs: [{ exerciseId: 'ex-008', type: 'reps', sets: [{ reps: 10, weightKg: 40 }] }],
+        }),
+      );
+
+      const history = await exerciseHistoryUseCase.execute({
+        userId: OWNER_A,
+        slug: 'dumbbell-bench-press',
+      });
+      expect(history.ok).toBe(true);
+      if (!history.ok) return;
+      // Zero set_logs ⇒ no occurrence; the query relies on actual set_logs
+      // existence and the skipped occurrence never fabricated one.
+      expect(history.data.entries.map((entry) => entry.sessionId)).toEqual([
+        'session-m10-genuine',
+      ]);
+      expect(history.data.trend.map((point) => point.sessionId)).toEqual([
+        'session-m10-genuine',
+      ]);
+      // ...and it never leaked into ex-002 (authored) history either.
+      const authored = await exerciseHistoryUseCase.execute({
+        userId: OWNER_A,
+        slug: 'goblet-squat',
+      });
+      expect(authored.ok).toBe(true);
+      if (!authored.ok) return;
+      expect(authored.data.entries).toEqual([]);
+    });
+
+    it('keeps skipped occurrences out of progression-history inputs', async () => {
+      await saveAll(
+        skippedSubstitutedSession('session-m10-prog-skipped', 0),
+        historySession({
+          id: 'session-m10-prog-genuine',
+          occurrence: 1,
+          startedAt: '2025-02-06T10:00:00Z',
+          completedAt: '2025-02-06T11:00:00Z',
+          logs: [{ exerciseId: 'ex-008', type: 'reps', sets: [{ reps: 10, weightKg: 40 }] }],
+        }),
+      );
+
+      // The M8 progression input read — only genuine performed work.
+      const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+        userId(OWNER_A),
+        [exerciseId('ex-008')],
+        5,
+      );
+      expect(performances.map((performance) => performance.sessionId)).toEqual([
+        'session-m10-prog-genuine',
+      ]);
+      expect(performances[0]?.sets).toEqual([
+        { type: 'reps', setNumber: 1, reps: 10, weightKg: 40, rpe: null },
+      ]);
+    });
+
+    it('renders a reordered completed session in its persisted final order', async () => {
+      // Final order after "move B up": B(1), A(2) — persisted as-is; the
+      // authored template order (A first) is NOT reconstructed.
+      await saveAll(
+        historySession({
+          id: 'session-m10-reordered',
+          startedAt: '2025-01-06T10:00:00Z',
+          completedAt: '2025-01-06T11:00:00Z',
+          logs: [
+            // order 1 — ex-002 (goblet squat), 1 logged set
+            { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 16 }] },
+            // order 2 — ex-001 (bodyweight squat), 1 logged set
+            { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 12, weightKg: null }] },
+          ],
+        }),
+      );
+
+      const result = await detailUseCase.execute({
+        userId: OWNER_A,
+        sessionId: 'session-m10-reordered',
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.entries.map((entry) => entry.exerciseOrder)).toEqual([1, 2]);
+      expect(result.data.entries.map((entry) => entry.performedExerciseId)).toEqual([
+        'ex-002',
+        'ex-001',
+      ]);
+      // Each set stayed with its own occurrence after the move.
+      expect(result.data.entries[0]?.sets[0]?.weightKg).toBe(16);
+      const movedSet = result.data.entries[1]?.sets[0];
+      if (movedSet === undefined || movedSet.type !== 'reps') {
+        throw new Error('expected a reps set');
+      }
+      expect(movedSet.reps).toBe(12);
+    });
+  });
+});
+
+describe('training history — skipped and reordered occurrences (M10)', () => {
+  it('keeps a skipped occurrence in completed detail but out of exercise history and progression inputs', async () => {
+    await saveAll(
+      // Completed session: genuine squat occurrence plus a
+      // substituted-then-skipped bench occurrence (valid M10 state:
+      // substitution is blocked only WHILE skipped, so it can happen before).
+      historySession({
+        id: 'session-skip-det',
+        occurrence: 1,
+        startedAt: '2025-02-01T10:00:00Z',
+        completedAt: '2025-02-01T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          {
+            exerciseId: 'ex-002',
+            performedExerciseId: 'ex-008',
+            type: 'reps',
+            sets: [],
+            isSkipped: true,
+          },
+        ],
+      }),
+      // A later genuine bench performance drives history/progression normally.
+      historySession({
+        id: 'session-skip-genuine',
+        occurrence: 3,
+        startedAt: '2025-03-01T10:00:00Z',
+        completedAt: '2025-03-01T11:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 24 }] }],
+      }),
+    );
+
+    // Skipped zero-set occurrences are absent from per-exercise history —
+    // for BOTH identities (authored ex-002 and performed ex-008).
+    const skippedHistory = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'dumbbell-bench-press',
+    });
+    expect(skippedHistory.ok).toBe(true);
+    if (!skippedHistory.ok) return;
+    expect(skippedHistory.data.entries).toEqual([]);
+
+    const genuineHistory = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'goblet-squat',
+    });
+    expect(genuineHistory.ok).toBe(true);
+    if (!genuineHistory.ok) return;
+    expect(genuineHistory.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-skip-genuine',
+    ]);
+
+    // Progression inputs (M8 previous-performance lookup) exclude the skipped
+    // occurrence: the next bench recommendation cannot anchor to zero work.
+    const progressionInputs = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002'), exerciseId('ex-008')],
+      5,
+    );
+    expect(progressionInputs.map((p) => [p.exerciseId, p.sessionId])).toEqual([
+      ['ex-002', 'session-skip-genuine'],
+    ]);
+
+    // The completed-session DETAIL still contains the skipped occurrence,
+    // with explicit persisted skip state and truthful identities.
+    const detail = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-skip-det',
+    });
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    const skippedEntry = detail.data.entries[1];
+    expect(skippedEntry).toMatchObject({
+      authoredExerciseId: 'ex-002',
+      performedExerciseId: 'ex-008',
+      isSubstituted: true,
+      isSkipped: true,
+      exerciseOrder: 2,
+      sets: [],
+    });
+    expect(detail.data.entries).toHaveLength(2);
+  });
+
+  it('renders a reordered completed session in final persisted order with sets attached to movers', async () => {
+    const built = historySession({
+      id: 'session-move-det',
+      occurrence: 1,
+      startedAt: '2025-02-01T10:00:00Z',
+      logs: [
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 24 }] },
+        // Duplicate of ex-001: distinguished by (sessionId, exerciseOrder).
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 12, weightKg: 30 }] },
+      ],
+    });
+    // B (order 2) moves up BEFORE completion: final persisted order B, A, C.
+    const moved = moveSessionExercise(built, { exerciseOrder: 2, direction: 'up' });
+    if (!moved.ok) throw new Error(moved.error.message);
+    const completedSession = completeWorkoutSession(moved.data, new Date('2025-02-01T11:00:00Z'));
+    if (!completedSession.ok) throw new Error(completedSession.error.message);
+    await workoutSessionRepositorySave(completedSession.data);
+
+    const detail = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-move-det',
+    });
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    // History renders the persisted final order — never the template order.
+    expect(
+      detail.data.entries.map((entry) => [entry.exerciseOrder, entry.performedExerciseId]),
+    ).toEqual([
+      [1, 'ex-002'],
+      [2, 'ex-001'],
+      [3, 'ex-001'],
+    ]);
+    // Every occurrence kept its own sets through the move and the
+    // whole-aggregate delete/reinsert: B keeps 24, A keeps 20, C keeps 30.
+    expect(detail.data.entries[0]?.sets.map((set) => set.weightKg)).toEqual([24]);
+    expect(detail.data.entries[1]?.sets.map((set) => set.weightKg)).toEqual([20]);
+    expect(detail.data.entries[2]?.sets.map((set) => set.weightKg)).toEqual([30]);
+
+    // Occurrence identity is (sessionId, exerciseOrder): the moved squat
+    // occurrences appear as two entries under their NEW orders, weights intact.
+    const squatHistory = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'bodyweight-squat',
+    });
+    expect(squatHistory.ok).toBe(true);
+    if (!squatHistory.ok) return;
+    expect(
+      squatHistory.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder]),
+    ).toEqual([
+      ['session-move-det', 3],
+      ['session-move-det', 2],
+    ]);
+    expect(squatHistory.data.entries.map((entry) => entry.workingLoadKg)).toEqual([30, 20]);
+  });
+
+  it('counts a completed session with skips toward program progress, detached excluded, reorder-neutral', async () => {
+    const { workoutSessionRepository } = await import('./setup');
+
+    // Reorder BEFORE completion, then complete: session identity is what
+    // program progress consumes — not its exercise mix or order.
+    const built = historySession({
+      id: 'session-prog-skip',
+      occurrence: 1,
+      startedAt: '2025-02-01T10:00:00Z',
+      logs: [
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [], isSkipped: true },
+      ],
+    });
+    const moved = moveSessionExercise(built, { exerciseOrder: 1, direction: 'down' });
+    if (!moved.ok) throw new Error(moved.error.message);
+    const completed = completeWorkoutSession(moved.data, new Date('2025-02-01T11:00:00Z'));
+    if (!completed.ok) throw new Error(completed.error.message);
+    await workoutSessionRepositorySave(completed.data);
+
+    const scheduledIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-hist-a'),
+    );
+    // Completed WITH a skipped occurrence and after a reorder — still counts.
+    expect(scheduledIds.map(String)).toContain('fit40-beginner-strength-w1-2');
+
+    // Detached completed session with a skip: never program progress.
+    const detached = historySession({
+      id: 'session-prog-detached',
+      occurrence: 2,
+      enrollmentId: null,
+      startedAt: '2025-02-02T10:00:00Z',
+      completedAt: '2025-02-02T11:00:00Z',
+      logs: [
+        { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8 }] },
+        { exerciseId: 'ex-002', type: 'reps', sets: [], isSkipped: true },
+      ],
+    });
+    await workoutSessionRepositorySave(detached);
+    const afterDetached = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-hist-a'),
+    );
+    expect(afterDetached.map(String)).not.toContain('fit40-beginner-strength-w2-1');
   });
 });
 

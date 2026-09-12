@@ -18,6 +18,11 @@
  * - The PERFORMED exercise is each entry's primary identity; a substituted
  *   occurrence adds the subtle "Originally: …" authored-exercise context,
  *   omitted when the authored metadata is unavailable — never fabricated.
+ * - A SKIPPED occurrence renders a neutral "Skipped" state: no
+ *   performance-history link, no set rows, no fabricated performance. The
+ *   persisted isSkipped flag is authoritative — zero logged sets never
+ *   implies skipped. A substituted-then-skipped occurrence keeps "Originally:
+ *   …" without implying the replacement was performed.
  * - Current catalog names are display-only; an unresolved exercise falls
  *   back to a positional label instead of hiding the work.
  * - Logged timed work (`totalDurationSeconds`) is never labeled as the
@@ -55,6 +60,12 @@ export interface CompletedSessionEntryView {
   readonly originallyName: string | null;
   /** `/history/exercises/<slug>` when a valid slug resolved, else null. */
   readonly historyHref: string | null;
+  /**
+   * The persisted skip decision for this occurrence (M10). Explicit DTO
+   * state — never inferred from zero logged sets. A skipped occurrence
+   * renders the neutral Skipped state with no history link and no set rows.
+   */
+  readonly isSkipped: boolean;
   readonly equipmentLabel: string | null;
   readonly prescriptionLabel: string;
   readonly restLabel: string | null;
@@ -94,13 +105,16 @@ function toEntryView(
       entry.isSubstituted && entry.authoredExerciseName !== null
         ? entry.authoredExerciseName
         : null,
-    // The slug is current catalog data, not the persisted record — only a
-    // structurally valid slug links out; anything else renders as plain
-    // text instead of a broken URL.
+    // A skipped occurrence (M10) never links into per-exercise performance
+    // history: it carries zero set logs and is intentionally excluded there.
     historyHref:
-      entry.exerciseSlug !== null && SLUG_PATTERN.test(entry.exerciseSlug)
+      !entry.isSkipped &&
+      entry.exerciseSlug !== null &&
+      SLUG_PATTERN.test(entry.exerciseSlug)
         ? `/history/exercises/${entry.exerciseSlug}`
         : null,
+    // Explicit persisted skip state — never inferred from zero logged sets.
+    isSkipped: entry.isSkipped,
     equipmentLabel: entry.equipment === null ? null : EQUIPMENT_LABELS[entry.equipment],
     prescriptionLabel: formatPrescription(entry.prescription),
     restLabel: entry.restSeconds > 0 ? `${entry.restSeconds}s rest` : null,

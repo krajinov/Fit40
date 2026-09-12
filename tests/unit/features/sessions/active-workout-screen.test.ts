@@ -217,6 +217,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
       status: 'in-progress',
       startedAt: '2026-09-01T17:00:00.000Z',
       completedAt: null,
+      version: 0,
       exerciseLogs: [
         log(1, 'ex-b', [repSet(1, 10, 50), repSet(2, 10, 50)]),
         log(2, 'ex-a', [repSet(1, 10, 40)]),
@@ -251,6 +252,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
       status: 'in-progress',
       startedAt: '2026-09-01T17:00:00.000Z',
       completedAt: null,
+      version: 0,
       exerciseLogs: [
         log(1, 'ex-b', [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
         log(2, 'ex-a', [repSet(1, 10, 40)]),
@@ -287,6 +289,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
       status: 'in-progress',
       startedAt: '2026-09-01T17:00:00.000Z',
       completedAt: null,
+      version: 0,
       exerciseLogs: [
         log(1, 'ex-b', [], {
           isSkipped: true,
@@ -331,6 +334,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
       status: 'in-progress',
       startedAt: '2026-09-01T17:00:00.000Z',
       completedAt: null,
+      version: 0,
       exerciseLogs: [
         log(1, 'ex-b', []),
         log(2, 'ex-a', []),

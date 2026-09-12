@@ -51,6 +51,7 @@ function makeMoveFormData(direction: 'up' | 'down' = 'up'): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '2');
+  fd.set('expectedSessionVersion', '5');
   fd.set('direction', direction);
   fd.set('programSlug', 'fit40-beginner-strength');
   fd.set('weekNumber', '1');
@@ -151,6 +152,7 @@ describe('moveExerciseAction', () => {
     expect(execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 2,
+      expectedSessionVersion: 5,
       direction: 'down',
       userId: SESSION_USER.id,
     });

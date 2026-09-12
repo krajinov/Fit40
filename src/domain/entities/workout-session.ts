@@ -17,7 +17,6 @@
  */
 
 import { err, ok, type Result } from '@/domain/types/result';
-import { resolveSessionCompletionReadiness } from '@/domain/services/session-exercise-adjustment';
 
 import type {
   EnrollmentId,
@@ -541,6 +540,26 @@ export function deleteSessionSet(
 }
 
 // ─── Complete ────────────────────────────────────────────────────────────────
+
+/**
+ * The domain-owned completion gate (F6, unchanged by M10): a session is
+ * completable when at least one set is logged somewhere in it. Skipped
+ * occurrences carry no sets, so an all-skipped session stays non-completable
+ * through this same gate; there is no stricter every-non-skipped-exercise
+ * rule. Defined here — next to `completeWorkoutSession`, its only mutator
+ * consumer — so the entity module imports nothing from the adjustment
+ * service (acyclic domain graph, no source-level cycle).
+ */
+export interface SessionCompletionReadiness {
+  readonly canComplete: boolean;
+}
+
+export function resolveSessionCompletionReadiness(
+  session: WorkoutSession,
+): SessionCompletionReadiness {
+  const hasLoggedSets = session.exerciseLogs.some((log) => log.sets.length > 0);
+  return { canComplete: hasLoggedSets };
+}
 
 export function completeWorkoutSession(
   session: WorkoutSession,

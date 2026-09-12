@@ -58,6 +58,7 @@ function makeSubstituteFormData(): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '1');
+  fd.set('expectedSessionVersion', '4');
   fd.set('replacementExerciseId', 'ex-db-bench');
   fd.set('programSlug', 'fit40-beginner-strength');
   fd.set('weekNumber', '1');
@@ -69,6 +70,7 @@ function makeRestoreFormData(): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '1');
+  fd.set('expectedSessionVersion', '4');
   fd.set('programSlug', 'fit40-beginner-strength');
   fd.set('weekNumber', '1');
   fd.set('workoutOrder', '1');
@@ -204,6 +206,7 @@ describe('substitution action schemas (FormData coercion)', () => {
     expect(substituteSessionExerciseUseCase.execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 1,
+      expectedSessionVersion: 4,
       replacementExerciseId: 'ex-db-bench',
       userId: SESSION_USER.id,
     });
@@ -217,6 +220,7 @@ describe('substitution action schemas (FormData coercion)', () => {
     expect(restoreSessionExerciseUseCase.execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 1,
+      expectedSessionVersion: 4,
       userId: SESSION_USER.id,
     });
   });

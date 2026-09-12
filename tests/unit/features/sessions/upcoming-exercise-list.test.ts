@@ -68,6 +68,7 @@ async function renderList(
         upcoming,
         logs,
         sessionId: 's-1',
+        expectedSessionVersion: 0,
         programSlug: 'prog-1',
         weekNumber: 1,
         workoutOrder: 1,
@@ -116,6 +117,7 @@ const openAdjustment: SessionAdjustmentView = {
 function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): SessionExerciseCardView {
   return {
     order: 2,
+    renderKey: '2:ex-001:ex-001',
     kind: 'upcoming',
     name: 'Dumbbell Bench Press',
     originallyName: null,
@@ -258,5 +260,163 @@ describe('UpcomingExerciseList / adjacent move affordance (M10 Slice 6)', () => 
     expect(row?.textContent).not.toContain('Undo skip');
     expect(row?.textContent).not.toContain('Move up');
     expect(row?.textContent).not.toContain('Move down');
+  });
+});
+
+// ─── PR #13 Finding 2: React state must not follow mutable order keys ────────
+
+/**
+ * A render-and-rerender harness: unlike `renderList`, this returns a
+ * `rerender` function so the test can simulate the canonical reorder
+ * arriving as a new server render (B moved above A) and assert what happened
+ * to local component state at each order slot.
+ */
+async function renderListRerenderable(
+  initial: ReadonlyArray<SessionExerciseCardView>,
+  initialLogs: ReadonlyMap<number, WorkoutSessionExerciseDto>,
+): Promise<{
+  container: HTMLElement;
+  rerender: (
+    upcoming: ReadonlyArray<SessionExerciseCardView>,
+    logs: ReadonlyMap<number, WorkoutSessionExerciseDto>,
+  ) => Promise<void>;
+}> {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  mounted.push({ container, root });
+
+  async function renderInto(
+    upcoming: ReadonlyArray<SessionExerciseCardView>,
+    logs: ReadonlyMap<number, WorkoutSessionExerciseDto>,
+  ): Promise<void> {
+    await act(async () => {
+      root.render(
+        createElement(UpcomingExerciseList, {
+          upcoming,
+          logs,
+          sessionId: 's-1',
+          expectedSessionVersion: 0,
+          programSlug: 'prog-1',
+          weekNumber: 1,
+          workoutOrder: 1,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  await renderInto(initial, initialLogs);
+  return { container, rerender: renderInto };
+}
+
+/** The reps input of the FIRST row's expanded logger. */
+function firstRowCountInput(container: HTMLElement): HTMLInputElement {
+  const firstLi = container.querySelector('li');
+  if (firstLi === null) throw new Error('missing first row');
+  const input = Array.from(firstLi.querySelectorAll('input')).find(
+    (el) => (el as HTMLInputElement).name === 'reps',
+  );
+  if (input === undefined) throw new Error('missing reps input in the first row');
+  return input as HTMLInputElement;
+}
+
+/** Types into a React controlled input the way a real browser does (jsdom needs the native value setter to reach React's onChange). */
+async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )?.set;
+  if (nativeSetter === undefined) throw new Error('missing native input value setter');
+  await act(async () => {
+    nativeSetter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+describe('UpcomingExerciseList / reorder remounts the occurrence subtree (PR #13 Finding 2)', () => {
+  it("a reorder that seats a different occurrence at order 1 does not inherit the previous occupant's local state", async () => {
+    // Rendered state: A (Squat, order 1) and B (Bench, order 2) — distinct
+    // exercises at distinct orders. Both rows carry a logger (expandable).
+    const squatCard = upcomingCard({ order: 1, renderKey: '1:ex-squat:ex-squat', name: 'Squat' });
+    const benchCard = upcomingCard({ order: 2, renderKey: '2:ex-bench:ex-bench', name: 'Bench' });
+    const squatLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(1),
+      authoredExerciseId: 'ex-squat',
+      performedExerciseId: 'ex-squat',
+    };
+    const benchLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(2),
+      authoredExerciseId: 'ex-bench',
+      performedExerciseId: 'ex-bench',
+    };
+
+    const { container, rerender } = await renderListRerenderable(
+      [squatCard, benchCard],
+      new Map([
+        [1, squatLog],
+        [2, benchLog],
+      ]),
+    );
+
+    // The user types into A's (Squat's) controlled logger — LOCAL
+    // SetLoggerForm state at the order-1 slot.
+    const squatInput = firstRowCountInput(container);
+    await typeInto(squatInput, '10');
+    expect(squatInput.value).toBe('10');
+
+    // The canonical reorder arrives from the server: B (Bench) now occupies
+    // order 1; A (Squat) moved to order 2. The renderKey changes at the
+    // order-1 slot, so React REMOUNTS that subtree — Bench never inherits
+    // the squat draft.
+    const reorderedBench = upcomingCard({
+      order: 1,
+      renderKey: '1:ex-bench:ex-bench',
+      name: 'Bench',
+    });
+    const reorderedSquat = upcomingCard({
+      order: 2,
+      renderKey: '2:ex-squat:ex-squat',
+      name: 'Squat',
+    });
+    await rerender(
+      [reorderedBench, reorderedSquat],
+      new Map([
+        [1, benchLog],
+        [2, squatLog],
+      ]),
+    );
+
+    // The order-1 row is now Bench, and its logger state started fresh:
+    // the squat draft (10) is gone — it did not follow the numeric key.
+    const benchInput = firstRowCountInput(container);
+    expect(container.querySelector('li')?.textContent).toContain('Bench');
+    expect(benchInput.value).toBe('');
+    // The Squat occurrence (now order 2) renders as its own fresh row.
+    expect(container.textContent).toContain('Squat');
+  });
+
+  it('an ordinary rerender of the same occurrence keeps its local state', async () => {
+    const squatCard = upcomingCard({ order: 1, renderKey: '1:ex-squat:ex-squat', name: 'Squat' });
+    const squatLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(1),
+      authoredExerciseId: 'ex-squat',
+      performedExerciseId: 'ex-squat',
+    };
+    const { container, rerender } = await renderListRerenderable(
+      [squatCard],
+      new Map([[1, squatLog]]),
+    );
+
+    const input = firstRowCountInput(container);
+    await typeInto(input, '8');
+
+    // Same occurrence, same order, same identity — the key is stable, so an
+    // unrelated rerender (e.g. a target refresh) preserves the draft.
+    await rerender([squatCard], new Map([[1, squatLog]]));
+
+    const inputAfter = firstRowCountInput(container);
+    expect(inputAfter.value).toBe('8');
   });
 });

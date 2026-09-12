@@ -16,6 +16,7 @@
 import {
   SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
+  SessionStaleVersionError,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -75,7 +76,22 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
       }
     }
-    this.sessionsById.set(session.id, structuredClone(session));
+    // Optimistic concurrency, mirroring the Drizzle implementation exactly:
+    // an UPDATE of an existing row must carry the version the caller READ,
+    // and only the update path bumps the stored version by one — a first
+    // save (INSERT, no existing row) stores the snapshot's own version,
+    // like the SQL upsert's insert branch. A stale snapshot is rejected
+    // instead of silently overwriting concurrent changes, so use-case tests
+    // observe the same race outcome as PostgreSQL.
+    if (existing !== undefined && existing.version !== session.version) {
+      throw new SessionStaleVersionError(session.id);
+    }
+    this.sessionsById.set(
+      session.id,
+      structuredClone(
+        existing === undefined ? session : { ...session, version: session.version + 1 },
+      ),
+    );
   }
 
   async listCompletedScheduledWorkoutIds(

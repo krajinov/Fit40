@@ -27,6 +27,12 @@ const quietControlClass =
 interface SessionExerciseAdjustPanelProps {
   readonly sessionId: string;
   readonly exerciseOrder: number;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), submitted with
+   * every adjustment so the use case can reject stale rendered intent before
+   * interpreting the mutable `exerciseOrder`.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -78,6 +84,7 @@ interface SessionExerciseAdjustPanelProps {
 export function SessionExerciseAdjustPanel({
   sessionId,
   exerciseOrder,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -95,6 +102,7 @@ export function SessionExerciseAdjustPanel({
   function applyRouteFields(formData: FormData): void {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));

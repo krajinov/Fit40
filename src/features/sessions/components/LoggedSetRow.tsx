@@ -38,6 +38,12 @@ interface LoggedSetRowProps {
   /** The set to display/edit/delete. */
   readonly set: WorkoutSessionSetDto;
   readonly exerciseOrder: number;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), submitted with
+   * every set mutation so the use case can reject stale rendered intent
+   * before interpreting the mutable `exerciseOrder`.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -70,6 +76,7 @@ export function LoggedSetRow({
   sessionId,
   set,
   exerciseOrder,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -109,6 +116,7 @@ export function LoggedSetRow({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('setNumber', String(set.setNumber));
     formData.set('type', isReps ? 'reps' : 'duration');
     formData.set('programSlug', programSlug);
@@ -139,6 +147,7 @@ export function LoggedSetRow({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('setNumber', String(set.setNumber));
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));

@@ -42,12 +42,12 @@
  * Session-level consequences of skip decisions are domain-owned here:
  * - `resolveSessionPrescriptionTotals`: the progress denominator excludes
  *   skipped occurrences (F5).
- * - `resolveSessionCompletionReadiness`: the completion gate — a session is
- *   completable when at least one set is logged somewhere (F6, unchanged by
- *   M10). Skipped occurrences carry no sets, so an all-skipped session
- *   stays non-completable through this same gate; there is no stricter
- *   every-non-skipped-exercise rule. `completeWorkoutSession` delegates to
- *   this definition.
+ * - The completion gate (F6, unchanged by M10) lives on the entity
+ *   (`resolveSessionCompletionReadiness` in `workout-session.ts`, next to
+ *   `completeWorkoutSession`): a session is completable when at least one
+ *   set is logged somewhere. Skipped occurrences carry no sets, so an
+ *   all-skipped session stays non-completable through that same gate; there
+ *   is no stricter every-non-skipped-exercise rule.
  */
 
 import type { ExerciseLog, WorkoutSession } from '@/domain/entities/workout-session';
@@ -341,20 +341,4 @@ export function resolveSessionPrescriptionTotals(
     prescribedSets += log.prescription.sets;
   }
   return { prescribedSets, skippedOccurrences };
-}
-
-/**
- * The domain-owned completion gate (F6, unchanged by M10): a session is
- * completable when at least one set is logged somewhere in it.
- * `completeWorkoutSession` delegates to this definition.
- */
-export interface SessionCompletionReadiness {
-  readonly canComplete: boolean;
-}
-
-export function resolveSessionCompletionReadiness(
-  session: WorkoutSession,
-): SessionCompletionReadiness {
-  const hasLoggedSets = session.exerciseLogs.some((log) => log.sets.length > 0);
-  return { canComplete: hasLoggedSets };
 }

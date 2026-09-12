@@ -78,7 +78,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -98,10 +98,12 @@ describe('SkipSessionExerciseUseCase', () => {
     const findByIdSpy = vi.spyOn(repo, 'findById');
 
     const cases = [
-      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1 },
-      { sessionId: 's-1', userId: '', exerciseOrder: 1 },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0 },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 2.5 },
+      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: '', exerciseOrder: 1, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 2.5, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, expectedSessionVersion: -1 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, expectedSessionVersion: 1.5 },
     ];
     for (const input of cases) {
       const r = await uc.execute(input);
@@ -113,7 +115,7 @@ describe('SkipSessionExerciseUseCase', () => {
 
   it('returns SESSION_NOT_FOUND for an unknown session', async () => {
     const uc = new SkipSessionExerciseUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -123,7 +125,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession('user-1');
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -136,7 +138,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(OWNER_ID, null);
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -162,7 +164,7 @@ describe('SkipSessionExerciseUseCase', () => {
     await repo.save(completed.data);
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -184,7 +186,7 @@ describe('SkipSessionExerciseUseCase', () => {
     await repo.save(withSet.data);
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -197,7 +199,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSkippedSession();
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -208,7 +210,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99 , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -220,7 +222,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionStaleVersionError('s-1'));
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -233,7 +235,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionEnrollmentChangedError('s-1'));
     const uc = new SkipSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -247,7 +249,7 @@ describe('SkipSessionExerciseUseCase', () => {
     const uc = new SkipSessionExerciseUseCase(repo);
 
     await expect(
-      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1 }),
+      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, expectedSessionVersion: 0 }),
     ).rejects.toThrow('db connection lost');
 
     saveSpy.mockRestore();

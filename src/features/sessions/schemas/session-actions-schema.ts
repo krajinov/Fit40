@@ -10,6 +10,14 @@ export const exerciseOrderSchema = z.coerce.number().int().min(1);
 export const setNumberSchema = z.coerce.number().int().min(1);
 
 /**
+ * The rendered session snapshot's optimistic-concurrency token (PR #13
+ * Finding 1), submitted by every occurrence-addressed mutation form so the
+ * use case can reject stale rendered intent BEFORE interpreting the mutable
+ * `exerciseOrder`. Fresh sessions start at 0; every successful save bumps it.
+ */
+export const expectedSessionVersionSchema = z.coerce.number().int().min(0);
+
+/**
  * Optional decimal load. Browser FormData delivers numeric strings ("52.5"),
  * so coerce before validating; '' or an absent field normalizes to null (no
  * load), and a non-numeric string fails validation.
@@ -28,6 +36,7 @@ const rpeSchema = z.preprocess(toNullableNumber, z.number().int().min(1).max(10)
 export const repSetInputSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
   type: z.literal('reps'),
   reps: z.coerce.number().int().positive(),
   weightKg: weightKgSchema,
@@ -37,6 +46,7 @@ export const repSetInputSchema = z.object({
 export const durationSetInputSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
   type: z.literal('duration'),
   durationSeconds: z.coerce.number().int().positive(),
   weightKg: weightKgSchema,
@@ -53,6 +63,7 @@ export const updateSetSchema = z.discriminatedUnion('type', [
 export const deleteSetSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
   setNumber: setNumberSchema,
 });
 
@@ -74,6 +85,7 @@ export const startSessionSchema = z.object({
 export const substituteExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
   replacementExerciseId: z.string().min(1),
 });
 
@@ -81,6 +93,7 @@ export const substituteExerciseSchema = z.object({
 export const restoreExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
 });
 
 /**
@@ -91,12 +104,14 @@ export const restoreExerciseSchema = z.object({
 export const skipExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
 });
 
 /** Unskip (M10): the occurrence reverted back to not-skipped. */
 export const unskipExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
 });
 
 /**
@@ -113,5 +128,6 @@ export const moveDirectionSchema = z.enum(['up', 'down']);
 export const moveExerciseSchema = z.object({
   sessionId: sessionIdSchema,
   exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
   direction: moveDirectionSchema,
 });

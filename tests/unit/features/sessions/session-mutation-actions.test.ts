@@ -60,6 +60,7 @@ function makeLogSetFormData(): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '1');
+  fd.set('expectedSessionVersion', '2');
   fd.set('type', 'reps');
   fd.set('reps', '10');
   fd.set('programSlug', 'fit40-beginner-strength');
@@ -78,6 +79,7 @@ function makeDeleteSetFormData(): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '1');
+  fd.set('expectedSessionVersion', '2');
   fd.set('setNumber', '1');
   fd.set('programSlug', 'fit40-beginner-strength');
   fd.set('weekNumber', '1');
@@ -239,6 +241,7 @@ describe('set FormData round-trips with optional RPE', () => {
     expect(logSessionSetUseCase.execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 1,
+      expectedSessionVersion: 2,
       type: 'reps',
       reps: 10,
       weightKg: 52.5,

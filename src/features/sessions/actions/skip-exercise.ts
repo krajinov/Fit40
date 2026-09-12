@@ -25,6 +25,7 @@ export async function skipExerciseAction(formData: FormData): Promise<SessionAct
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
   };
 
   const parsed = skipExerciseSchema.safeParse(raw);

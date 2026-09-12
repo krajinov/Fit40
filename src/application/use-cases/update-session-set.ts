@@ -10,9 +10,13 @@ import {
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import {
   updateSessionSet,
-  type UpdateSetCommandInput,
   type SessionMutationError,
+  type UpdateSetCommandInput,
 } from '@/domain/entities/workout-session';
+import {
+  isValidExpectedSessionVersion,
+  rejectStaleRenderedIntent,
+} from '@/application/use-cases/session-version-guard';
 import { createUserId, createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -28,6 +32,14 @@ export interface UpdateSessionSetInput {
   readonly sessionId: string;
   readonly userId: string;
   readonly exerciseOrder: number;
+  /**
+   * The session `version` of the snapshot the caller rendered (PR #13
+   * Finding 1): compared against the freshly loaded aggregate BEFORE
+   * `exerciseOrder` is interpreted, so a tab rendered before a concurrent
+   * reorder cannot edit the sets of the occurrence that now occupies its
+   * old order.
+   */
+  readonly expectedSessionVersion: number;
   readonly setNumber: number;
   readonly type: 'reps';
   readonly reps: number;
@@ -39,6 +51,8 @@ export interface UpdateSessionDurationSetInput {
   readonly sessionId: string;
   readonly userId: string;
   readonly exerciseOrder: number;
+  /** Same stale-rendered-intent guard as the reps variant. */
+  readonly expectedSessionVersion: number;
   readonly setNumber: number;
   readonly type: 'duration';
   readonly durationSeconds: number;
@@ -62,6 +76,14 @@ export class UpdateSessionSetUseCase {
     const userIdResult = createUserId(input.userId);
     if (!userIdResult.ok) {
       return err({ code: 'INVALID_INPUT', message: userIdResult.error.message, field: 'userId' });
+    }
+
+    if (!isValidExpectedSessionVersion(input.expectedSessionVersion)) {
+      return err({
+        code: 'INVALID_INPUT',
+        message: 'expectedSessionVersion must be a non-negative integer',
+        field: 'expectedSessionVersion',
+      });
     }
 
     const session = await this.sessionRepository.findById(idResult.data);
@@ -91,6 +113,13 @@ export class UpdateSessionSetUseCase {
         message:
           'You are no longer enrolled in this program, so this session can no longer be modified.',
       });
+    }
+
+    // Stale rendered intent (PR #13 Finding 1): reject BEFORE interpreting
+    // the mutable `exerciseOrder` — the current occupant stays untouched.
+    const versionCheck = rejectStaleRenderedIntent(input.expectedSessionVersion, session);
+    if (!versionCheck.ok) {
+      return err(versionCheck.error);
     }
 
     const domainInput: UpdateSetCommandInput =

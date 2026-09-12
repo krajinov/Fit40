@@ -17,12 +17,12 @@ import {
   completeWorkoutSession,
   createWorkoutSession,
   logSessionSet,
+  resolveSessionCompletionReadiness,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import {
   moveSessionExercise,
   resolveOccurrenceAdjustmentEligibility,
-  resolveSessionCompletionReadiness,
   resolveSessionPrescriptionTotals,
   skipSessionExercise,
   unskipSessionExercise,

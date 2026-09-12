@@ -27,6 +27,10 @@ import {
   type SessionSubstitutionError,
 } from '@/domain/services/session-exercise-substitution';
 import { createExerciseId, createUserId, createWorkoutSessionId } from '@/domain/types/ids';
+import {
+  isValidExpectedSessionVersion,
+  rejectStaleRenderedIntent,
+} from '@/application/use-cases/session-version-guard';
 import { err, ok, type Result } from '@/domain/types/result';
 
 export type SubstituteSessionExerciseError =
@@ -46,6 +50,13 @@ export interface SubstituteSessionExerciseInput {
   readonly userId: string;
   readonly exerciseOrder: number;
   readonly replacementExerciseId: string;
+  /**
+   * The session `version` of the snapshot the caller rendered (PR #13
+   * Finding 1): compared against the freshly loaded aggregate BEFORE
+   * `exerciseOrder` is interpreted, so a tab rendered before a concurrent
+   * reorder cannot substitute the occurrence that now occupies its old order.
+   */
+  readonly expectedSessionVersion: number;
 }
 
 export class SubstituteSessionExerciseUseCase {
@@ -84,6 +95,14 @@ export class SubstituteSessionExerciseUseCase {
       });
     }
 
+    if (!isValidExpectedSessionVersion(input.expectedSessionVersion)) {
+      return err({
+        code: 'INVALID_INPUT',
+        message: 'expectedSessionVersion must be a non-negative integer',
+        field: 'expectedSessionVersion',
+      });
+    }
+
     const session = await this.sessionRepository.findById(idResult.data);
     if (session === null) {
       return err({
@@ -111,6 +130,13 @@ export class SubstituteSessionExerciseUseCase {
         message:
           'You are no longer enrolled in this program, so this session can no longer be modified.',
       });
+    }
+
+    // Stale rendered intent (PR #13 Finding 1): reject BEFORE interpreting
+    // the mutable `exerciseOrder` — the current occupant stays untouched.
+    const versionCheck = rejectStaleRenderedIntent(input.expectedSessionVersion, session);
+    if (!versionCheck.ok) {
+      return err(versionCheck.error);
     }
 
     // Server-side existence check: the replacement must be a real catalog

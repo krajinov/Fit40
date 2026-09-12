@@ -24,6 +24,7 @@ export async function restoreExerciseAction(formData: FormData): Promise<Session
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
   };
 
   const parsed = restoreExerciseSchema.safeParse(raw);

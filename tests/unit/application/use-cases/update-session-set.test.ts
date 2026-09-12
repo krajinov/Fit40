@@ -31,7 +31,7 @@ describe('UpdateSessionSetUseCase', () => {
   it('updates an existing set and returns DTO', async () => {
     const { repo, sessionId } = await sessionWithSet();
     const uc = new UpdateSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: 22.5, rpe: 8 });
+    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: 22.5, rpe: 8 , expectedSessionVersion: 1 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.metrics.totalSets).toBe(1);
@@ -39,7 +39,7 @@ describe('UpdateSessionSetUseCase', () => {
 
   it('returns SESSION_NOT_FOUND', async () => {
     const uc = new UpdateSessionSetUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -48,7 +48,7 @@ describe('UpdateSessionSetUseCase', () => {
   it('returns FORBIDDEN when the session belongs to another user', async () => {
     const { repo, sessionId } = await sessionWithSet('user-1');
     const uc = new UpdateSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: sessionId as string, userId: 'user-2', exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: sessionId as string, userId: 'user-2', exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('FORBIDDEN');
@@ -58,7 +58,7 @@ describe('UpdateSessionSetUseCase', () => {
     const { repo, sessionId } = await sessionWithSet(OWNER_ID, null);
     const uc = new UpdateSessionSetUseCase(repo);
 
-    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: sessionId as string, userId: OWNER_ID, exerciseOrder: 1, setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;

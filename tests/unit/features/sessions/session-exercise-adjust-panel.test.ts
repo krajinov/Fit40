@@ -103,6 +103,7 @@ async function renderPanel(adjustment: SessionAdjustmentView): Promise<MountedPa
   const props = {
     sessionId: 's-1',
     exerciseOrder: 2,
+    expectedSessionVersion: 0,
     programSlug: 'prog-1',
     weekNumber: 1,
     workoutOrder: 1,

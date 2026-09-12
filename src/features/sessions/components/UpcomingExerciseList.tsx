@@ -12,6 +12,11 @@ interface UpcomingExerciseListProps {
   /** All session logs, keyed by order, for the hidden loggers' prescriptions. */
   readonly logs: ReadonlyMap<number, WorkoutSessionExerciseDto>;
   readonly sessionId: string;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), forwarded to
+   * every mutation island a row hosts.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -58,6 +63,7 @@ export function UpcomingExerciseList({
   upcoming,
   logs,
   sessionId,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -77,7 +83,7 @@ export function UpcomingExerciseList({
           const logger = exercise.logger;
           if (log === undefined || logger === null) {
             return (
-              <li key={exercise.order} className="flex items-center gap-2.5 py-3 md:gap-3.5 md:py-4">
+              <li key={exercise.renderKey} className="flex items-center gap-2.5 py-3 md:gap-3.5 md:py-4">
                 <span
                   aria-hidden="true"
                   className="flex size-[26px] shrink-0 items-center justify-center rounded-pill bg-surface-2 text-xs font-semibold text-ink-3 md:size-[34px] md:text-sm"
@@ -93,7 +99,7 @@ export function UpcomingExerciseList({
           }
 
           return (
-            <li key={exercise.order} className="py-1.5 md:py-2">
+            <li key={exercise.renderKey} className="py-1.5 md:py-2">
               <details className="group/up">
                 <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg py-1.5 transition-colors hover:bg-surface-2/60 md:gap-3.5 [&::-webkit-details-marker]:hidden">
                   <span
@@ -116,6 +122,7 @@ export function UpcomingExerciseList({
                     key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                     sessionId={sessionId}
                     exerciseOrder={log.order}
+                    expectedSessionVersion={expectedSessionVersion}
                     prescription={log.prescription}
                     programSlug={programSlug}
                     weekNumber={weekNumber}
@@ -136,6 +143,7 @@ export function UpcomingExerciseList({
                       <SessionExerciseSwapPanel
                         sessionId={sessionId}
                         exerciseOrder={log.order}
+                        expectedSessionVersion={expectedSessionVersion}
                         programSlug={programSlug}
                         weekNumber={weekNumber}
                         workoutOrder={workoutOrder}
@@ -153,6 +161,7 @@ export function UpcomingExerciseList({
                     <SessionExerciseAdjustPanel
                       sessionId={sessionId}
                       exerciseOrder={log.order}
+                      expectedSessionVersion={expectedSessionVersion}
                       programSlug={programSlug}
                       weekNumber={weekNumber}
                       workoutOrder={workoutOrder}

@@ -229,9 +229,10 @@ skip-adjusted denominators locally**.
 
 **Completion rule (unchanged, F6).** A session is completable when at least
 one set is logged somewhere in it — `resolveSessionCompletionReadiness`
-(`session-exercise-adjustment.ts`) / `completeWorkoutSession` delegate to
-this definition. M10 adds **no** "every non-skipped occurrence must be
-performed" requirement — skips never block completion.
+(lives on the entity, `workout-session.ts`, next to `completeWorkoutSession`)
+/ `completeWorkoutSession` delegate to this definition. M10 adds **no**
+"every non-skipped occurrence must be performed" requirement — skips never
+block completion.
 
 ---
 
@@ -327,16 +328,37 @@ The completed-session detail view (`completed-session-view.ts` +
 
 ## 13. Concurrency
 
-All M10 mutations ride the existing optimistic-concurrency model:
+All M10 mutations ride the existing optimistic-concurrency model, plus a
+stale-rendered-intent guard (PR #13):
 
 - Every save bumps the row `version`; a save whose version no longer
   matches the persisted row throws `SessionStaleVersionError`, which the
   use cases map to `SESSION_MODIFIED`.
+- **Stale rendered intent:** `exerciseOrder` is mutable, so a tab rendered
+  before a concurrent reorder holds an order that now identifies a
+  DIFFERENT occurrence — and the use case's reload+save would commit with a
+  fresh version, invisible to repository optimistic concurrency. Every
+  occurrence-addressed command therefore carries `expectedSessionVersion`
+  (the rendered snapshot's `version`, exposed on `WorkoutSessionDto` and
+  submitted by every mutation form), and the use case compares it against
+  the loaded aggregate BEFORE interpreting `exerciseOrder` — mismatch
+  maps to the existing `SESSION_MODIFIED`, leaving the current occupant
+  untouched. The shared guard lives in
+  `src/application/use-cases/session-version-guard.ts`; the in-memory
+  repository mirrors the Drizzle version semantics (bump on update, reject
+  stale) so use-case tests observe the same outcomes as PostgreSQL.
 - **Adjacent reorder with logged sets is safe** because the aggregate is
   saved atomically (delete + reinsert inside one transaction with the
   version check): a stale write cannot silently relabel exercise/set
   identity — it is rejected wholesale. Integration tests lock both the
   stale-move rejection and the set-attachment after a legitimate move.
+- **React state never follows the mutable order keys:** occurrence
+  subtrees render under the view mapper's `renderKey`
+  (`order:authoredExerciseId:performedExerciseId`), so a reorder that
+  seats a different occurrence at an order REMOUNTS that subtree instead
+  of handing the previous occupant's local state (logger drafts, open
+  editors, open disclosures) to it. Same occurrence, same key — ordinary
+  rerenders keep their state.
 - The UI reacts centrally via `shouldRefreshAfterSessionMutationError`
   (`session-mutation-refresh.ts`), which treats exactly the stale
   server-state outcomes as reload-worthy — see the module's code docs.

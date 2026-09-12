@@ -18,6 +18,7 @@ export async function logSetAction(formData: FormData): Promise<SessionActionSta
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
     type: formData.get('type'),
     reps: formData.get('reps'),
     durationSeconds: formData.get('durationSeconds'),

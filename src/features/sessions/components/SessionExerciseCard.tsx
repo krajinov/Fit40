@@ -15,6 +15,11 @@ interface SessionExerciseCardProps {
   /** The log this card was built from (prescription + raw sets for editing). */
   readonly log: WorkoutSessionExerciseDto;
   readonly sessionId: string;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), forwarded to
+   * every mutation island this card hosts.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -41,6 +46,7 @@ export function SessionExerciseCard({
   card,
   log,
   sessionId,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -124,6 +130,7 @@ export function SessionExerciseCard({
                 sessionId={sessionId}
                 set={set}
                 exerciseOrder={log.order}
+                expectedSessionVersion={expectedSessionVersion}
                 programSlug={programSlug}
                 weekNumber={weekNumber}
                 workoutOrder={workoutOrder}
@@ -145,6 +152,7 @@ export function SessionExerciseCard({
             key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
             sessionId={sessionId}
             exerciseOrder={log.order}
+            expectedSessionVersion={expectedSessionVersion}
             prescription={log.prescription}
             programSlug={programSlug}
             weekNumber={weekNumber}
@@ -169,6 +177,7 @@ export function SessionExerciseCard({
                 key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                 sessionId={sessionId}
                 exerciseOrder={log.order}
+                expectedSessionVersion={expectedSessionVersion}
                 prescription={log.prescription}
                 programSlug={programSlug}
                 weekNumber={weekNumber}
@@ -194,6 +203,7 @@ export function SessionExerciseCard({
         <SessionExerciseSwapPanel
           sessionId={sessionId}
           exerciseOrder={log.order}
+          expectedSessionVersion={expectedSessionVersion}
           programSlug={programSlug}
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}
@@ -213,6 +223,7 @@ export function SessionExerciseCard({
         <SessionExerciseAdjustPanel
           sessionId={sessionId}
           exerciseOrder={log.order}
+          expectedSessionVersion={expectedSessionVersion}
           programSlug={programSlug}
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}

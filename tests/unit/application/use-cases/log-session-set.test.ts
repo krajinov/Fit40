@@ -26,7 +26,7 @@ describe('LogSessionSetUseCase', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(makeSession());
     const uc = new LogSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 , expectedSessionVersion: 0 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.metrics.totalSets).toBe(1);
@@ -34,7 +34,7 @@ describe('LogSessionSetUseCase', () => {
 
   it('returns SESSION_NOT_FOUND for unknown session', async () => {
     const uc = new LogSessionSetUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -44,7 +44,7 @@ describe('LogSessionSetUseCase', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(makeSession('user-1'));
     const uc = new LogSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('FORBIDDEN');
@@ -58,7 +58,7 @@ describe('LogSessionSetUseCase', () => {
     await repo.save(makeSession(OWNER_ID, null));
     const uc = new LogSessionSetUseCase(repo);
 
-    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -77,7 +77,7 @@ describe('LogSessionSetUseCase', () => {
     await repo.save(skipped.data);
     const uc = new LogSessionSetUseCase(repo);
 
-    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;

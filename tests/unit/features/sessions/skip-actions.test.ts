@@ -58,6 +58,7 @@ function makeSkipFormData(): FormData {
   const fd = new FormData();
   fd.set('sessionId', 's-1');
   fd.set('exerciseOrder', '1');
+  fd.set('expectedSessionVersion', '3');
   fd.set('programSlug', 'fit40-beginner-strength');
   fd.set('weekNumber', '1');
   fd.set('workoutOrder', '1');
@@ -183,6 +184,7 @@ describe('skip action schemas and forwarding (FormData coercion)', () => {
     expect(skipSessionExerciseUseCase.execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 1,
+      expectedSessionVersion: 3,
       userId: SESSION_USER.id,
     });
   });
@@ -195,6 +197,7 @@ describe('skip action schemas and forwarding (FormData coercion)', () => {
     expect(unskipSessionExerciseUseCase.execute).toHaveBeenCalledWith({
       sessionId: 's-1',
       exerciseOrder: 1,
+      expectedSessionVersion: 3,
       userId: SESSION_USER.id,
     });
   });

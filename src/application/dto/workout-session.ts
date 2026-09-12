@@ -119,6 +119,15 @@ export interface WorkoutSessionDto {
   readonly status: WorkoutSessionStatus;
   readonly startedAt: string;
   readonly completedAt: string | null;
+  /**
+   * The rendered snapshot's optimistic-concurrency token (PR #13 stale
+   * rendered-intent guard): occurrence-addressed mutation commands carry it
+   * back as `expectedSessionVersion`, and the use case rejects a mismatch
+   * BEFORE interpreting the mutable `exerciseOrder` — a stale tab that was
+   * rendered before a concurrent reorder cannot silently target the
+   * occurrence that now occupies its old order.
+   */
+  readonly version: number;
   readonly exerciseLogs: ReadonlyArray<WorkoutSessionExerciseDto>;
   readonly metrics: WorkoutSessionMetricsDto;
   /**
@@ -170,6 +179,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
     status: getSessionStatus(session),
     startedAt: session.startedAt.toISOString(),
     completedAt: session.completedAt?.toISOString() ?? null,
+    version: session.version,
     exerciseLogs: session.exerciseLogs.map((log) => {
       const substitution = resolveOccurrenceSubstitutionState(log);
       const eligibility = resolveOccurrenceSubstitutionEligibility(session, log);

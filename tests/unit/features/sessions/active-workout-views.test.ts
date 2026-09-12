@@ -141,6 +141,7 @@ function sessionDto(
     status: 'in-progress',
     startedAt: '2026-09-01T17:00:00.000Z',
     completedAt: null,
+    version: 0,
     exerciseLogs: logs,
     metrics,
     prescribedSets: totals.prescribedSets,

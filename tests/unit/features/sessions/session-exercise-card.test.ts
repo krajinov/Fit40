@@ -115,6 +115,7 @@ function sessionLog(order: number, isSkipped = false): WorkoutSessionExerciseDto
 function cardView(overrides: Partial<SessionExerciseCardView> = {}): SessionExerciseCardView {
   return {
     order: 1,
+    renderKey: '1:ex-001:ex-001',
     kind: 'upcoming',
     name: 'Bench Press',
     originallyName: null,
@@ -141,6 +142,7 @@ function skippedCardView(): SessionExerciseCardView {
 
 const BASE_PROPS = {
   sessionId: 's-1',
+  expectedSessionVersion: 0,
   programSlug: 'prog-1',
   weekNumber: 1,
   workoutOrder: 1,

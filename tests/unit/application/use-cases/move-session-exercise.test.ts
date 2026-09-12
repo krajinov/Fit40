@@ -67,7 +67,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -95,10 +95,10 @@ describe('MoveSessionExerciseUseCase', () => {
     const findByIdSpy = vi.spyOn(repo, 'findById');
 
     const cases = [
-      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1, direction: 'up' as const },
-      { sessionId: 's-1', userId: '', exerciseOrder: 1, direction: 'up' as const },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0, direction: 'up' as const },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 2.5, direction: 'up' as const },
+      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1, direction: 'up' as const, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: '', exerciseOrder: 1, direction: 'up' as const, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0, direction: 'up' as const, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 2.5, direction: 'up' as const, expectedSessionVersion: 0 },
     ];
     for (const input of cases) {
       const r = await uc.execute(input);
@@ -110,7 +110,7 @@ describe('MoveSessionExerciseUseCase', () => {
 
   it('returns SESSION_NOT_FOUND for an unknown session', async () => {
     const uc = new MoveSessionExerciseUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, direction: 'up' });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, direction: 'up' , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -120,7 +120,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -133,7 +133,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(OWNER_ID, null);
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -155,7 +155,7 @@ describe('MoveSessionExerciseUseCase', () => {
     await repo.save(completed.data);
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -166,7 +166,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99, direction: 'up' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -177,12 +177,12 @@ describe('MoveSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession();
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const up = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, direction: 'up' });
+    const up = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, direction: 'up' , expectedSessionVersion: 0 });
     expect(up.ok).toBe(false);
     if (up.ok) return;
     expect(up.error.code).toBe('MOVE_OUT_OF_RANGE');
 
-    const down = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 3, direction: 'down' });
+    const down = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 3, direction: 'down' , expectedSessionVersion: 0 });
     expect(down.ok).toBe(false);
     if (down.ok) return;
     expect(down.error.code).toBe('MOVE_OUT_OF_RANGE');
@@ -199,7 +199,7 @@ describe('MoveSessionExerciseUseCase', () => {
     await repo.save(withSet.data);
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'down' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'down' , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -228,7 +228,7 @@ describe('MoveSessionExerciseUseCase', () => {
     await repo.save(skipped.data);
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 3, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 3, direction: 'up' , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -252,7 +252,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionStaleVersionError('s-1'));
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -265,7 +265,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionEnrollmentChangedError('s-1'));
     const uc = new MoveSessionExerciseUseCase(repo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -279,7 +279,7 @@ describe('MoveSessionExerciseUseCase', () => {
     const uc = new MoveSessionExerciseUseCase(repo);
 
     await expect(
-      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up' }),
+      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 2, direction: 'up', expectedSessionVersion: 0 }),
     ).rejects.toThrow('db connection lost');
 
     saveSpy.mockRestore();

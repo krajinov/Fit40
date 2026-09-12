@@ -26,6 +26,7 @@ export async function moveExerciseAction(formData: FormData): Promise<SessionAct
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
     direction: formData.get('direction'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
   };
 
   const parsed = moveExerciseSchema.safeParse(raw);

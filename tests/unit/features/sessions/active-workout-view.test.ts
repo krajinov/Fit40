@@ -98,6 +98,7 @@ function sessionDto(logs: WorkoutSessionDto['exerciseLogs']): WorkoutSessionDto 
     status: 'in-progress',
     startedAt: '2026-09-01T17:00:00.000Z',
     completedAt: null,
+    version: 0,
     exerciseLogs: logs,
     metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
     // Skip-adjusted session totals are now consumed by the view layer

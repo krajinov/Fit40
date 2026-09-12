@@ -367,6 +367,16 @@ occurrence identity, so the same exercise can appear as two distinct
 occurrences in one session. Full substitution semantics:
 [`docs/exercise-substitution.md`](exercise-substitution.md).
 
+### Skip flag on `exercise_logs` (M10)
+
+`is_skipped` (`boolean NOT NULL DEFAULT false`, migration `0009`) stores the
+explicit user decision to not perform an occurrence in this session. It is
+never inferred from zero logged sets, and the skip⇔logged-sets mutual
+exclusion is enforced by the domain alone (deliberately no database CHECK).
+The composite PK stays `(session_id, exercise_order)` — no surrogate
+occurrence id or reorder column was added. Full skip/reorder semantics:
+[`docs/session-adjustments.md`](session-adjustments.md).
+
 ---
 
 ## Database Errors

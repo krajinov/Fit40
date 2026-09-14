@@ -21,7 +21,7 @@ import {
 import {
   skipSessionExercise,
   unskipSessionExercise,
-} from '@/domain/services/session-exercise-adjustment';
+} from '@/domain/services/session-exercise-skip';
 import { createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 

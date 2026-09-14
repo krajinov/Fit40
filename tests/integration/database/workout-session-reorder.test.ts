@@ -18,7 +18,7 @@ import {
   logSessionSet,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
-import { moveSessionExercise } from '@/domain/services/session-exercise-adjustment';
+import { moveSessionExercise } from '@/domain/services/session-exercise-reorder';
 import {
   createEnrollmentId,
   createExerciseId,

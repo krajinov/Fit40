@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { createWorkoutSession } from '@/domain/entities/workout-session';
-import { skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 

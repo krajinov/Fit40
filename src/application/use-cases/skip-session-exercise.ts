@@ -20,7 +20,8 @@ import {
 } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import { skipSessionExercise, type SessionAdjustmentError } from '@/domain/services/session-exercise-adjustment';
+import type { SessionAdjustmentError } from '@/domain/services/occurrence-adjustment-rules';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import {
   isValidExpectedSessionVersion,
   rejectStaleRenderedIntent,

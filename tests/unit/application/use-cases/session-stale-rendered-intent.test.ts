@@ -34,7 +34,8 @@ import { UnskipSessionExerciseUseCase } from '@/application/use-cases/unskip-ses
 import { UpdateSessionSetUseCase } from '@/application/use-cases/update-session-set';
 import type { Exercise } from '@/domain/entities/exercise';
 import { createWorkoutSession, type WorkoutSession } from '@/domain/entities/workout-session';
-import { moveSessionExercise, skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
+import { moveSessionExercise } from '@/domain/services/session-exercise-reorder';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import {
   createEnrollmentId,
   createExerciseId,

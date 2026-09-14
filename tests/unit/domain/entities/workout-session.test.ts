@@ -9,8 +9,9 @@ import {
   createWorkoutSession,
   getSessionStatus,
   logSessionSet,
+  resolveSessionCompletionReadiness,
 } from '@/domain/entities/workout-session';
-import { skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -392,4 +393,39 @@ describe('completeWorkoutSession with skipped occurrences (M10)', () => {
     expect(result.data.exerciseLogs[0]?.isSkipped).toBe(false);
     expect(result.data.exerciseLogs[1]?.isSkipped).toBe(true);
   });
+
+describe('resolveSessionCompletionReadiness', () => {
+  it('refuses a session with zero logged sets', () => {
+    expect(resolveSessionCompletionReadiness(validSession()).canComplete).toBe(false);
+  });
+
+  it('refuses an all-skipped session (skips carry no sets)', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const all = skipSessionExercise(first.data, { exerciseOrder: 2 });
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+
+    expect(resolveSessionCompletionReadiness(all.data).canComplete).toBe(false);
+  });
+
+  it('allows completion once at least one set is logged anywhere, even with skips', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 2 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const logged = logSessionSet(first.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+
+    expect(resolveSessionCompletionReadiness(logged.data).canComplete).toBe(true);
+  });
+});
+
 });

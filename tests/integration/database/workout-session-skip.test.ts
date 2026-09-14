@@ -7,7 +7,7 @@ import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import {
   skipSessionExercise,
   unskipSessionExercise,
-} from '@/domain/services/session-exercise-adjustment';
+} from '@/domain/services/session-exercise-skip';
 import {
   createEnrollmentId,
   createExerciseId,

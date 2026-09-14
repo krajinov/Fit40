@@ -10,10 +10,10 @@ import type { WorkoutSession, WorkoutSessionStatus } from '@/domain/entities/wor
 import { getSessionStatus } from '@/domain/entities/workout-session';
 import {
   resolveOccurrenceAdjustmentEligibility,
-  resolveSessionPrescriptionTotals,
   type OccurrenceAdjustmentBlock,
-} from '@/domain/services/session-exercise-adjustment';
+} from '@/domain/services/occurrence-adjustment-rules';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import { resolveSessionPrescriptionTotals } from '@/domain/services/session-prescription-totals';
 import {
   resolveOccurrenceSubstitutionEligibility,
   resolveOccurrenceSubstitutionState,

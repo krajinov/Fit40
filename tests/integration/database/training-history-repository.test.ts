@@ -16,10 +16,8 @@ import {
   createWorkoutSessionId,
 } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
-import {
-  moveSessionExercise,
-  skipSessionExercise,
-} from '@/domain/services/session-exercise-adjustment';
+import { moveSessionExercise } from '@/domain/services/session-exercise-reorder';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
 import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';

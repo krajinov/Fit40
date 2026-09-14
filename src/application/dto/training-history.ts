@@ -23,7 +23,7 @@ import type {
   TrainingHistoryEntry,
 } from '@/application/ports/training-history-repository';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
-import { resolveOccurrenceAdjustmentEligibility } from '@/domain/services/session-exercise-adjustment';
+import { resolveOccurrenceAdjustmentEligibility } from '@/domain/services/occurrence-adjustment-rules';
 import {
   resolveOccurrenceSubstitutionEligibility,
   resolveOccurrenceSubstitutionState,

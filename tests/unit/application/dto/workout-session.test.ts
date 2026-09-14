@@ -12,7 +12,7 @@
  * aggregate, so a future re-derivation drift in Application is caught.
  *
  * Domain mutation/eligibility rules themselves are covered by the Slice 1
- * domain tests (session-exercise-adjustment.test.ts) and are not re-tested
+ * domain tests (occurrence-adjustment-rules / session-exercise-skip /
  * here.
  */
 
@@ -27,11 +27,9 @@ import {
   logSessionSet,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
-import {
-  resolveOccurrenceAdjustmentEligibility,
-  resolveSessionPrescriptionTotals,
-  skipSessionExercise,
-} from '@/domain/services/session-exercise-adjustment';
+import { resolveOccurrenceAdjustmentEligibility } from '@/domain/services/occurrence-adjustment-rules';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
+import { resolveSessionPrescriptionTotals } from '@/domain/services/session-prescription-totals';
 import type { TrainingHistoryEntry } from '@/application/ports/training-history-repository';
 import {
   createExerciseId,

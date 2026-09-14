@@ -6,7 +6,7 @@ import {
 } from '@/application/ports/workout-session-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { createWorkoutSession, logSessionSet, completeWorkoutSession } from '@/domain/entities/workout-session';
-import { skipSessionExercise } from '@/domain/services/session-exercise-adjustment';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import {
   createEnrollmentId,
   createExerciseId,

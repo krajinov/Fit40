@@ -385,6 +385,45 @@ describe('SessionExerciseAdjustPanel pending state (Slice 6)', () => {
       await Promise.resolve();
     });
   });
+
+  it('a slow skip disables the move buttons too (combined pending, PR #13 Finding 3)', async () => {
+    // Hold the SKIP in-flight: the move islands must be disabled as well —
+    // the combined pending flag is the panel-level guarantee that a second
+    // click can never submit the wrong form while any mutation is in flight.
+    let release: (state: SessionActionState) => void = () => {};
+    skipExecute.mockImplementation(
+      () =>
+        new Promise<SessionActionState>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitSkip();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const skip = buttonByLabel(panel.container, 'Skipping…');
+    const moveUp = buttonByLabel(panel.container, 'Move up');
+    const moveDown = buttonByLabel(panel.container, 'Move down');
+    expect(skip.disabled).toBe(true);
+    expect(moveUp.disabled).toBe(true);
+    expect(moveDown.disabled).toBe(true);
+
+    // Clicking the disabled controls is a DOM no-op — no duplicate skip, no
+    // move submitted mid-skip.
+    panel.clickByLabel('Skipping…');
+    panel.clickByLabel('Move up');
+    expect(skipExecute).toHaveBeenCalledTimes(1);
+    expect(moveExecute).not.toHaveBeenCalled();
+
+    release({ ok: true });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
 });
 
 describe('SessionExerciseAdjustPanel stale-state reload (skip path)', () => {

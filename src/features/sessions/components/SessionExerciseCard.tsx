@@ -7,12 +7,19 @@ import type { SessionExerciseCardView } from '@/features/sessions/active-workout
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
+import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
+import { SKIPPED_HINT_LABEL } from '@/features/sessions/session-adjustment-views';
 
 interface SessionExerciseCardProps {
   readonly card: SessionExerciseCardView;
   /** The log this card was built from (prescription + raw sets for editing). */
   readonly log: WorkoutSessionExerciseDto;
   readonly sessionId: string;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), forwarded to
+   * every mutation island this card hosts.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -39,6 +46,7 @@ export function SessionExerciseCard({
   card,
   log,
   sessionId,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -46,6 +54,7 @@ export function SessionExerciseCard({
 }: SessionExerciseCardProps) {
   const logger = card.logger;
   const isDone = card.kind === 'done';
+  const isSkipped = card.kind === 'skipped';
 
   return (
     <article
@@ -67,14 +76,16 @@ export function SessionExerciseCard({
           {isDone ? <Check className="size-3.5 md:size-4" /> : card.order}
         </span>
 
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[15px] font-semibold text-ink md:text-[17px]">{card.name}</h2>
+        <div className={cn('min-w-0 flex-1', isSkipped && 'text-ink-2')}>
+          <h2 className={cn('text-[15px] font-semibold md:text-[17px]', isSkipped ? 'text-ink-2' : 'text-ink')}>
+            {card.name}
+          </h2>
           {card.originallyName !== null && (
             <p className="text-[11px] text-ink-3 md:text-xs">
               Originally: {card.originallyName}
             </p>
           )}
-          <p className="text-xs text-ink-2 md:text-sm">
+          <p className={cn('text-xs md:text-sm', isSkipped ? 'text-ink-3' : 'text-ink-2')}>
             {card.prescriptionLabel}
             {card.equipmentLabel !== null && ` · ${card.equipmentLabel}`}
           </p>
@@ -87,6 +98,10 @@ export function SessionExerciseCard({
           {card.badge.label}
         </Badge>
       </div>
+
+      {isSkipped && (
+        <p className="text-xs text-ink-3 md:text-[13px]">{SKIPPED_HINT_LABEL}</p>
+      )}
 
       {card.setRows.length > 0 && (
         <ul className="flex flex-col gap-1.5 md:gap-2">
@@ -115,6 +130,7 @@ export function SessionExerciseCard({
                 sessionId={sessionId}
                 set={set}
                 exerciseOrder={log.order}
+                expectedSessionVersion={expectedSessionVersion}
                 programSlug={programSlug}
                 weekNumber={weekNumber}
                 workoutOrder={workoutOrder}
@@ -133,9 +149,10 @@ export function SessionExerciseCard({
       {logger !== null &&
         (card.kind === 'active' ? (
           <SetLoggerForm
-            key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+            key={`${card.renderKey}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
             sessionId={sessionId}
             exerciseOrder={log.order}
+            expectedSessionVersion={expectedSessionVersion}
             prescription={log.prescription}
             programSlug={programSlug}
             weekNumber={weekNumber}
@@ -157,9 +174,10 @@ export function SessionExerciseCard({
             </summary>
             <div className="pt-3">
               <SetLoggerForm
-                key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+                key={`${card.renderKey}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                 sessionId={sessionId}
                 exerciseOrder={log.order}
+                expectedSessionVersion={expectedSessionVersion}
                 prescription={log.prescription}
                 programSlug={programSlug}
                 weekNumber={weekNumber}
@@ -185,10 +203,31 @@ export function SessionExerciseCard({
         <SessionExerciseSwapPanel
           sessionId={sessionId}
           exerciseOrder={log.order}
+          expectedSessionVersion={expectedSessionVersion}
           programSlug={programSlug}
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}
           substitution={card.substitution}
+        />
+      )}
+
+      {/* M10 adjustment affordance (skip + adjacent move): derived entirely
+          from the pure view mapper's state — no skip or move rules live in
+          this component. The domain's eligibility projection already freezes
+          a completed session to `hidden`, so read-only rendering needs no
+          extra guard here. One shared affordance covers every non-hidden
+          state: `blocked-logged-sets` renders its truthful copy AND the move
+          controls (logged sets freeze only the skip decision, never a
+          reorder), and a skipped occurrence still moves. */}
+      {card.adjustment.state !== 'hidden' && (
+        <SessionExerciseAdjustPanel
+          sessionId={sessionId}
+          exerciseOrder={log.order}
+          expectedSessionVersion={expectedSessionVersion}
+          programSlug={programSlug}
+          weekNumber={weekNumber}
+          workoutOrder={workoutOrder}
+          adjustment={card.adjustment}
         />
       )}
     </article>

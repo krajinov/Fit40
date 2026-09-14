@@ -1,5 +1,5 @@
 import type { ActiveWorkoutView } from '@/features/sessions/active-workout-view';
-import { formatSessionClock } from '@/features/sessions/active-workout-views';
+import { formatSessionClock, splitSessionExerciseCardBands } from '@/features/sessions/active-workout-views';
 import { ActiveWorkoutHeader } from '@/features/sessions/components/ActiveWorkoutHeader';
 import { SessionProgressCard } from '@/features/sessions/components/SessionProgressCard';
 import { SessionExerciseCard } from '@/features/sessions/components/SessionExerciseCard';
@@ -37,8 +37,13 @@ export function ActiveWorkoutScreen({
     logsByOrder.set(log.order, log);
   }
 
-  const startedCards = view.cards.filter((card) => card.kind !== 'upcoming');
-  const upcomingCards = view.cards.filter((card) => card.kind === 'upcoming');
+  // The canonical render bands come from the pure view mapper (PR #13
+  // Finding 4): the cut sits AFTER the last touched occurrence, so a skipped
+  // (or otherwise touched) card can never be pulled ahead of an earlier
+  // untouched one. Concatenating the bands reproduces the canonical DTO
+  // order element-for-element; this component holds no partitioning or
+  // ordering logic of its own.
+  const { cards: startedCards, upcoming: upcomingCards } = splitSessionExerciseCardBands(view.cards);
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
@@ -60,10 +65,11 @@ export function ActiveWorkoutScreen({
           }
           return (
             <SessionExerciseCard
-              key={card.order}
+              key={card.renderKey}
               card={card}
               log={log}
               sessionId={session.sessionId}
+              expectedSessionVersion={session.version}
               programSlug={programSlug}
               weekNumber={weekNumber}
               workoutOrder={workoutOrder}
@@ -76,6 +82,7 @@ export function ActiveWorkoutScreen({
         upcoming={upcomingCards}
         logs={logsByOrder}
         sessionId={session.sessionId}
+        expectedSessionVersion={session.version}
         programSlug={programSlug}
         weekNumber={weekNumber}
         workoutOrder={workoutOrder}

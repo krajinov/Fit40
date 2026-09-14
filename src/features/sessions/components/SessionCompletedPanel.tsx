@@ -69,10 +69,11 @@ export function SessionCompletedPanel({
           }
           return (
             <SessionExerciseCard
-              key={card.order}
+              key={card.renderKey}
               card={card}
               log={log}
               sessionId={session.sessionId}
+              expectedSessionVersion={session.version}
               programSlug={programSlug}
               weekNumber={weekNumber}
               workoutOrder={workoutOrder}

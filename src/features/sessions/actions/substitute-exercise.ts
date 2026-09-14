@@ -25,6 +25,7 @@ export async function substituteExerciseAction(formData: FormData): Promise<Sess
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
     replacementExerciseId: formData.get('replacementExerciseId'),
   };
 

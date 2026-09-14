@@ -67,6 +67,32 @@ export interface ExerciseLog {
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
+  /**
+   * The persisted user decision to not perform this occurrence in this
+   * session (M10). Never inferred from zero sets: an untouched occurrence
+   * is skipped only when this flag says so. Mutually exclusive with logged
+   * sets in both directions and enforced by the domain alone —
+   * `skipSessionExercise` requires zero sets and `logSessionSet` rejects a
+   * skipped occurrence; there is deliberately no database CHECK/trigger for
+   * this cross-table rule, so direct SQL could violate it. Reversible
+   * while the session is in progress; frozen at completion.
+   */
+  readonly isSkipped: boolean;
+  /**
+   * Immutable per-occurrence persistence/render token (PR #13 Finding 1).
+   * Assigned once at session creation (defaulting to the creation order) and
+   * carried unchanged through reorder, skip/unskip, substitution/restore and
+   * every set mutation. It exists ONLY so presentation render identity can
+   * travel WITH an occurrence through a reorder — `order` is rewritten by
+   * moves and duplicate identical occurrences are otherwise
+   * render-indistinguishable.
+   *
+   * NOT the business locator (that remains `(sessionId, exerciseOrder)`,
+   * persisted as the `exercise_logs` composite PK) and never an input to
+   * any use case or action. A plain number, deliberately not branded: it is
+   * an attribute, not an identity.
+   */
+  readonly occurrenceKey: number;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -110,6 +136,23 @@ export interface CreateExerciseLogInput {
    * performed := authored (performed-as-authored).
    */
   readonly performedExerciseId?: ExerciseId;
+  /**
+   * The persisted skip decision for rehydrating a possibly-skipped
+   * occurrence. Fresh sessions omit it: the factory then defaults to
+   * false (not skipped) — skip is a persisted fact, never inferred from
+   * zero sets.
+   */
+  readonly isSkipped?: boolean;
+  /**
+   * The immutable occurrence render/persistence token for rehydrating a
+   * session saved with one. Fresh sessions omit it: the factory then
+   * defaults it to the occurrence's creation order, which is unique within
+   * the session at creation time. Rehydrating callers may override it only
+   * when they hold a genuinely distinct token per occurrence (the read
+   * mapper's legacy fallback does exactly that); the factory validates
+   * uniqueness within the aggregate either way.
+   */
+  readonly occurrenceKey?: number;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -182,7 +225,8 @@ export type SessionMutationError =
   | { readonly code: 'SET_NOT_FOUND'; readonly setNumber: number; readonly message: string }
   | { readonly code: 'INVALID_SET_TYPE'; readonly message: string }
   | { readonly code: 'INVALID_SET_DATA'; readonly message: string; readonly field?: string }
-  | { readonly code: 'CANNOT_COMPLETE_EMPTY_SESSION'; readonly message: string };
+  | { readonly code: 'CANNOT_COMPLETE_EMPTY_SESSION'; readonly message: string }
+  | { readonly code: 'EXERCISE_OCCURRENCE_SKIPPED'; readonly exerciseOrder: number; readonly message: string };
 
 // ─── Status ──────────────────────────────────────────────────────────────────
 
@@ -297,12 +341,28 @@ export function createWorkoutSession(
     }
   }
 
+  // The immutable render token defaults to the creation order (unique within
+  // a fresh session because the orders validated above are the dense 1..N),
+  // and whatever value each occurrence carries must stay unique within the
+  // aggregate: a duplicate token would collapse two occurrences' render
+  // identity — the exact defect the token exists to prevent (PR #13 Finding 1).
+  const occurrenceKeys = input.exerciseLogs.map((log) => log.occurrenceKey ?? log.order);
+  if (new Set(occurrenceKeys).size !== occurrenceKeys.length) {
+    return err({
+      code: 'INVALID_WORKOUT_SESSION',
+      message: 'exercise log occurrence keys must be unique within a session',
+      field: 'exerciseLogs',
+    });
+  }
+
   const exerciseLogs: ReadonlyArray<ExerciseLog> = input.exerciseLogs.map((log) => ({
     authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId ?? log.authoredExerciseId,
     order: log.order,
     prescription: log.prescription,
     restSeconds: log.restSeconds,
+    isSkipped: log.isSkipped ?? false,
+    occurrenceKey: log.occurrenceKey ?? log.order,
     sets: [],
   }));
 
@@ -334,6 +394,17 @@ export function logSessionSet(
       code: 'EXERCISE_LOG_NOT_FOUND',
       exerciseOrder: input.exerciseOrder,
       message: `Exercise log with order ${input.exerciseOrder} not found in session`,
+    });
+  }
+
+  // Skip and logged sets are mutually exclusive in BOTH directions (M10):
+  // a skipped occurrence accepts no sets. The domain is the only
+  // enforcement boundary for this rule.
+  if (log.isSkipped) {
+    return err({
+      code: 'EXERCISE_OCCURRENCE_SKIPPED',
+      exerciseOrder: input.exerciseOrder,
+      message: `Exercise order ${input.exerciseOrder} is skipped; unskip it before logging sets`,
     });
   }
 
@@ -510,6 +581,26 @@ export function deleteSessionSet(
 
 // ─── Complete ────────────────────────────────────────────────────────────────
 
+/**
+ * The domain-owned completion gate (F6, unchanged by M10): a session is
+ * completable when at least one set is logged somewhere in it. Skipped
+ * occurrences carry no sets, so an all-skipped session stays non-completable
+ * through this same gate; there is no stricter every-non-skipped-exercise
+ * rule. Defined here — next to `completeWorkoutSession`, its only mutator
+ * consumer — so the entity module imports nothing from the adjustment
+ * service (acyclic domain graph, no source-level cycle).
+ */
+export interface SessionCompletionReadiness {
+  readonly canComplete: boolean;
+}
+
+export function resolveSessionCompletionReadiness(
+  session: WorkoutSession,
+): SessionCompletionReadiness {
+  const hasLoggedSets = session.exerciseLogs.some((log) => log.sets.length > 0);
+  return { canComplete: hasLoggedSets };
+}
+
 export function completeWorkoutSession(
   session: WorkoutSession,
   completedAt: Date,
@@ -518,8 +609,13 @@ export function completeWorkoutSession(
     return err({ code: 'SESSION_ALREADY_COMPLETED', message: 'Session is already completed' });
   }
 
-  const hasAnySet = session.exerciseLogs.some((log) => log.sets.length > 0);
-  if (!hasAnySet) {
+  // The completion gate is domain-owned by the adjustment service (M10 F6,
+  // unchanged): at least one logged set anywhere in the session. Skipped
+  // occurrences carry no sets, so an all-skipped session stays
+  // non-completable through this same gate — no stricter
+  // every-non-skipped-exercise rule exists.
+  const readiness = resolveSessionCompletionReadiness(session);
+  if (!readiness.canComplete) {
     return err({
       code: 'CANNOT_COMPLETE_EMPTY_SESSION',
       message: 'Cannot complete a session with zero logged sets',

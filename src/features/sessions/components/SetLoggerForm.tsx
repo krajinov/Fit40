@@ -19,6 +19,12 @@ const initialState: SessionActionState = { ok: true };
 interface SetLoggerFormProps {
   readonly sessionId: string;
   readonly exerciseOrder: number;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), submitted with
+   * the set so the use case can reject stale rendered intent before
+   * interpreting the mutable `exerciseOrder`.
+   */
+  readonly expectedSessionVersion: number;
   readonly prescription: RepPrescription;
   readonly programSlug: string;
   readonly weekNumber: number;
@@ -60,6 +66,7 @@ interface SetLoggerFormProps {
 export function SetLoggerForm({
   sessionId,
   exerciseOrder,
+  expectedSessionVersion,
   prescription,
   programSlug,
   weekNumber,
@@ -86,6 +93,7 @@ export function SetLoggerForm({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('type', isReps ? 'reps' : 'duration');
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));

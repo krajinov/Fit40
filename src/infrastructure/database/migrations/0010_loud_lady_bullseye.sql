@@ -1,0 +1,1 @@
+ALTER TABLE "exercise_logs" ADD COLUMN "occurrence_key" integer;

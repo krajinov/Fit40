@@ -19,6 +19,7 @@ export async function deleteSetAction(formData: FormData): Promise<SessionAction
   const raw = {
     sessionId: formData.get('sessionId'),
     exerciseOrder: formData.get('exerciseOrder'),
+    expectedSessionVersion: formData.get('expectedSessionVersion'),
     setNumber: formData.get('setNumber'),
   };
 

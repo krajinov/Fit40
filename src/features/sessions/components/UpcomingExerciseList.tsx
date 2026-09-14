@@ -4,6 +4,7 @@ import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-sessio
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
+import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
 
 interface UpcomingExerciseListProps {
   /** Untouched exercise rows, in log order. */
@@ -11,6 +12,11 @@ interface UpcomingExerciseListProps {
   /** All session logs, keyed by order, for the hidden loggers' prescriptions. */
   readonly logs: ReadonlyMap<number, WorkoutSessionExerciseDto>;
   readonly sessionId: string;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), forwarded to
+   * every mutation island a row hosts.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -50,12 +56,14 @@ function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
  * pre-redesign screen offered a logger on every exercise. The locked frames
  * show these rows quiet, so each row keeps a subtle expand affordance that
  * reveals the same set logger — the visual stays as designed while
- * out-of-order logging remains possible.
+ * out-of-order logging remains possible. Skipped occurrences never appear
+ * here (they render as their own muted card kind in the main list, M10).
  */
 export function UpcomingExerciseList({
   upcoming,
   logs,
   sessionId,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -75,7 +83,7 @@ export function UpcomingExerciseList({
           const logger = exercise.logger;
           if (log === undefined || logger === null) {
             return (
-              <li key={exercise.order} className="flex items-center gap-2.5 py-3 md:gap-3.5 md:py-4">
+              <li key={exercise.renderKey} className="flex items-center gap-2.5 py-3 md:gap-3.5 md:py-4">
                 <span
                   aria-hidden="true"
                   className="flex size-[26px] shrink-0 items-center justify-center rounded-pill bg-surface-2 text-xs font-semibold text-ink-3 md:size-[34px] md:text-sm"
@@ -91,7 +99,7 @@ export function UpcomingExerciseList({
           }
 
           return (
-            <li key={exercise.order} className="py-1.5 md:py-2">
+            <li key={exercise.renderKey} className="py-1.5 md:py-2">
               <details className="group/up">
                 <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg py-1.5 transition-colors hover:bg-surface-2/60 md:gap-3.5 [&::-webkit-details-marker]:hidden">
                   <span
@@ -111,9 +119,10 @@ export function UpcomingExerciseList({
                 </summary>
                 <div className="pb-3 pt-1">
                   <SetLoggerForm
-                    key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+                    key={`${exercise.renderKey}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                     sessionId={sessionId}
                     exerciseOrder={log.order}
+                    expectedSessionVersion={expectedSessionVersion}
                     prescription={log.prescription}
                     programSlug={programSlug}
                     weekNumber={weekNumber}
@@ -134,12 +143,30 @@ export function UpcomingExerciseList({
                       <SessionExerciseSwapPanel
                         sessionId={sessionId}
                         exerciseOrder={log.order}
+                        expectedSessionVersion={expectedSessionVersion}
                         programSlug={programSlug}
                         weekNumber={weekNumber}
                         workoutOrder={workoutOrder}
                         substitution={exercise.substitution}
                       />
                     </div>
+                  )}
+                  {/* …and the prime skip/move moment (M10): untouched
+                      occurrences are exactly the ones the domain lets the
+                      user skip, so the adjustment affordance (pure
+                      view-mapper state) sits in the same expand — the same
+                      shared panel the main card uses, no separate movement
+                      rule for upcoming rows. */}
+                  {exercise.adjustment.state !== 'hidden' && (
+                    <SessionExerciseAdjustPanel
+                      sessionId={sessionId}
+                      exerciseOrder={log.order}
+                      expectedSessionVersion={expectedSessionVersion}
+                      programSlug={programSlug}
+                      weekNumber={weekNumber}
+                      workoutOrder={workoutOrder}
+                      adjustment={exercise.adjustment}
+                    />
                   )}
                 </div>
               </details>

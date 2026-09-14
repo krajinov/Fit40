@@ -8,7 +8,9 @@ interface SessionProgressCardProps {
 /**
  * Session progress band (locked design): "N of M sets logged" with the
  * reps · volume metrics line on the right, above the accent progress track.
- * Purely presentational — the view mapper computed every label.
+ * When occurrences are skipped the set line appends a muted "· N skipped"
+ * (only when the count is positive). Purely presentational — the view mapper
+ * computed every label.
  */
 export function SessionProgressCard({ progress }: SessionProgressCardProps) {
   return (
@@ -19,6 +21,9 @@ export function SessionProgressCard({ progress }: SessionProgressCardProps) {
       <div className="flex items-center gap-4">
         <p className="text-[13px] font-semibold text-foreground md:text-[15px]">
           {progress.loggedSets} of {progress.prescribedSets} sets logged
+          {progress.skippedCount > 0 && (
+            <span className="font-normal text-ink-3"> · {progress.skippedCount} skipped</span>
+          )}
         </p>
         <p className="min-w-0 flex-1 truncate text-right text-xs text-ink-3 md:text-sm">
           {progress.repsLabel} · {progress.volumeLabel} volume

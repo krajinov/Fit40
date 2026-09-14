@@ -105,6 +105,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
       sessionId,
       userId: OWNER_ID,
       exerciseOrder: 1,
+      expectedSessionVersion: 0,
       replacementExerciseId: REPLACE_WITH,
     });
 
@@ -135,11 +136,11 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const findByIdSpy = vi.spyOn(repo, 'findById');
 
     const cases = [
-      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH },
-      { sessionId: 's-1', userId: '', exerciseOrder: 1, replacementExerciseId: REPLACE_WITH },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0, replacementExerciseId: REPLACE_WITH },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1.5, replacementExerciseId: REPLACE_WITH },
-      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: ' ' },
+      { sessionId: '', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: '', exerciseOrder: 1, replacementExerciseId: REPLACE_WITH, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 0, replacementExerciseId: REPLACE_WITH, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1.5, replacementExerciseId: REPLACE_WITH, expectedSessionVersion: 0 },
+      { sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: ' ', expectedSessionVersion: 0 },
     ];
     for (const input of cases) {
       const r = await uc.execute(input);
@@ -155,7 +156,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
       new InMemoryWorkoutSessionRepository(),
       makeExerciseRepo([REPLACE_WITH]),
     );
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -165,7 +166,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(['ex-001'], 'user-1');
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: 'user-2', exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -178,7 +179,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(['ex-001'], OWNER_ID, null);
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -197,7 +198,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     await repo.save(completed.data);
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 2 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -208,7 +209,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(['ex-001']);
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 99, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -220,7 +221,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const exerciseRepo = makeExerciseRepo([]);
     const uc = new SubstituteSessionExerciseUseCase(repo, exerciseRepo);
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: 'ex-404' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: 'ex-404' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -234,7 +235,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const { repo, sessionId } = await seedSession(['ex-001']);
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo(['ex-001']));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: 'ex-001' });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: 'ex-001' , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -246,7 +247,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     await withLoggedSet(repo, 1);
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 1 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -260,7 +261,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionStaleVersionError('s-1'));
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -273,7 +274,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const saveSpy = vi.spyOn(repo, 'save').mockRejectedValue(new SessionEnrollmentChangedError('s-1'));
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
-    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH });
+    const r = await uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH , expectedSessionVersion: 0 });
 
     saveSpy.mockRestore();
     expect(r.ok).toBe(false);
@@ -287,7 +288,7 @@ describe('SubstituteSessionExerciseUseCase', () => {
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo([REPLACE_WITH]));
 
     await expect(
-      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH }),
+      uc.execute({ sessionId, userId: OWNER_ID, exerciseOrder: 1, replacementExerciseId: REPLACE_WITH, expectedSessionVersion: 0 }),
     ).rejects.toThrow('db connection lost');
 
     saveSpy.mockRestore();

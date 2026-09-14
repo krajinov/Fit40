@@ -90,18 +90,28 @@ export interface WorkoutSessionRepository {
   ): Promise<WorkoutSession | null>;
 
   /**
-   * Saves a session (insert or update by session ID).
+   * Saves a session (insert or update by session ID) and returns the
+   * PERSISTED aggregate carrying the committed `version`.
    *
    * Updates of enrollment-owned sessions are conditional on the snapshot's
    * version AND its enrollment identity, so a leave (or any enrollment
    * change) between load and write makes the mutation a no-op instead of
    * mutating detached history.
    *
+   * The versioning policy belongs to the repository, not to its callers: an
+   * UPDATE commits `version + 1` while a first INSERT stores the snapshot's
+   * own version. A caller that builds a DTO from a successful save MUST use
+   * this return value and never the pre-save snapshot — otherwise the DTO
+   * carries a version the database never held, and the caller's next
+   * occurrence mutation would send that stale token as
+   * `expectedSessionVersion` and be rejected with `SESSION_MODIFIED` despite
+   * the preceding write having succeeded.
+   *
    * May throw {@link SessionAlreadyExistsError},
    * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
    * or {@link SessionEnrollmentChangedError}.
    */
-  save(session: WorkoutSession): Promise<void>;
+  save(session: WorkoutSession): Promise<WorkoutSession>;
 
   /**
    * Returns the IDs of the scheduled workouts the enrollment has completed

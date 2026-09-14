@@ -406,7 +406,9 @@ describe('DrizzleWorkoutSessionRepository', () => {
     await workoutSessionRepository.save(first);
 
     const second = makeSession('session-user-b', { userId: 'user-test-b', enrollmentId: 'enrollment-test-b' });
-    await expect(workoutSessionRepository.save(second)).resolves.toBeUndefined();
+    // save resolves with the persisted aggregate (PR #13 Finding 5 contract).
+    const persisted = await workoutSessionRepository.save(second);
+    expect(persisted.id).toBe('session-user-b');
 
     const firstLoaded = await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(
       first.enrollmentId!,
@@ -498,6 +500,33 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     const updated = await workoutSessionRepository.findById(session.id);
     expect(updated?.version).toBe(1);
+  });
+
+  it('save returns the persisted aggregate with the committed version on insert', async () => {
+    // PR #13 Finding 5: the INSERT branch stores the snapshot's own version,
+    // and the returned aggregate must carry exactly what the row now holds.
+    const session = makeSession(); // version 0
+    const persisted = await workoutSessionRepository.save(session);
+
+    const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(persisted.version).toBe(reloaded?.version);
+    expect(persisted.version).toBe(0);
+  });
+
+  it('save returns the persisted aggregate with the committed version on update', async () => {
+    // PR #13 Finding 5: the UPDATE branch commits version + 1, and the
+    // returned aggregate must carry the database's own committed value — a
+    // caller building a DTO from it can feed `version` straight back as its
+    // next mutation's `expectedSessionVersion` and succeed.
+    const session = makeSession(); // version 0
+    await workoutSessionRepository.save(session); // insert -> 0
+
+    const persisted = await workoutSessionRepository.save(withOneRepSet(session)); // update -> 1
+
+    const reloaded = await workoutSessionRepository.findById(session.id);
+    expect(persisted.version).toBe(1);
+    expect(persisted.version).toBe(reloaded?.version);
+    expect(persisted.exerciseLogs[0]?.sets).toHaveLength(1);
   });
 
   it('returns isolated objects (mutating a loaded session does not persist)', async () => {

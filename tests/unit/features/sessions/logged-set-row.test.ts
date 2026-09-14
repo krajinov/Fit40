@@ -116,6 +116,7 @@ async function renderRow(set: WorkoutSessionSetDto): Promise<{
     sessionId: 's-1',
     set,
     exerciseOrder: 1,
+    expectedSessionVersion: 0,
     programSlug: 'prog-1',
     weekNumber: 1,
     workoutOrder: 1,

@@ -17,6 +17,10 @@
  *   loads to the (new) exercise's history and progression. The user must
  *   explicitly delete the logged sets first — nothing is silently
  *   discarded or relabeled.
+ * - A skipped occurrence can be neither substituted nor restored (M10):
+ *   the user must unskip it first (EXERCISE_OCCURRENCE_SKIPPED). A valid
+ *   skipped occurrence has zero logged sets, so this block never
+ *   co-occurs with the logged-set rule.
  * - Restore returns the occurrence to performed-as-authored identity.
  *
  * The same rules are exposed as a read-only eligibility projection
@@ -33,13 +37,16 @@ import { err, ok, type Result } from '@/domain/types/result';
 
 /**
  * Expected substitution failures. `SESSION_ALREADY_COMPLETED` and
- * `EXERCISE_LOG_NOT_FOUND` mirror the entity mutation error shapes; the two
- * substitution-specific codes are unique to this service.
+ * `EXERCISE_LOG_NOT_FOUND` mirror the entity mutation error shapes;
+ * `EXERCISE_OCCURRENCE_SKIPPED` is shared with the M10 adjustment model;
+ * `EXERCISE_HAS_LOGGED_SETS` and `SUBSTITUTION_NO_CHANGE` are unique to
+ * this service.
  */
 export type SessionSubstitutionError =
   | { readonly code: 'SESSION_ALREADY_COMPLETED'; readonly message: string }
   | { readonly code: 'EXERCISE_LOG_NOT_FOUND'; readonly exerciseOrder: number; readonly message: string }
   | { readonly code: 'EXERCISE_HAS_LOGGED_SETS'; readonly exerciseOrder: number; readonly message: string }
+  | { readonly code: 'EXERCISE_OCCURRENCE_SKIPPED'; readonly exerciseOrder: number; readonly message: string }
   | { readonly code: 'SUBSTITUTION_NO_CHANGE'; readonly message: string };
 
 // ─── Inputs & State ──────────────────────────────────────────────────────────
@@ -75,6 +82,10 @@ function occurrenceSubstitutionBlock(
   log: ExerciseLog,
 ): OccurrenceSubstitutionBlock | null {
   if (session.completedAt !== null) return 'session-completed';
+  // A valid skipped occurrence has zero logged sets, so the skipped and
+  // logged-sets blocks never co-occur; skipped is checked first — the user
+  // must unskip before any other occurrence change is meaningful.
+  if (log.isSkipped) return 'skipped';
   if (log.sets.length > 0) return 'logged-sets';
   return null;
 }
@@ -101,12 +112,21 @@ function loadMutableOccurrence(
     });
   }
 
-  // The completed case returned above, so a block here is the logged-set rule.
-  if (occurrenceSubstitutionBlock(session, log) === 'logged-sets') {
+  const block = occurrenceSubstitutionBlock(session, log);
+  // The completed case returned above, so a block here is the logged-set or
+  // skipped rule.
+  if (block === 'logged-sets') {
     return err({
       code: 'EXERCISE_HAS_LOGGED_SETS',
       exerciseOrder,
       message: `Exercise order ${exerciseOrder} has logged sets; delete them before changing its exercise`,
+    });
+  }
+  if (block === 'skipped') {
+    return err({
+      code: 'EXERCISE_OCCURRENCE_SKIPPED',
+      exerciseOrder,
+      message: `Exercise order ${exerciseOrder} is skipped; unskip it before changing its exercise`,
     });
   }
 
@@ -187,6 +207,7 @@ export function resolveOccurrenceSubstitutionState(log: ExerciseLog): Occurrence
 /** Why an occurrence's substitution/restore is currently blocked; null = mutable. */
 export type OccurrenceSubstitutionBlock =
   | 'session-completed'
+  | 'skipped'
   | 'logged-sets';
 
 /** Derived substitution eligibility of one occurrence. Never persisted. */

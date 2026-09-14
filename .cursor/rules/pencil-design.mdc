@@ -1,0 +1,81 @@
+---
+description: Pencil (pen.dev) design rules - inspect .pen designs via the pencil MCP server before UI work; design is the visual source of truth; Pencil stays read-only unless a design change is explicitly requested
+globs:
+  - "**/*.pen"
+  - "src/app/**"
+  - "src/features/**"
+  - "src/components/**"
+  - "src/**/*.tsx"
+alwaysApply: false
+---
+
+# Pencil Design Rules (pencil MCP)
+
+Apply whenever a task involves UI implementation, redesign, styling, layout, responsive behavior, or an existing `.pen` design. The configured MCP server is named `pencil`.
+
+## Before Changing UI Code
+
+- Inspect the relevant Pencil design via MCP BEFORE implementing. Never implement from a filename or screenshot alone.
+- Use `pencil__get_app_state` to identify the active document, top-level screens, and reusable components.
+- Inspect the exact relevant screen/frame with MCP reads (`pencil__execute` with `Get`/`Print`); `pencil__browser` (`return-element`, `return-screenshot`) as a fallback for visual checks.
+- Cover: reusable components, design tokens, hierarchy, spacing, typography, colors, sizing, visual states, responsive variants.
+- Use `pencil__read_skill` first when the correct Pencil MCP workflow is unclear.
+- If multiple similar screens exist (desktop/mobile, state variants), determine which one this task implements before coding.
+
+## Design Authority
+
+- The `.pen` document is the primary visual source of truth: layout, spacing, typography, colors, component hierarchy, sizing, alignment, icons, visual states.
+- The existing application code is the source of truth for business logic, behavior, architecture, data flow, and domain rules.
+- Do NOT remove or alter working behavior just because it is not visible in the design.
+- If design and behavior conflict: preserve behavior, match the visual design, and report the conflict.
+
+## Implementation Workflow
+
+1. Inspect relevant `.cursor/rules`.
+2. Inspect existing implementation and architecture.
+3. Inspect the corresponding Pencil screen via MCP.
+4. Inspect reusable components already in the codebase (`src/components/`, `src/features/[name]/components/`).
+5. Implement the design using existing architecture and components where possible.
+6. Re-inspect the Pencil screen after implementation and compare the result.
+7. Run relevant lint, typecheck (`npx tsc --noEmit`), tests, and build checks.
+
+## Post-Implementation Visual Validation
+
+- After implementation, visually compare the rendered application against the relevant Pencil frame whenever a reliable rendered preview is available (e.g. running app, `pencil__browser` `return-screenshot`).
+- Use the Pencil frame as the visual reference for the comparison.
+- Check spacing, sizing, typography, alignment, colors, borders/radius, responsive behavior, and component states.
+- Do not claim pixel-close parity or design parity unless this comparison was actually performed.
+
+## Responsive Design
+
+- If desktop AND mobile Pencil variants exist, inspect BOTH before implementing.
+- Do not implement desktop by scaling mobile, or vice versa.
+- Reproduce the intended responsive/adaptive behavior with the project's existing conventions (Tailwind breakpoints, shadcn/ui).
+
+## Reusable Design Components
+
+- Identify the intended role of Pencil reusable components and map them to existing application components where practical.
+- Never duplicate an existing application component just to mirror Pencil's internal structure.
+
+## Mutation Safety (READ-ONLY by default)
+
+- Treat Pencil as READ-ONLY by default: any operation that changes `.pen` document state requires explicit user authorization.
+- ✅ Read operations through `pencil__execute` are allowed. `pencil__execute` itself is NOT forbidden — it is also the document-reading API (`Get`, `GetVariables`, `Print`).
+- ❌ Mutating operations (`Insert`, `Update`, `Replace`, `Move`, `Delete`, `Generate`, `SetVariables`) remain forbidden unless the user explicitly requests a design change.
+- If explicitly asked to change the design: inspect the design system board and reusable components first, then mutate in a logical designer order.
+
+## Repository-Specific Notes
+
+- The Fit40 design document may live OUTSIDE the repo (e.g. `/Users/krajinov/Documents/Fit40.pen`). Do not assume a `.pen` file is inside the repo.
+- When the currently active Pencil document is clearly the Fit40 design, use it.
+- The design contains desktop and mobile variants plus a reusable-component library — use them; do not infer appearance from screenshots or names alone.
+
+## Quality Expectations
+
+- Match spacing, typography, hierarchy, sizing, alignment, colors, borders, radius, component states, and responsive behavior as closely as practical.
+- Prefer existing design tokens/theme variables over arbitrary hardcoded values when an equivalent token exists.
+- Do NOT compromise architecture or module boundaries to achieve visual matching.
+- Avoid unnecessary component duplication.
+- Do not claim design parity (pixel-close or otherwise) unless the relevant Pencil frame was actually inspected via MCP and the post-implementation visual comparison was performed.
+
+See `AGENTS.md` for canonical repository rules.

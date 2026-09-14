@@ -7,6 +7,10 @@ document is the canonical reference for the feature: domain semantics,
 persistence, candidate selection, application orchestration, UI, history
 truthfulness, and testing.
 
+Substitution is one of several session adjustments: skip/unskip and adjacent
+reorder (M10) are sibling features with their own canonical reference,
+[`docs/session-adjustments.md`](session-adjustments.md).
+
 Everything below describes shipped behavior — the code is the final
 authority, and each section points to its implementation.
 
@@ -107,10 +111,11 @@ swaps only the performed id of the addressed occurrence; everything else
 **Eligibility projection (read side of the same rules):**
 `resolveOccurrenceSubstitutionEligibility(session, log)` exposes the blocking
 rules as `{ isSubstituted, blockedBy, canRestore }` — `blockedBy` is
-`'session-completed'` or `'logged-sets'` (null when mutable; the
-completed-session block outranks logged sets, mirroring the guards), and
-`canRestore` is true only for a currently substituted, mutable occurrence.
-The session DTOs carry it per log as `substitutionEligibility`
+`'session-completed'`, `'logged-sets'`, or `'skipped'` (M10: substitution
+and restore are also blocked while the occurrence is skipped; null when
+mutable; the completed-session block outranks logged sets, mirroring the
+guards), and `canRestore` is true only for a currently substituted, mutable
+occurrence. The session DTOs carry it per log as `substitutionEligibility`
 (`workout-session.ts`, `training-history.ts`), so presentation formats it
 and never re-derives mutability from raw session facts.
 
@@ -248,7 +253,7 @@ navigation and form submission work with zero extra client state:
   trigger the established `router.refresh()` reload/retry pattern is decided
   centrally by the pure predicate `shouldRefreshAfterSessionMutationError`
   (`src/features/sessions/session-mutation-refresh.ts`), shared by the
-  substitute and restore paths: it refreshes on the five stale server-state
+  substitute and restore paths: it refreshes on the stale server-state
   outcomes — `SESSION_MODIFIED` (another tab changed the session),
   `SUBSTITUTION_NO_CHANGE` (another tab already applied the same
   swap/restore), `EXERCISE_HAS_LOGGED_SETS`, `SESSION_ALREADY_COMPLETED`,
@@ -336,7 +341,7 @@ Rows written before migration `0008` store NULL in
 | Affordance consumes the eligibility projection — never re-derives blocking from raw facts | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts`, `tests/unit/features/sessions/active-workout-views.test.ts` |
 | "Originally: …" context on substituted upcoming rows ("Up next") | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | Swap panel copy and affordance states | Presentation (unit) | `tests/unit/features/sessions/session-substitution-views.test.ts` |
-| Centralized stale-state reload decision — refresh on the five stale server-state codes, never on ordinary request/input failures | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts` |
+| Centralized stale-state reload decision — refresh on the stale server-state codes (M10 added `ADJUSTMENT_NO_CHANGE` and `MOVE_OUT_OF_RANGE` to the set), never on ordinary request/input failures | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts` |
 | Swap panel applies the centralized reload decision on both substitute and restore paths; ordinary failures and success never reload | Presentation (unit) | `tests/unit/features/sessions/session-exercise-swap-panel.test.ts` |
 
 

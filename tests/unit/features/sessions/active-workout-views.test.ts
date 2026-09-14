@@ -15,6 +15,8 @@ import {
   buildSessionProgress,
   formatSessionClock,
   formatVolumeLabel,
+  splitSessionExerciseCardBands,
+  type SessionExerciseCardView,
 } from '@/features/sessions/active-workout-views';
 import {
   buildSessionLoggerView,
@@ -1199,3 +1201,121 @@ describe('active-workout-views / formatting helpers', () => {
     expect(formatVolumeLabel(1240.4)).toBe('1,240 kg');
   });
 });
+
+// ─── Card bands: canonical render order (PR #13 Finding 4) ────────────────────
+
+/** A minimal card view carrying only what the band split consumes. */
+function bandCard(order: number, kind: SessionExerciseCardView['kind']): SessionExerciseCardView {
+  return {
+    order,
+    renderKey: `band:${order}`,
+    kind,
+    name: `Exercise ${order}`,
+    originallyName: null,
+    equipmentLabel: null,
+    prescriptionLabel: '3×8-10',
+    badge: { style: 'neutral', label: 'Upcoming', mobileVisible: true },
+    setRows: [],
+    logger: null,
+    substitution: { state: 'hidden', blockedLabel: null },
+    adjustment: { state: 'open', blockedLabel: null, canMoveUp: true, canMoveDown: true },
+  } as unknown as SessionExerciseCardView;
+}
+
+describe('splitSessionExerciseCardBands (canonical render order)', () => {
+  it('keeps a skipped occurrence behind an earlier untouched one: 1,2,3 stays 1,2,3', () => {
+    // The reported bug: order 1 active, order 2 upcoming, order 3 skipped.
+    // The old non-upcoming-first partition rendered 1, 3, 2.
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'active'),
+      bandCard(2, 'upcoming'),
+      bandCard(3, 'skipped'),
+    ]);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.upcoming).toEqual([]);
+  });
+
+  it('keeps an interleaved partial occurrence behind an earlier untouched one', () => {
+    // Not M10-specific: logging a set on order 3 while order 2 is untouched
+    // is the same interleaving shape and must render canonically too.
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'done'),
+      bandCard(2, 'upcoming'),
+      bandCard(3, 'partial'),
+    ]);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps the untouched trailing suffix in the Up next band', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'done'),
+      bandCard(2, 'active'),
+      bandCard(3, 'upcoming'),
+    ]);
+
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2]);
+    expect(bands.upcoming.map((card) => card.order)).toEqual([3]);
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('returns an empty card band when every occurrence is untouched', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'upcoming'),
+      bandCard(2, 'upcoming'),
+    ]);
+
+    expect(bands.cards).toEqual([]);
+    expect(bands.upcoming.map((card) => card.order)).toEqual([1, 2]);
+  });
+
+  it('returns an empty upcoming band when every occurrence is touched', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'skipped'),
+      bandCard(2, 'done'),
+    ]);
+
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2]);
+    expect(bands.upcoming).toEqual([]);
+  });
+
+  it('never reorders: the concatenation is always the input, in order', () => {
+    const kinds: ReadonlyArray<SessionExerciseCardView['kind']> = [
+      'upcoming', 'skipped', 'upcoming', 'active', 'done', 'upcoming', 'partial', 'upcoming',
+    ];
+    const cards = kinds.map((kind, index) => bandCard(index + 1, kind));
+
+    const bands = splitSessionExerciseCardBands(cards);
+
+    expect([...bands.cards, ...bands.upcoming]).toEqual(cards);
+    // Post-condition: every member of the upcoming band is untouched.
+    for (const card of bands.upcoming) {
+      expect(card.kind).toBe('upcoming');
+    }
+  });
+
+  it('agrees with the real card mapper on a skipped-after-upcoming session', () => {
+    // The full pipeline (buildSessionExerciseCardViews → band split) on the
+    // reported fixture: the bands concatenated are the DTO's canonical order.
+    const cards = buildSessionExerciseCardViews({
+      logs: [
+        log(1, 'ex-a', threeByEightToTen, []),
+        log(2, 'ex-b', threeByEightToTen, []),
+        skippedLog(3, 'ex-c'),
+      ],
+      targets: [null, null, null],
+      catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: new Map(),
+      sessionStatus: 'in-progress',
+    });
+
+    const bands = splitSessionExerciseCardBands(cards);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.cards.map((card) => card.kind)).toEqual(['active', 'upcoming', 'skipped']);
+    expect(bands.upcoming).toEqual([]);
+  });
+});
+

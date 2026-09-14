@@ -102,6 +102,48 @@ export interface SessionProgressView {
   readonly volumeLabel: string;
 }
 
+// ─── Card bands (canonical render order) ─────────────────────────────────────
+
+/**
+ * The two render bands of the Active Workout screen. Concatenating
+ * `cards` + `upcoming` reproduces the canonical DTO order
+ * element-for-element — no sorting ever happens anywhere (PR #13
+ * Finding 4).
+ */
+export interface SessionExerciseCardBands {
+  /** The canonical leading band: every card before the last non-upcoming one. */
+  readonly cards: ReadonlyArray<SessionExerciseCardView>;
+  /** The canonical trailing band: untouched occurrences, all kind === 'upcoming'. */
+  readonly upcoming: ReadonlyArray<SessionExerciseCardView>;
+}
+
+/**
+ * Splits canonically ordered cards into the full-card band and the quiet
+ * "Up next" band WITHOUT reordering anything: the cut index is the position
+ * AFTER the last card whose kind is not 'upcoming', so the concatenation of
+ * the two bands is always element-for-element the input.
+ *
+ * Why a suffix cut (not the previous "every non-upcoming first" partition):
+ * a touched occurrence sitting AFTER an untouched one (e.g. order 3 skipped
+ * while order 2 is still upcoming) used to be pulled ahead of it, rendering
+ * the DOM as 1, 3, 2 against the canonical 1, 2, 3. Cutting at the last
+ * touched position keeps every touched occurrence in place — the untouched
+ * occurrence simply renders as a full card with its own quiet affordances
+ * instead of a dimmed row — while the untouched suffix keeps the compact
+ * "Up next" treatment exactly as before.
+ */
+export function splitSessionExerciseCardBands(
+  cards: ReadonlyArray<SessionExerciseCardView>,
+): SessionExerciseCardBands {
+  let cut = 0;
+  for (let index = 0; index < cards.length; index += 1) {
+    if (cards[index]?.kind !== 'upcoming') {
+      cut = index + 1;
+    }
+  }
+  return { cards: cards.slice(0, cut), upcoming: cards.slice(cut) };
+}
+
 /**
  * Formats a session timestamp as a 24h clock label ("17:42"), matching the
  * locked design eyebrow. Rendered server-side only; the server's timezone is

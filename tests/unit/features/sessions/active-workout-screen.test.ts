@@ -356,3 +356,93 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
     expect(text).toContain('adjust 3 open up:yes down:no');
   });
 });
+
+describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #13 Finding 4)', () => {
+  /** The order circles in true DOCUMENT order — articles and upcoming rows interleaved as the DOM emits them. */
+  function documentOrderCircles(container: HTMLElement): string[] {
+    return Array.from(
+      container.querySelectorAll(
+        'article span[aria-hidden="true"], section[aria-label="Up next"] li span[aria-hidden="true"]',
+      ),
+    ).map((circle) => circle.textContent ?? '');
+  }
+
+  it('renders 1 active / 2 upcoming / 3 skipped visually as 1, 2, 3 — never 1, 3, 2', async () => {
+    // The reported Codex case: order 1 is active, order 2 is still untouched,
+    // order 3 is skipped. The old non-upcoming-first partition pulled the
+    // skipped card ahead of the untouched one (DOM 1, 3, 2); the canonical
+    // DTO order is 1, 2, 3 and that is what must render.
+    const session: WorkoutSessionDto = {
+      sessionId: 's-1',
+      scheduledWorkoutId: 'sw-1',
+      workoutId: 'w1',
+      status: 'in-progress',
+      startedAt: '2026-09-01T17:00:00.000Z',
+      completedAt: null,
+      version: 0,
+      exerciseLogs: [
+        log(1, 'ex-a', []),
+        log(2, 'ex-b', []),
+        log(3, 'ex-c', [], {
+          isSkipped: true,
+          substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
+          adjustmentEligibility: eligibility(true, true, false),
+        }),
+      ],
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+      prescribedSets: 6,
+      skippedExerciseCount: 1,
+    };
+
+    const container = await renderScreen(session);
+
+    // Document order — the concatenation the user actually sees.
+    expect(documentOrderCircles(container)).toEqual(['1', '2', '3']);
+
+    // The skipped occurrence keeps its visibly-skipped rendering: the muted
+    // skipped card (not a dimmed Up-next row), with its badge and hint.
+    const articles = Array.from(container.querySelectorAll('article'));
+    expect(articles).toHaveLength(3);
+    const skippedCard = articles[2];
+    expect(skippedCard?.textContent).toContain('Skipped');
+    expect(skippedCard?.textContent).toContain(
+      'Skipped in this session — it logged no sets and adds none to your progress.',
+    );
+    // No occurrence was pulled into the quiet band: the untouched occurrence
+    // 2 renders as its own full card between the active and skipped ones.
+    expect(container.querySelector('section[aria-label="Up next"]')).toBeNull();
+    // Move controls still face the REAL adjacent neighbor: the skipped
+    // occurrence at the visual tail may move up but not down.
+    const text = container.textContent ?? '';
+    expect(text).toContain('adjust 3 skipped up:yes down:no');
+  });
+
+  it('renders an interleaved partial occurrence behind an earlier untouched one canonically', async () => {
+    // Not M10-specific: order 3 partial (a logged set) while order 2 is still
+    // upcoming must also render 1, 2, 3 — the fix is kind-agnostic.
+    const session: WorkoutSessionDto = {
+      sessionId: 's-1',
+      scheduledWorkoutId: 'sw-1',
+      workoutId: 'w1',
+      status: 'in-progress',
+      startedAt: '2026-09-01T17:00:00.000Z',
+      completedAt: null,
+      version: 0,
+      exerciseLogs: [
+        log(1, 'ex-a', [repSet(1, 10, 50), repSet(2, 10, 50)]),
+        log(2, 'ex-b', []),
+        log(3, 'ex-c', [repSet(1, 10, 40)], {
+          adjustmentEligibility: eligibility(false, true, false, 'logged-sets'),
+        }),
+      ],
+      metrics: { totalSets: 4, totalReps: 40, totalDurationSeconds: 0, volume: 190 },
+      prescribedSets: 9,
+      skippedExerciseCount: 0,
+    };
+
+    const container = await renderScreen(session);
+
+    expect(documentOrderCircles(container)).toEqual(['1', '2', '3']);
+  });
+});
+

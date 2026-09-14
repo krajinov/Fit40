@@ -413,4 +413,137 @@ describe('current rendered intent: occurrence-addressed commands succeed', () =>
   });
 });
 
+// ─── Committed version in the returned DTO (PR #13 Finding 5) ────────────────
+
+/**
+ * A successful mutation's returned WorkoutSessionDto must carry the version
+ * the repository COMMITTED — never the pre-save snapshot's. A caller that
+ * uses the returned DTO as its updated snapshot and feeds `data.version`
+ * straight back as the next command's `expectedSessionVersion` must succeed;
+ * a pre-save DTO would send a token the database no longer holds and the
+ * next write would fail with SESSION_MODIFIED despite the preceding one
+ * having succeeded.
+ */
+describe('committed version: returned DTO matches the persisted aggregate', () => {
+  const SESSION = () => seedTwoOccurrenceSession();
+
+  it('skip returns the persisted version, and mutating again with that version succeeds', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(SESSION());
+    const uc = new SkipSessionExerciseUseCase(repo);
+
+    const first = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      expectedSessionVersion: 0,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    // The returned DTO's version equals the committed row version.
+    const stored = await repo.findById(seedTwoOccurrenceSession().id);
+    expect(stored?.version).toBe(1);
+    expect(first.data.version).toBe(stored?.version);
+
+    // Feed the returned version straight into the next mutation.
+    const second = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 2,
+      expectedSessionVersion: first.data.version,
+    });
+    expect(second.ok).toBe(true);
+  });
+
+  it('move returns the persisted version, and mutating again with that version succeeds', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(SESSION());
+    const uc = new MoveSessionExerciseUseCase(repo);
+
+    const first = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 2,
+      direction: 'up',
+      expectedSessionVersion: 0,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const stored = await repo.findById(seedTwoOccurrenceSession().id);
+    expect(stored?.version).toBe(1);
+    expect(first.data.version).toBe(stored?.version);
+
+    const second = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      direction: 'down',
+      expectedSessionVersion: first.data.version,
+    });
+    expect(second.ok).toBe(true);
+  });
+
+  it('log set returns the persisted version, and mutating again with that version succeeds', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(SESSION());
+    const uc = new LogSessionSetUseCase(repo);
+
+    const first = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      expectedSessionVersion: 0,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const stored = await repo.findById(seedTwoOccurrenceSession().id);
+    expect(stored?.version).toBe(1);
+    expect(first.data.version).toBe(stored?.version);
+
+    const second = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      expectedSessionVersion: first.data.version,
+      type: 'reps',
+      reps: 10,
+      weightKg: 52.5,
+      rpe: null,
+    });
+    expect(second.ok).toBe(true);
+  });
+
+  it('substitute returns the persisted version, and mutating again with that version succeeds', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(SESSION());
+    const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo(['ex-x', 'ex-y']));
+
+    const first = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      replacementExerciseId: 'ex-x',
+      expectedSessionVersion: 0,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const stored = await repo.findById(seedTwoOccurrenceSession().id);
+    expect(stored?.version).toBe(1);
+    expect(first.data.version).toBe(stored?.version);
+
+    const second = await uc.execute({
+      sessionId: SESSION_ID,
+      userId: OWNER,
+      exerciseOrder: 1,
+      replacementExerciseId: 'ex-y',
+      expectedSessionVersion: first.data.version,
+    });
+    expect(second.ok).toBe(true);
+  });
+});
+
 

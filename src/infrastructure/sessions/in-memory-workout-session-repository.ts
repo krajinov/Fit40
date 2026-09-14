@@ -49,7 +49,7 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return null;
   }
 
-  async save(session: WorkoutSession): Promise<void> {
+  async save(session: WorkoutSession): Promise<WorkoutSession> {
     // Mirror the database's write protection: an update of an existing row
     // whose enrollment no longer matches the caller's snapshot (detached by
     // a concurrent leave, or re-pointed) must not commit, so use-case tests
@@ -86,12 +86,15 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     if (existing !== undefined && existing.version !== session.version) {
       throw new SessionStaleVersionError(session.id);
     }
-    this.sessionsById.set(
-      session.id,
-      structuredClone(
-        existing === undefined ? session : { ...session, version: session.version + 1 },
-      ),
-    );
+    // The returned aggregate carries the COMMITTED version (the port's
+    // contract): the same two-branch policy the SQL upsert applies, so a
+    // caller building a DTO from this return value never sends a version the
+    // store did not hold. Both the stored copy and the returned copy are
+    // clones, preserving this repository's mutation isolation.
+    const persisted: WorkoutSession =
+      existing === undefined ? session : { ...session, version: session.version + 1 };
+    this.sessionsById.set(session.id, structuredClone(persisted));
+    return structuredClone(persisted);
   }
 
   async listCompletedScheduledWorkoutIds(

@@ -103,9 +103,9 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
   }
 
-  async save(session: WorkoutSession): Promise<void> {
+  async save(session: WorkoutSession): Promise<WorkoutSession> {
     try {
-      await this.db.transaction(async (tx) => {
+      const committedVersion = await this.db.transaction(async (tx) => {
         const affected = await tx
           .insert(workoutSessions)
           .values(mapSessionToRow(session))
@@ -132,9 +132,15 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
                   )
                 : eq(workoutSessions.version, session.version),
           })
-          .returning({ id: workoutSessions.id });
+          // The committed version is READ BACK from the row, never recomputed
+          // here: the upsert's INSERT branch stores the snapshot's own version
+          // while its UPDATE branch stores version + 1, and only PostgreSQL
+          // knows which branch ran. Returning the database's own value is what
+          // lets the port promise "the persisted aggregate".
+          .returning({ id: workoutSessions.id, version: workoutSessions.version });
 
-        if (affected.length === 0) {
+        const committed = affected[0];
+        if (committed === undefined) {
           // Failure-path classification only (never a pre-save recheck): a
           // version mismatch is the existing optimistic-concurrency outcome;
           // a version match with a changed/NULL enrollment is the detached-
@@ -169,7 +175,14 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
             await tx.insert(setLogs).values(mapSetToRow(session.id, log.order, set));
           }
         }
+
+        return committed.version;
       });
+
+      // The whole-aggregate write persisted exactly this snapshot's children,
+      // so the persisted aggregate is the snapshot with the database's own
+      // committed version attached.
+      return { ...session, version: committedVersion };
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);

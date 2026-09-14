@@ -278,3 +278,41 @@ describe('moveSessionExercise', () => {
   });
 });
 
+
+
+  it('two COMPLETELY IDENTICAL duplicate occurrences keep distinct stable keys through a swap (PR #13 Finding 1)', () => {
+    // The exact case no composite render key can solve: the same exercise
+    // authored twice with identical prescription AND identical rest, both
+    // untouched. Every persisted column except exercise_order is equal.
+    // The stable occurrenceKey is the only thing distinguishing them, and it
+    // must TRAVEL WITH its occurrence through the swap.
+    const r = createWorkoutSession({
+      id: 't-identical', userId: uid('user-1'), enrollmentId: null,
+      scheduledWorkoutId: sid('s-1'), workoutId: wid('w-1'),
+      startedAt: new Date('2025-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-same'), order: 1, prescription: rep(), restSeconds: 60 },
+        { authoredExerciseId: eid('ex-same'), order: 2, prescription: rep(), restSeconds: 60 },
+      ],
+    });
+    if (!r.ok) throw Error();
+
+    // Creation default: keys are the creation orders, distinct.
+    expect(r.data.exerciseLogs.map((e) => e.occurrenceKey)).toEqual([1, 2]);
+
+    // Swap the two identical duplicates.
+    const moved = moveSessionExercise(r.data, { exerciseOrder: 2, direction: 'up' });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+
+    // Orders swapped: dense 1..N canonical.
+    expect(moved.data.exerciseLogs.map((e) => e.order)).toEqual([1, 2]);
+    // The occurrence that WAS order 2 (key 2) now sits at order 1 — its key
+    // traveled with it — and the occurrence that WAS order 1 (key 1) is now
+    // at order 2. The keys remain distinct and unchanged in value.
+    expect(moved.data.exerciseLogs.map((e) => [e.order, e.occurrenceKey])).toEqual([
+      [1, 2],
+      [2, 1],
+    ]);
+    expect(new Set(moved.data.exerciseLogs.map((e) => e.occurrenceKey)).size).toBe(2);
+  });

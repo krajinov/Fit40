@@ -119,7 +119,7 @@ export function UpcomingExerciseList({
                 </summary>
                 <div className="pb-3 pt-1">
                   <SetLoggerForm
-                    key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+                    key={`${exercise.renderKey}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                     sessionId={sessionId}
                     exerciseOrder={log.order}
                     expectedSessionVersion={expectedSessionVersion}

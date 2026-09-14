@@ -55,6 +55,15 @@ export interface WorkoutSessionExerciseDto {
    */
   readonly isSkipped: boolean;
   /**
+   * The immutable per-occurrence persistence/render token (PR #13
+   * Finding 1), projected straight from the aggregate. Presentation derives
+   * its stable React render identity from this — never from the mutable
+   * `order`. It is NOT the business occurrence locator (that remains
+   * `(sessionId, exerciseOrder)` via `order`) and is never an input to any
+   * use case, Server Action, or query.
+   */
+  readonly occurrenceKey: number;
+  /**
    * Whether the occurrence's skip decision may currently change — the
    * domain's mutation rules, projected by
    * `resolveOccurrenceAdjustmentEligibility`. Presentation consumes this
@@ -189,6 +198,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
         performedExerciseId: substitution.performedExerciseId as string,
         isSubstituted: substitution.isSubstituted,
         isSkipped: log.isSkipped,
+        occurrenceKey: log.occurrenceKey,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,

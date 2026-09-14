@@ -59,17 +59,22 @@ export interface SessionExerciseBadgeView {
 export interface SessionExerciseCardView {
   readonly order: number;
   /**
-   * React render identity of this occurrence subtree (PR #13 Finding 2),
-   * composed from the occurrence's snapshot identity plus its current order:
-   * `${order}:${authoredExerciseId}:${performedExerciseId}`. NOT the bare
-   * mutable `order` — after a reorder the same numeric order can identify a
-   * DIFFERENT occurrence, and React would otherwise preserve a slot's local
-   * state (open loggers, edit drafts, open `<details>`) and hand it to the
-   * exercise that now occupies that slot. The composite stays stable across
-   * ordinary rerenders of the same occurrence (same order, same identities),
-   * changes when another occurrence takes over the order, and distinguishes
-   * duplicate-exercise occurrences by their authored/performed pair. It is a
-   * presentation-only key — no surrogate occurrence id exists in M10.
+   * React render identity of this occurrence subtree, derived ONLY from the
+   * occurrence's immutable `occurrenceKey` (PR #13 Findings 1 & 2): the token
+   * is assigned once at session creation, persisted, and carried unchanged
+   * through reorder, skip/unskip, substitution/restore and set mutations —
+   * so the key TRAVELS WITH THE OCCURRENCE through a reorder instead of
+   * staying attached to the mutable numeric order slot.
+   *
+   * Why not a composite of order + authored/performed ids: `order` is
+   * rewritten by moves (same key, wrong occurrence) and two adjacent
+   * DUPLICATE occurrences of the same exercise are byte-identical in every
+   * persisted column except `order` — no composite can be both
+   * duplicate-distinguishing and reorder-stable. Only a persisted token can.
+   *
+   * Presentation-only key: `occurrenceKey` is never a business locator,
+   * never an action input, and never part of occurrence identity — the
+   * business locator stays `(sessionId, exerciseOrder)`.
    */
   readonly renderKey: string;
   readonly kind: SessionExerciseKind;
@@ -270,14 +275,14 @@ export function buildSessionExerciseCardViews(
 
     return {
       order: log.order,
-      // Presentation-only render identity (PR #13 Finding 2): order + the
-      // immutable identity snapshot, so a reorder that seats a different
-      // occurrence at this order remounts the subtree instead of reusing
-      // the previous occupant's local state. Duplicate occurrences with the
-      // same authored AND performed id still share this composite; their
-      // identity remains (sessionId, exerciseOrder) in the domain, and the
-      // order component of the key already separates them (dense 1..N).
-      renderKey: `${log.order}:${log.authoredExerciseId}:${log.performedExerciseId}`,
+      // Presentation-only render identity (PR #13 Findings 1 & 2): derived
+      // ONLY from the immutable persisted occurrenceKey, so the subtree's
+      // local state (open loggers, edit drafts, open disclosures) travels
+      // with the OCCURRENCE through a reorder — never with the numeric order
+      // slot — and duplicate identical occurrences of the same exercise get
+      // distinct keys. The domain guarantees token uniqueness within the
+      // session (the factory validates it), so no two cards share this key.
+      renderKey: `occ:${log.occurrenceKey}`,
       kind,
       name: meta?.name ?? `Exercise ${log.order}`,
       // The PERFORMED exercise is the primary identity; the authored name is

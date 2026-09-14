@@ -88,6 +88,8 @@ function sessionLog(order: number, isSkipped = false): WorkoutSessionExerciseDto
     performedExerciseId: 'ex-bench',
     isSubstituted: false,
     isSkipped,
+    // Defaults to the order (the fixture's implicit occurrenceKey).
+    occurrenceKey: order,
     substitutionEligibility: { blockedBy: isSkipped ? 'skipped' : null, canRestore: false },
     adjustmentEligibility: isSkipped
       ? {

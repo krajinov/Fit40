@@ -274,6 +274,63 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
       3,
     ]);
   });
+
+  it('persists occurrence keys and reorders them with their occurrences (PR #13 Finding 1)', async () => {
+    const session = makeSession('session-reorder-keys');
+    await workoutSessionRepository.save(session);
+
+    // The insert persisted a distinct token per occurrence, in creation order.
+    let logRows = await loadLogRows('session-reorder-keys');
+    expect(logRows.map((row) => row.occurrenceKey)).toEqual([1, 2, 3]);
+
+    // Rehydrate and move ex-015 (order 2, occurrenceKey 2) up. The whole
+    // occurrence — its token included — travels to order 1.
+    const loaded = await workoutSessionRepository.findById(sessionId('session-reorder-keys'));
+    if (!loaded) throw new Error('session not found');
+    expect(loaded.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
+    const up = moveSessionExercise(loaded, { exerciseOrder: 2, direction: 'up' });
+    if (!up.ok) throw new Error(up.error.message);
+    await workoutSessionRepository.save(up.data);
+
+    // Persisted: the token follows its occurrence — exercise ex-015 now sits
+    // at order 1 STILL carrying key 2, and every key stays session-unique.
+    logRows = await loadLogRows('session-reorder-keys');
+    expect(logRows.map((row) => row.exerciseId)).toEqual(['ex-015', 'ex-002', 'ex-010']);
+    expect(logRows.map((row) => row.occurrenceKey)).toEqual([2, 1, 3]);
+    expect(new Set(logRows.map((row) => row.occurrenceKey)).size).toBe(3);
+  });
+
+  it('hydrates legacy NULL occurrence_key rows via the order fallback and self-heals on the next save (PR #13 Finding 1)', async () => {
+    const session = makeSession('session-legacy-keys');
+    await workoutSessionRepository.save(session);
+
+    // Simulate pre-fix legacy rows: NULL tokens, exercised orders intact.
+    await db.update(exerciseLogs).set({ occurrenceKey: null }).where(
+      eq(exerciseLogs.sessionId, 'session-legacy-keys'),
+    );
+    let logRows = await loadLogRows('session-legacy-keys');
+    expect(logRows.map((row) => row.occurrenceKey)).toEqual([null, null, null]);
+
+    // Hydration coalesces NULL to exercise_order (distinct within the session
+    // by the composite PK), so a legacy render keys each occurrence by its
+    // order exactly as the pre-fix behavior did.
+    const hydrated = await workoutSessionRepository.findById(sessionId('session-legacy-keys'));
+    if (!hydrated) throw new Error('session not found');
+    expect(hydrated.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
+
+    // The next whole-aggregate save persists the coalesced tokens — the row
+    // self-heals with values that match the fallback the render used, so the
+    // render key never changes across the transition.
+    const moved = moveSessionExercise(hydrated, { exerciseOrder: 2, direction: 'up' });
+    if (!moved.ok) throw new Error(moved.error.message);
+    await workoutSessionRepository.save(moved.data);
+
+    logRows = await loadLogRows('session-legacy-keys');
+    // ex-015 (hydrated key 2) now sits at order 1 still carrying key 2.
+    expect(logRows.map((row) => row.exerciseId)).toEqual(['ex-015', 'ex-002', 'ex-010']);
+    expect(logRows.map((row) => row.occurrenceKey)).toEqual([2, 1, 3]);
+    expect(new Set(logRows.map((row) => row.occurrenceKey)).size).toBe(3);
+  });
 });
 
 afterAll(async () => {

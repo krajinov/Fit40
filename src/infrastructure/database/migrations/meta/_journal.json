@@ -71,6 +71,13 @@
       "when": 1789058627566,
       "tag": "0009_elite_hellion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789374243253,
+      "tag": "0010_loud_lady_bullseye",
+      "breakpoints": true
     }
   ]
 }

@@ -149,7 +149,7 @@ export function SessionExerciseCard({
       {logger !== null &&
         (card.kind === 'active' ? (
           <SetLoggerForm
-            key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+            key={`${card.renderKey}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
             sessionId={sessionId}
             exerciseOrder={log.order}
             expectedSessionVersion={expectedSessionVersion}
@@ -174,7 +174,7 @@ export function SessionExerciseCard({
             </summary>
             <div className="pt-3">
               <SetLoggerForm
-                key={`${card.order}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
+                key={`${card.renderKey}-${card.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
                 sessionId={sessionId}
                 exerciseOrder={log.order}
                 expectedSessionVersion={expectedSessionVersion}

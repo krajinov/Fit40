@@ -250,3 +250,75 @@ describe('stale rendered intent: every occurrence-addressed schema requires the 
     expect(parse().success).toBe(false);
   });
 });
+
+describe('occurrence-key boundary (PR #13 Finding 1)', () => {
+  // `occurrenceKey` is a presentation/persistence token only. It must NEVER
+  // become part of the command surface: the business occurrence locator stays
+  // (sessionId, exerciseOrder) and every action continues to address an
+  // occurrence with sessionId + exerciseOrder + expectedSessionVersion.
+  // Every session action schema strips a client-supplied occurrenceKey — it
+  // is never carried through to the parsed command.
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly parse: () => { success: boolean; data?: Record<string, unknown> };
+  }> = [
+    {
+      name: 'logSetSchema (reps)',
+      parse: () =>
+        logSetSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
+          type: 'reps', reps: 10, weightKg: 20, rpe: null,
+        }),
+    },
+    {
+      name: 'deleteSetSchema',
+      parse: () =>
+        deleteSetSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999, setNumber: 1,
+        }),
+    },
+    {
+      name: 'substituteExerciseSchema',
+      parse: () =>
+        substituteExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
+          replacementExerciseId: 'ex-2',
+        }),
+    },
+    {
+      name: 'restoreExerciseSchema',
+      parse: () =>
+        restoreExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
+        }),
+    },
+    {
+      name: 'skipExerciseSchema',
+      parse: () =>
+        skipExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
+        }),
+    },
+    {
+      name: 'unskipExerciseSchema',
+      parse: () =>
+        unskipExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
+        }),
+    },
+    {
+      name: 'moveExerciseSchema',
+      parse: () =>
+        moveExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999, direction: 'up',
+        }),
+    },
+  ] as const;
+
+  it.each(cases)('$name strips a client-supplied occurrenceKey instead of accepting it', ({ parse }) => {
+    const result = parse();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).not.toHaveProperty('occurrenceKey');
+  });
+});

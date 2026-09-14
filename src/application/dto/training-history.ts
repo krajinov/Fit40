@@ -246,6 +246,7 @@ export function toTrainingHistorySessionDto(
         performedExerciseId: substitution.performedExerciseId,
         isSubstituted: substitution.isSubstituted,
         isSkipped: log.isSkipped,
+        occurrenceKey: log.occurrenceKey,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,

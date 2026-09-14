@@ -61,6 +61,9 @@ function log(
     performedExerciseId: exerciseId,
     isSubstituted: false,
     isSkipped: false,
+    // Defaults to the order (the fixture's implicit occurrenceKey); tests
+    // that exercise reorder stability override it explicitly.
+    occurrenceKey: order,
     substitutionEligibility: { blockedBy: null, canRestore: false },
     adjustmentEligibility: {
       isSkipped: false,
@@ -1317,5 +1320,77 @@ describe('splitSessionExerciseCardBands (canonical render order)', () => {
     expect(bands.cards.map((card) => card.kind)).toEqual(['active', 'upcoming', 'skipped']);
     expect(bands.upcoming).toEqual([]);
   });
+
+describe('active-workout-views / renderKey derivation (PR #13 Finding 1)', () => {
+  const catalog = new Map<string, { name: string; equipment: 'barbell' }>();
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
+  function cardsFor(logs: WorkoutSessionExerciseDto[]) {
+    return buildSessionExerciseCardViews({
+      logs,
+      targets: logs.map(() => null),
+      catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+  }
+
+  it('derives the key only from the occurrenceKey, never order or exercise ids', () => {
+    const cards = cardsFor([
+      log(1, 'ex-a', threeByEightToTen, []),
+      log(2, 'ex-b', threeByEightToTen, []),
+    ]);
+
+    expect(cards[0]?.renderKey).toBe('occ:1');
+    expect(cards[1]?.renderKey).toBe('occ:2');
+  });
+
+  it('two completely identical duplicate occurrences get DISTINCT keys', () => {
+    // Same authored id, same performed id, same prescription — only their
+    // occurrenceKeys differ, and so must their render keys.
+    const cards = cardsFor([
+      log(1, 'ex-same', threeByEightToTen, [], { occurrenceKey: 1 }),
+      log(2, 'ex-same', threeByEightToTen, [], { occurrenceKey: 2 }),
+    ]);
+
+    expect(cards[0]?.renderKey).not.toBe(cards[1]?.renderKey);
+    expect(new Set(cards.map((card) => card.renderKey)).size).toBe(2);
+  });
+
+  it('the key travels with the occurrence through a reorder, unchanged', () => {
+    // Occurrence with key 1 moves from order 1 to order 2 (and vice versa):
+    // its renderKey stays `occ:1` even though its order is now 2.
+    const before = cardsFor([
+      log(1, 'ex-a', threeByEightToTen, [], { occurrenceKey: 1 }),
+      log(2, 'ex-b', threeByEightToTen, [], { occurrenceKey: 2 }),
+    ]);
+    const after = cardsFor([
+      log(1, 'ex-b', threeByEightToTen, [], { occurrenceKey: 2 }),
+      log(2, 'ex-a', threeByEightToTen, [], { occurrenceKey: 1 }),
+    ]);
+
+    // Same occurrence (key 1): same key before and after the reorder.
+    expect(before.find((card) => card.order === 1)?.renderKey).toBe('occ:1');
+    expect(after.find((card) => card.order === 2)?.renderKey).toBe('occ:1');
+    // And the order-1 slot's key genuinely changed — its new occupant has
+    // its own key, so React remounts the slot instead of reusing the
+    // previous occupant's local state.
+    expect(before.find((card) => card.order === 1)?.renderKey).not.toBe(
+      after.find((card) => card.order === 1)?.renderKey,
+    );
+  });
+
+  it('the key is stable across repeated builds of the same snapshot', () => {
+    const logs = [
+      log(1, 'ex-a', threeByEightToTen, []),
+      log(2, 'ex-b', threeByEightToTen, []),
+    ];
+
+    expect(cardsFor(logs).map((card) => card.renderKey)).toEqual(
+      cardsFor(logs).map((card) => card.renderKey),
+    );
+  });
+});
+
 });
 

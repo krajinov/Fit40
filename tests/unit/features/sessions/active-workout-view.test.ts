@@ -59,6 +59,8 @@ function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]
     performedExerciseId: 'ex-bench',
     isSubstituted: false,
     isSkipped: false,
+    // Defaults to the order (the fixture's implicit occurrenceKey).
+    occurrenceKey: 1,
     substitutionEligibility: { blockedBy: null, canRestore: false },
     adjustmentEligibility: {
       isSkipped: false,

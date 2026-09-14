@@ -117,7 +117,7 @@ const openAdjustment: SessionAdjustmentView = {
 function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): SessionExerciseCardView {
   return {
     order: 2,
-    renderKey: '2:ex-001:ex-001',
+    renderKey: 'occ:2',
     kind: 'upcoming',
     name: 'Dumbbell Bench Press',
     originallyName: null,
@@ -138,6 +138,8 @@ function sessionLog(order: number): WorkoutSessionExerciseDto {
     performedExerciseId: 'ex-db-bench',
     isSubstituted: true,
     isSkipped: false,
+    // Defaults to the order (the fixture's implicit occurrenceKey).
+    occurrenceKey: order,
     substitutionEligibility: { blockedBy: null, canRestore: true },
     adjustmentEligibility: {
       isSkipped: false,
@@ -339,8 +341,8 @@ describe('UpcomingExerciseList / reorder remounts the occurrence subtree (PR #13
   it("a reorder that seats a different occurrence at order 1 does not inherit the previous occupant's local state", async () => {
     // Rendered state: A (Squat, order 1) and B (Bench, order 2) — distinct
     // exercises at distinct orders. Both rows carry a logger (expandable).
-    const squatCard = upcomingCard({ order: 1, renderKey: '1:ex-squat:ex-squat', name: 'Squat' });
-    const benchCard = upcomingCard({ order: 2, renderKey: '2:ex-bench:ex-bench', name: 'Bench' });
+    const squatCard = upcomingCard({ order: 1, renderKey: 'occ:1', name: 'Squat' });
+    const benchCard = upcomingCard({ order: 2, renderKey: 'occ:2', name: 'Bench' });
     const squatLog: WorkoutSessionExerciseDto = {
       ...sessionLog(1),
       authoredExerciseId: 'ex-squat',
@@ -367,17 +369,17 @@ describe('UpcomingExerciseList / reorder remounts the occurrence subtree (PR #13
     expect(squatInput.value).toBe('10');
 
     // The canonical reorder arrives from the server: B (Bench) now occupies
-    // order 1; A (Squat) moved to order 2. The renderKey changes at the
-    // order-1 slot, so React REMOUNTS that subtree — Bench never inherits
-    // the squat draft.
+    // order 1; A (Squat) moved to order 2. Each occurrence keeps its own
+    // occurrenceKey-derived renderKey, so the order-1 slot's subtree
+    // REMOUNTS — Bench never inherits the squat draft.
     const reorderedBench = upcomingCard({
       order: 1,
-      renderKey: '1:ex-bench:ex-bench',
+      renderKey: 'occ:2',
       name: 'Bench',
     });
     const reorderedSquat = upcomingCard({
       order: 2,
-      renderKey: '2:ex-squat:ex-squat',
+      renderKey: 'occ:1',
       name: 'Squat',
     });
     await rerender(
@@ -398,7 +400,7 @@ describe('UpcomingExerciseList / reorder remounts the occurrence subtree (PR #13
   });
 
   it('an ordinary rerender of the same occurrence keeps its local state', async () => {
-    const squatCard = upcomingCard({ order: 1, renderKey: '1:ex-squat:ex-squat', name: 'Squat' });
+    const squatCard = upcomingCard({ order: 1, renderKey: 'occ:1', name: 'Squat' });
     const squatLog: WorkoutSessionExerciseDto = {
       ...sessionLog(1),
       authoredExerciseId: 'ex-squat',
@@ -418,5 +420,119 @@ describe('UpcomingExerciseList / reorder remounts the occurrence subtree (PR #13
 
     const inputAfter = firstRowCountInput(container);
     expect(inputAfter.value).toBe('8');
+  });
+
+  it('the draft FOLLOWS the actual occurrence through a reorder, not the numeric order slot (PR #13 Finding 1)', async () => {
+    // Two DISTINCT exercises: the user drafts in occurrence A (order 1).
+    // A server reorder swaps A to order 2 and B to order 1. Because the key
+    // is the occurrence's own occurrenceKey, the draft must stay with the A
+    // SUBTREE (now rendered at order 2), while the order-1 slot — occupied
+    // by a different occurrence — starts fresh.
+    const squatCard = upcomingCard({ order: 1, renderKey: 'occ:1', name: 'Squat' });
+    const benchCard = upcomingCard({ order: 2, renderKey: 'occ:2', name: 'Bench' });
+    const squatLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(1),
+      authoredExerciseId: 'ex-squat',
+      performedExerciseId: 'ex-squat',
+    };
+    const benchLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(2),
+      authoredExerciseId: 'ex-bench',
+      performedExerciseId: 'ex-bench',
+    };
+
+    const { container, rerender } = await renderListRerenderable(
+      [squatCard, benchCard],
+      new Map([
+        [1, squatLog],
+        [2, benchLog],
+      ]),
+    );
+
+    // Draft 10 reps into the FIRST row (Squat, occurrenceKey 1).
+    const squatInput = firstRowCountInput(container);
+    await typeInto(squatInput, '10');
+    expect(squatInput.value).toBe('10');
+
+    await rerender(
+      [
+        upcomingCard({ order: 1, renderKey: 'occ:2', name: 'Bench' }),
+        upcomingCard({ order: 2, renderKey: 'occ:1', name: 'Squat' }),
+      ],
+      new Map([
+        [1, benchLog],
+        [2, squatLog],
+      ]),
+    );
+
+    // The draft is still on the SQUAT subtree — whichever row it renders in.
+    const rows = Array.from(container.querySelectorAll('li'));
+    const squatRow = rows.find((row) => row.textContent?.includes('Squat'));
+    const benchRow = rows.find((row) => row.textContent?.includes('Bench'));
+    const repsValueOf = (row: Element | undefined): string => {
+      const input = Array.from(row?.querySelectorAll('input') ?? []).find(
+        (el) => (el as HTMLInputElement).name === 'reps',
+      ) as HTMLInputElement | undefined;
+      return input?.value ?? '';
+    };
+    expect(repsValueOf(squatRow)).toBe('10');
+    expect(repsValueOf(benchRow)).toBe('');
+  });
+
+  it('two COMPLETELY IDENTICAL duplicate occurrences keep distinct keys, so a reorder swaps their drafts correctly (PR #13 Finding 1)', async () => {
+    // The exact composite-key failure: the same exercise twice with the same
+    // authored AND performed id. Only occurrenceKey distinguishes the rows.
+    // The user drafts into the FIRST duplicate, a reorder swaps them, and
+    // the draft must travel with the first duplicate's subtree.
+    const dupOne = upcomingCard({ order: 1, renderKey: 'occ:1', name: 'Squat' });
+    const dupTwo = upcomingCard({ order: 2, renderKey: 'occ:2', name: 'Squat' });
+    const dupOneLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(1),
+      authoredExerciseId: 'ex-squat',
+      performedExerciseId: 'ex-squat',
+    };
+    const dupTwoLog: WorkoutSessionExerciseDto = {
+      ...sessionLog(2),
+      authoredExerciseId: 'ex-squat',
+      performedExerciseId: 'ex-squat',
+    };
+
+    const { container, rerender } = await renderListRerenderable(
+      [dupOne, dupTwo],
+      new Map([
+        [1, dupOneLog],
+        [2, dupTwoLog],
+      ]),
+    );
+
+    const firstInput = firstRowCountInput(container);
+    await typeInto(firstInput, '12');
+    expect(firstInput.value).toBe('12');
+
+    // Server reorder: the duplicates swap positions, each keeping its key.
+    await rerender(
+      [
+        upcomingCard({ order: 1, renderKey: 'occ:2', name: 'Squat' }),
+        upcomingCard({ order: 2, renderKey: 'occ:1', name: 'Squat' }),
+      ],
+      new Map([
+        [1, dupTwoLog],
+        [2, dupOneLog],
+      ]),
+    );
+
+    // The draft (12) FOLLOWS occurrenceKey 1 — now rendered at order 2 —
+    // and the occurrence now at order 1 starts fresh. Under the old
+    // `${order}:${authored}:${performed}` key both rows would have keyed
+    // purely by their order, and the order-1 slot's subtree would have been
+    // REUSED as-is, handing the draft to the wrong duplicate.
+    const repsValues = Array.from(container.querySelectorAll('li')).map((row) => {
+      const input = Array.from(row.querySelectorAll('input')).find(
+        (el) => (el as HTMLInputElement).name === 'reps',
+      ) as HTMLInputElement | undefined;
+      return input?.value ?? '';
+    });
+    expect(repsValues[0]).toBe('');
+    expect(repsValues[1]).toBe('12');
   });
 });

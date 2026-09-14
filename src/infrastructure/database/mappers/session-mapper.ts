@@ -156,6 +156,13 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
       // The persisted skip decision (M10). The column is NOT NULL DEFAULT
       // false, so rows written before it existed hydrate as not skipped.
       isSkipped: row.isSkipped,
+      // The immutable occurrence render/persistence token (PR #13 Finding 1).
+      // The column is nullable with no default: pre-fix legacy rows hydrate
+      // with a fallback to their exercise_order — distinct within the
+      // session by the composite PK, so the fallback never collides — and
+      // self-heal to persisted tokens on their next whole-aggregate save.
+      // The same legacy-coalesce pattern as authoredExerciseId above.
+      occurrenceKey: row.occurrenceKey ?? row.exerciseOrder,
     };
   });
 
@@ -225,6 +232,10 @@ export function mapExerciseLogToRow(
     restSeconds: log.restSeconds,
     // The persisted skip decision rides along on every whole-aggregate save.
     isSkipped: log.isSkipped,
+    // The immutable occurrence render/persistence token rides along the same
+    // way (PR #13 Finding 1): the whole-aggregate rewrite persists it
+    // verbatim, so a reordered occurrence keeps its token at its new order.
+    occurrenceKey: log.occurrenceKey,
   };
 }
 

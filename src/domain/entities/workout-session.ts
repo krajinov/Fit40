@@ -78,6 +78,21 @@ export interface ExerciseLog {
    * while the session is in progress; frozen at completion.
    */
   readonly isSkipped: boolean;
+  /**
+   * Immutable per-occurrence persistence/render token (PR #13 Finding 1).
+   * Assigned once at session creation (defaulting to the creation order) and
+   * carried unchanged through reorder, skip/unskip, substitution/restore and
+   * every set mutation. It exists ONLY so presentation render identity can
+   * travel WITH an occurrence through a reorder — `order` is rewritten by
+   * moves and duplicate identical occurrences are otherwise
+   * render-indistinguishable.
+   *
+   * NOT the business locator (that remains `(sessionId, exerciseOrder)`,
+   * persisted as the `exercise_logs` composite PK) and never an input to
+   * any use case or action. A plain number, deliberately not branded: it is
+   * an attribute, not an identity.
+   */
+  readonly occurrenceKey: number;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -128,6 +143,16 @@ export interface CreateExerciseLogInput {
    * zero sets.
    */
   readonly isSkipped?: boolean;
+  /**
+   * The immutable occurrence render/persistence token for rehydrating a
+   * session saved with one. Fresh sessions omit it: the factory then
+   * defaults it to the occurrence's creation order, which is unique within
+   * the session at creation time. Rehydrating callers may override it only
+   * when they hold a genuinely distinct token per occurrence (the read
+   * mapper's legacy fallback does exactly that); the factory validates
+   * uniqueness within the aggregate either way.
+   */
+  readonly occurrenceKey?: number;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -316,6 +341,20 @@ export function createWorkoutSession(
     }
   }
 
+  // The immutable render token defaults to the creation order (unique within
+  // a fresh session because the orders validated above are the dense 1..N),
+  // and whatever value each occurrence carries must stay unique within the
+  // aggregate: a duplicate token would collapse two occurrences' render
+  // identity — the exact defect the token exists to prevent (PR #13 Finding 1).
+  const occurrenceKeys = input.exerciseLogs.map((log) => log.occurrenceKey ?? log.order);
+  if (new Set(occurrenceKeys).size !== occurrenceKeys.length) {
+    return err({
+      code: 'INVALID_WORKOUT_SESSION',
+      message: 'exercise log occurrence keys must be unique within a session',
+      field: 'exerciseLogs',
+    });
+  }
+
   const exerciseLogs: ReadonlyArray<ExerciseLog> = input.exerciseLogs.map((log) => ({
     authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId ?? log.authoredExerciseId,
@@ -323,6 +362,7 @@ export function createWorkoutSession(
     prescription: log.prescription,
     restSeconds: log.restSeconds,
     isSkipped: log.isSkipped ?? false,
+    occurrenceKey: log.occurrenceKey ?? log.order,
     sets: [],
   }));
 

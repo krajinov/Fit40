@@ -58,14 +58,33 @@ provenance, or alter completion/program-progress semantics (see
 
 ## 2. Occurrence identity
 
-- **Occurrence identity remains `(sessionId, exerciseOrder)`.** There is no
-  surrogate occurrence id in M10. The same exercise can appear twice in one
-  session as two distinct occurrences, and adjusting one never touches the
-  other.
+- **Occurrence identity — the business locator used by every command —
+  remains `(sessionId, exerciseOrder)`.** There is no surrogate identity:
+  the same exercise can appear twice in one session as two distinct
+  occurrences, and adjusting one never touches the other. (The PR #13
+  corrective pass added a **presentation-stability token**, `occurrenceKey`,
+  alongside this identity — see below. It is an *attribute of* the
+  occurrence, never an address for it.)
 - **`exerciseOrder` is mutable while the session is in progress.** Moves are
   the only mutation path; after every successful move the array is
   **canonical**: `exerciseLogs[index].order === index + 1` with orders dense
   `1..N`.
+- **`occurrenceKey` — the stable render token (PR #13 Finding 1).** Because
+  `exerciseOrder` is mutable, it cannot also be React's identity: two
+  *completely identical duplicate* occurrences (same authored id, same
+  performed id, same prescription) are indistinguishable in every other
+  persisted field, so any order-derived key hands one duplicate's local UI
+  state to the other when they swap. `ExerciseLog.occurrenceKey`
+  (migration `0010`) is an immutable, session-unique integer assigned at
+  creation (defaulting to the initial order). It travels with the occurrence
+  through reorder, skip/unskip, substitution/restore and set mutations; it
+  is **never** an input to any use case, Server Action or Zod schema, never
+  a repository query predicate, and never part of history/progression
+  identity. Uniqueness within a session is domain-enforced at construction
+  (deliberately no DB constraint — see
+  [§7](#7-persistence-model)). The view mapper derives
+  `renderKey: 'occ:${occurrenceKey}'` from it alone, including the inner
+  `SetLoggerForm` remount keys.
 - **Completed sessions freeze the final occurrence order.** No adjustment
   use case accepts a completed session (`SESSION_ALREADY_COMPLETED`).
 - The repository's whole-aggregate rewrite makes adjacent reordering safe:
@@ -185,8 +204,12 @@ Shared guard chain: ownership/`SESSION_NOT_FOUND` → enrollment
 stale version). Domain failures surface with their own codes
 (`SESSION_ALREADY_COMPLETED`, `EXERCISE_LOG_NOT_FOUND`,
 `EXERCISE_HAS_LOGGED_SETS`, `ADJUSTMENT_NO_CHANGE`, `MOVE_OUT_OF_RANGE`).
-On success each returns the canonical DTO so actions revalidate the session
-route.
+On success each builds its DTO from the **persisted aggregate returned by
+`save()`** — so the returned `version` is the committed database version,
+never the pre-save snapshot's. A caller chaining a second occurrence
+mutation from the first result therefore sends a current
+`expectedSessionVersion` (PR #13 Finding 5). Server actions currently
+discard the DTO and revalidate the session route.
 
 Server actions (`src/features/sessions/actions/`) are thin Zod-validated
 boundaries delegating to these use cases; expected errors return as typed
@@ -196,24 +219,46 @@ boundaries delegating to these use cases; expected errors return as typed
 
 ## 7. Persistence model
 
-M10's only schema change is migration `0009_elite_hellion`:
+M10's schema changes are migrations `0009_elite_hellion` and `0010_loud_lady_bullseye`:
 
 ```sql
+-- 0009
 ALTER TABLE "exercise_logs" ADD COLUMN "is_skipped" boolean DEFAULT false NOT NULL;
+-- 0010 (PR #13 Finding 1)
+ALTER TABLE "exercise_logs" ADD COLUMN "occurrence_key" integer;
 ```
 
-- One defaulted column added to `exercise_logs`; **no PK change, no FK
-  change, no surrogate occurrence id, no additional reorder column, no new
-  index, no trigger**. The composite PK stays `(session_id,
-  exercise_order)`.
-- `NOT NULL DEFAULT false`: rows written before M10 hydrate as not skipped —
-  skip is a stored fact, never inferred.
+- **`is_skipped`** — `NOT NULL DEFAULT false`: rows written before M10
+  hydrate as not skipped; skip is a stored fact, never inferred.
+- **`occurrence_key`** (PR #13 Finding 1) — nullable integer, **no default,
+  no index, no UNIQUE constraint, no CHECK, no trigger**, and never
+  backfilled. Assigned at session creation and immutable thereafter, it is
+  the per-occurrence presentation-stability token (see
+  [§2](#2-occurrence-identity)) — **not** an identity: the composite PK
+  stays `(session_id, exercise_order)`, `set_logs`' composite FK stays on
+  that pair, and no query, action schema or history projection ever
+  references the column. Uniqueness within a session is enforced by the
+  domain at construction (the repository's catch-all unique-violation
+  mapping would misclassify a child-table constraint, so no DB constraint
+  is added — the same deliberate trade-off as the skip⇔logged-sets rule).
+  Rows written before the column existed hydrate with
+  `occurrenceKey ?? exerciseOrder` (the pre-M10-fix key source, so the
+  transition causes no remount); the next whole-aggregate save persists the
+  coalesced token, healing the NULL. Completed sessions never save again and
+  keep NULL harmlessly. Session creation defaults each
+  `occurrenceKey` to the occurrence's initial order; the in-memory
+  repository (unit-test world) mirrors all of these semantics by storing
+  the aggregate as-is.
 - Skips and moves both save through the existing whole-aggregate repository
-  write path (delete children → reinsert, version check), so skip round-trips
-  and reorder persistence need no dedicated SQL. The Drizzle mapper sorts
-  hydrated rows by `exerciseOrder` at the read boundary (row ordering at the
-  repository boundary, not a presentation concern).
-- The in-memory repository (unit-test world) mirrors the same semantics.
+  write path (delete children → reinsert, version check), so skip
+  round-trips, reorder persistence and `occurrence_key` round-trips need no
+  dedicated SQL. The Drizzle mapper sorts hydrated rows by `exerciseOrder`
+  at the read boundary (row ordering at the repository boundary, not a
+  presentation concern).
+- **`save()` returns the persisted aggregate** carrying the committed
+  database `version` (PR #13 Finding 5) — read from `.returning()`, not
+  recomputed in application code; both implementations (Drizzle, in-memory)
+  honor it, and every save-then-return-DTO use case builds its DTO from it.
 
 ---
 
@@ -290,13 +335,32 @@ from the view mapper — never re-derived from array position, skip state, or
 set counts. A **skipped occurrence still moves** (only the skip decision is
 tied to it).
 
-Mechanics (`SessionExerciseAdjustPanel.tsx`): native `<form>`s with
-`useActionState`, two hooks (the skip path and the move path post to
-different actions) and a **combined pending flag** so a second click can
-never submit a duplicate, the wrong form, or the wrong direction — the
-direction arrives as each form's own hidden input. There is **no
-client-side optimistic reorder**: after a successful move the server
-revalidates the session route and the canonical DTO order renders as
+**Canonical rendering order (PR #13 Finding 4).** The Active Workout screen
+does not partition by state and concatenate; the pure view mapper's
+`splitSessionExerciseCardBands` splits the canonical DTO-ordered card list
+once — **after the last non-`upcoming` card** — into `cards` (canonical
+prefix) and `upcoming` (canonical suffix, all untouched). Concatenated, the
+bands are element-for-element the input, so DOM order **is** canonical DTO
+order: a touched or skipped occurrence interleaved between untouched ones
+(e.g. `1 active, 2 upcoming, 3 skipped`) renders visually as 1 / 2 / 3
+instead of 1 / 3 / 2. Skipped cards stay visibly skipped in the full-card
+band (badge + hint); untouched occurrences keep their compact "Up next"
+rows; no presentation sorting exists anywhere. The move controls therefore
+always sit visually beside the occurrence's real adjacent neighbor.
+
+Mechanics (`SessionExerciseAdjustPanel.tsx`): the client boundary composes
+two presentational islands — `SessionSkipControl` (skip/undo-skip form) and
+`SessionMoveControls` (the two adjacent-move forms, each carrying its own
+hidden `direction` input) — with **two `useActionState` hooks kept in the
+panel** (the skip path and the move path post to different actions) and a
+**combined pending flag** so a second click can never submit a duplicate,
+the wrong form, or the wrong direction. The hooks must stay in the panel:
+moving one into an island would silently drop the combined-pending
+guarantee. Submissions share the `createSessionMutationSubmit` factory
+(`session-mutation-submit.ts`): it applies the route fields, invokes the
+single Server Action, and refreshes only on the centralized stale codes.
+There is **no client-side optimistic reorder**: after a successful move the
+server revalidates the session route and the canonical DTO order renders as
 received. Error labels and the shared refresh semantics live in
 `session-action-labels.ts` / `session-mutation-refresh.ts`.
 
@@ -352,13 +416,24 @@ stale-rendered-intent guard (PR #13):
   version check): a stale write cannot silently relabel exercise/set
   identity — it is rejected wholesale. Integration tests lock both the
   stale-move rejection and the set-attachment after a legitimate move.
+- **Committed version is returned, never pre-save:** `save()` returns the
+  persisted aggregate, and every save-then-return-DTO use case builds its
+  DTO from it (see [§6](#6-application-orchestration-use-cases)). A caller
+  that chains a second mutation from a first result's `version` therefore
+  sends a current `expectedSessionVersion` — the version consumed by the
+  stale-rendered-intent guard above stays trustworthy end to end.
 - **React state never follows the mutable order keys:** occurrence
   subtrees render under the view mapper's `renderKey`
-  (`order:authoredExerciseId:performedExerciseId`), so a reorder that
-  seats a different occurrence at an order REMOUNTS that subtree instead
-  of handing the previous occupant's local state (logger drafts, open
-  editors, open disclosures) to it. Same occurrence, same key — ordinary
-  rerenders keep their state.
+  (`occ:${occurrenceKey}`), derived from the persisted, immutable
+  `occurrenceKey` token ([§2](#2-occurrence-identity)) — including the
+  inner `SetLoggerForm` remount keys. Because the token is stable across
+  reorder, skip, substitution and set mutations, an occurrence keeps its
+  own local state (logger drafts, open editors, open disclosures) through
+  every adjustment, and two completely identical duplicate occurrences
+  never exchange state — a reorder that seats a different occurrence at an
+  order remounts that subtree instead of handing it the previous
+  occupant's state. Same occurrence, same key — ordinary rerenders keep
+  their state.
 - The UI reacts centrally via `shouldRefreshAfterSessionMutationError`
   (`session-mutation-refresh.ts`), which treats exactly the stale
   server-state outcomes as reload-worthy — see the module's code docs.
@@ -388,26 +463,32 @@ M11.
 
 | Behavior | Layer | Test file |
 |---|---|---|
-| Skip/unskip lifecycle, logged-sets block, skip⇔sets exclusion, eligibility projection, prescription totals, completion gate | Domain (unit) | `tests/unit/domain/services/session-exercise-adjustment.test.ts` |
-| `EXERCISE_OCCURRENCE_SKIPPED` on set-logging; skipped occurrences survive moves; canonical defaults in `buildWorkoutSession` | Domain (unit) | `tests/unit/domain/entities/workout-session.test.ts`, `session-exercise-adjustment.test.ts` |
-| Adjacent moves (first/middle/last), boundary failures, dense canonical orders, whole-unit move (sets/skip/substitution travel together), duplicate-id distinctness | Domain (unit) | `tests/unit/domain/services/session-exercise-adjustment.test.ts` |
-| Skip/unskip/move guard chains (ownership, enrollment, concurrency mapping, no-change) | Application (unit) | `tests/unit/application/use-cases/skip-session-exercise.test.ts`, `unskip-session-exercise.test.ts`, `move-session-exercise.test.ts` |
+| Skip/unskip lifecycle, logged-sets block, skip⇔sets exclusion, eligibility projection, prescription totals | Domain (unit) | `tests/unit/domain/services/occurrence-adjustment-rules.test.ts`, `session-exercise-skip.test.ts`, `session-prescription-totals.test.ts` |
+| `EXERCISE_OCCURRENCE_SKIPPED` on set-logging; skipped occurrences survive moves; canonical defaults in `buildWorkoutSession` | Domain (unit) | `tests/unit/domain/entities/workout-session.test.ts` |
+| Adjacent moves (first/middle/last), boundary failures, dense canonical orders, whole-unit move (sets/skip/substitution travel together), duplicate-id distinctness | Domain (unit) | `tests/unit/domain/services/session-exercise-reorder.test.ts` |
+| `occurrenceKey` factory default (= initial order), explicit assignment, duplicate-key rejection, stability through set mutations | Domain (unit) | `tests/unit/domain/entities/workout-session.test.ts` |
+| Duplicate identical occurrences reorder with distinct `occurrenceKey`s travelling per occurrence | Domain (unit) | `tests/unit/domain/services/session-exercise-reorder.test.ts` |
+| Skip/unskip/move guard chains (ownership, enrollment, concurrency mapping, no-change); every save-then-return-DTO use case returns the **committed** version; chained second mutation with the returned version succeeds | Application (unit) | `tests/unit/application/use-cases/skip-session-exercise.test.ts`, `unskip-session-exercise.test.ts`, `move-session-exercise.test.ts`, `session-stale-rendered-intent.test.ts` |
 | Logging onto a skipped occurrence blocked at the use case | Application (unit) | `tests/unit/application/use-cases/log-session-set.test.ts` |
-| `isSkipped` DTO projection + skip-adjusted totals | Application (unit) | `tests/unit/application/dto/workout-session.test.ts` |
+| `isSkipped`/`occurrenceKey` DTO projection + skip-adjusted totals | Application (unit) | `tests/unit/application/dto/workout-session.test.ts` |
 | Skip persistence round-trip (false→true→false whole-aggregate), column-default hydration | Integration | `tests/integration/database/workout-session-skip.test.ts` |
-| Real-PostgreSQL reorder persistence, set_logs attachment to the correct occurrence, stale-version rejection (no silent relabel) | Integration | `tests/integration/database/workout-session-reorder.test.ts` |
+| Real-PostgreSQL reorder persistence, set_logs attachment to the correct occurrence, stale-version rejection (no silent relabel), `save()` returns the committed version; `occurrence_key` round-trip, legacy NULL hydration + self-heal, session-unique keys after reorder | Integration | `tests/integration/database/workout-session-reorder.test.ts` |
 | Skipped zero-set excluded from history/progression for both identities; reordered history keys on new order; completed-with-skips counts toward program progress; detached never counts | Integration | `tests/integration/database/training-history-repository.test.ts` |
-| Skip/unskip/move action schemas | Presentation (unit) | `tests/unit/features/sessions/session-actions-schema.test.ts` |
+| Skip/unskip/move action schemas; no action schema exposes `occurrenceKey` | Presentation (unit) | `tests/unit/features/sessions/session-actions-schema.test.ts` |
 | Skip/unskip/move actions delegate to use cases with trusted identity | Presentation (unit) | `tests/unit/features/sessions/skip-actions.test.ts`, `move-actions.test.ts`, `session-mutation-actions.test.ts` |
 | Eligibility consumed verbatim from the DTO projection (never re-derived); blocked skip still moves; hidden states | Presentation (unit) | `tests/unit/features/sessions/session-adjustment-views.test.ts`, `session-exercise-adjust-panel.test.ts`, `session-exercise-card.test.ts` |
-| No client optimistic reorder; canonical DTO order rendered as-is; pending prevents duplicate submits | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts`, `active-workout-screen.test.ts`, `session-exercise-adjust-panel.test.ts` |
-| Centralized refresh decision (stale codes refresh, ordinary failures never reload) | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts` |
+| No client optimistic reorder; **canonical DTO order rendered as-is** (`1 active / 2 upcoming / 3 skipped` → DOM 1/2/3); pending prevents duplicate submits | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts`, `active-workout-screen.test.ts`, `session-exercise-adjust-panel.test.ts` |
+| `renderKey` derives from `occurrenceKey` only — distinct for duplicate identical occurrences, unchanged by reorder/substitution | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts` |
+| React draft state follows the occurrence, not the order slot (identical-duplicate reorder keeps each draft with its occurrence) | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
+| Centralized refresh decision (stale codes refresh, ordinary failures never reload); shared submit factory (route fields, single action call, verbatim result) | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts`, `session-mutation-submit.test.ts` |
 | History truth: skipped visible, no performance link, substituted+skipped truthful, final reordered order, zero-set≠skipped | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |
 
 ---
 
-Implementation entry points: `src/domain/services/session-exercise-adjustment.ts`
-(domain rules), `src/application/use-cases/{skip,unskip,move}-session-exercise.ts`
+Implementation entry points: `src/domain/services/occurrence-adjustment-rules.ts`,
+`session-exercise-skip.ts`, `session-exercise-reorder.ts`,
+`session-prescription-totals.ts` (domain rules),
+`src/application/use-cases/{skip,unskip,move}-session-exercise.ts`
 (orchestration), `src/features/sessions/` (actions + UI), and
 `src/features/history/` (completed-session truth).
 

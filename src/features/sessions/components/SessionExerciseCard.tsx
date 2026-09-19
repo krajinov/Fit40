@@ -1,10 +1,12 @@
 import { Check, ChevronDown } from 'lucide-react';
+import type { SyntheticEvent } from 'react';
 
 import { Badge } from '@/components/shared/Badge';
 import { cn } from '@/lib/utils';
 import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-session';
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
+import type { SetLoggerDraft } from '@/features/sessions/set-logger-draft';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
@@ -29,6 +31,19 @@ interface SessionExerciseCardProps {
    * sessions — this is presentation only, not authorization).
    */
   readonly readOnly?: boolean;
+  /**
+   * Controlled logger draft owned by the OCCURRENCE boundary (PR #13 P2).
+   * Optional: when absent the logger keeps its own state (completed-history
+   * rendering and unit tests that mount this card in isolation).
+   */
+  readonly draft?: SetLoggerDraft;
+  readonly onDraftChange?: (draft: SetLoggerDraft) => void;
+  /**
+   * Controlled "Log set" disclosure state owned by the occurrence boundary:
+   * the open state then follows the occurrence when its representation changes.
+   */
+  readonly loggerOpen?: boolean;
+  readonly onLoggerOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -51,6 +66,10 @@ export function SessionExerciseCard({
   weekNumber,
   workoutOrder,
   readOnly = false,
+  draft,
+  onDraftChange,
+  loggerOpen,
+  onLoggerOpenChange,
 }: SessionExerciseCardProps) {
   const logger = card.logger;
   const isDone = card.kind === 'done';
@@ -162,9 +181,20 @@ export function SessionExerciseCard({
             callout={logger.callout}
             quietLabel={logger.quietLabel}
             hintLabel={logger.hintLabel}
+            draft={draft}
+            onDraftChange={onDraftChange}
           />
         ) : (
-          <details className="group/log -mx-1">
+          <details
+            className="group/log -mx-1"
+            open={loggerOpen}
+            onToggle={
+              loggerOpen === undefined
+                ? undefined
+                : (event: SyntheticEvent<HTMLDetailsElement>) =>
+                    onLoggerOpenChange?.(event.currentTarget.open)
+            }
+          >
             <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-pill px-3 py-1.5 text-[13px] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink [&::-webkit-details-marker]:hidden">
               Log set
               <ChevronDown
@@ -187,6 +217,8 @@ export function SessionExerciseCard({
                 callout={logger.callout}
                 quietLabel={logger.quietLabel}
                 hintLabel={logger.hintLabel}
+                draft={draft}
+                onDraftChange={onDraftChange}
               />
             </div>
           </details>

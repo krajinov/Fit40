@@ -84,7 +84,12 @@ provenance, or alter completion/program-progress semantics (see
   (deliberately no DB constraint — see
   [§7](#7-persistence-model)). The view mapper derives
   `renderKey: 'occ:${occurrenceKey}'` from it alone, including the inner
-  `SetLoggerForm` remount keys.
+  `SetLoggerForm` remount keys. The Active Workout screen renders every
+  occurrence under ONE keyed `SessionOccurrence` boundary in a single
+  canonical-order list, keyed by `renderKey` (see
+  [§11](#11-ui-active-workout-controls)) — so the token is not just stable
+  within a band, it survives the occurrence crossing between the full-card and
+  compact representations.
 - **Completed sessions freeze the final occurrence order.** No adjustment
   use case accepts a completed session (`SESSION_ALREADY_COMPLETED`).
 - The repository's whole-aggregate rewrite makes adjacent reordering safe:
@@ -348,6 +353,22 @@ band (badge + hint); untouched occurrences keep their compact "Up next"
 rows; no presentation sorting exists anywhere. The move controls therefore
 always sit visually beside the occurrence's real adjacent neighbor.
 
+**One keyed occurrence boundary (PR #13 P2).** The screen renders all
+occurrences through a SINGLE `SessionOccurrence` client boundary — keyed
+`card.renderKey` (i.e. `occ:${occurrenceKey}`) — in one canonical-order list,
+choosing either the full `SessionExerciseCard` or the compact
+`UpcomingExerciseRow` per entry. React only matches keys among a parent's
+children, so the previous two-band markup (full cards in one `<div>`, rows
+inside `UpcomingExerciseList`'s `<section><ol>`) unmounted/remounted an
+occurrence whenever a reorder moved it between the bands, losing its logger
+draft and open disclosure. The boundary now OWNS that occurrence-local state
+(controlled `SetLoggerForm` draft + controlled disclosure) and is never
+reparented, so the draft and disclosure follow the occurrence as its
+representation changes. The "Up next" grouping is presentation only: the
+boundary no longer owns the rows. No global store, no new persistence, no
+order-based keys, and the canonical DTO order is unchanged (concatenated bands
+still equal the input).
+
 Mechanics (`SessionExerciseAdjustPanel.tsx`): the client boundary composes
 two presentational islands — `SessionSkipControl` (skip/undo-skip form) and
 `SessionMoveControls` (the two adjacent-move forms, each carrying its own
@@ -433,7 +454,15 @@ stale-rendered-intent guard (PR #13):
   never exchange state — a reorder that seats a different occurrence at an
   order remounts that subtree instead of handing it the previous
   occupant's state. Same occurrence, same key — ordinary rerenders keep
-  their state.
+  their state. Crucially, the key is matched among the children of ONE parent:
+  every occurrence renders under a single `SessionOccurrence` boundary in
+  canonical DTO order ([§11](#11-ui-active-workout-controls)), so a reorder
+  that moves an occurrence between the full-card and compact "Up next"
+  representations does not reparent the subtree — the boundary owns the logger
+  draft and disclosure state and carries them across the representation change.
+  The draft is controlled by that boundary (optional on `SetLoggerForm`), and
+  it resets only when the resolved logger instance changes (a logged set or a
+  new prefill) — never on a reorder, skip, substitution or band crossing.
 - The UI reacts centrally via `shouldRefreshAfterSessionMutationError`
   (`session-mutation-refresh.ts`), which treats exactly the stale
   server-state outcomes as reload-worthy — see the module's code docs.
@@ -480,6 +509,7 @@ M11.
 | No client optimistic reorder; **canonical DTO order rendered as-is** (`1 active / 2 upcoming / 3 skipped` → DOM 1/2/3); pending prevents duplicate submits | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts`, `active-workout-screen.test.ts`, `session-exercise-adjust-panel.test.ts` |
 | `renderKey` derives from `occurrenceKey` only — distinct for duplicate identical occurrences, unchanged by reorder/substitution | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts` |
 | React draft state follows the occurrence, not the order slot (identical-duplicate reorder keeps each draft with its occurrence) | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
+| A draft + open disclosure survive an occurrence crossing between the full-card and compact "Up next" render bands (one keyed `SessionOccurrence` boundary), and never leak to the neighbor | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
 | Centralized refresh decision (stale codes refresh, ordinary failures never reload); shared submit factory (route fields, single action call, verbatim result) | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts`, `session-mutation-submit.test.ts` |
 | History truth: skipped visible, no performance link, substituted+skipped truthful, final reordered order, zero-set≠skipped | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |
 

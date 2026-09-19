@@ -183,12 +183,12 @@ async function renderScreen(session: WorkoutSessionDto): Promise<HTMLElement> {
   return container;
 }
 
-/** The displayed exercise names in DOM order — started cards first, then upcoming rows. */
+/** The displayed exercise names in DOM order — full cards and compact rows. */
 function cardNames(container: HTMLElement): string[] {
   const started = Array.from(container.querySelectorAll('article h2')).map(
     (heading) => heading.textContent ?? '',
   );
-  const upcoming = Array.from(container.querySelectorAll('section[aria-label="Up next"] li')).map(
+  const upcoming = Array.from(container.querySelectorAll('li[data-band="upcoming"]')).map(
     // The row title's innermost name span (the first nested span inside
     // the title wrapper).
     (row) => row.querySelector('span span')?.textContent ?? '',
@@ -238,7 +238,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
     // show their own `card.order` (=== index + 1 under the canonical DTO).
     const circles = Array.from(
       container.querySelectorAll(
-        'article span[aria-hidden="true"], section[aria-label="Up next"] li span[aria-hidden="true"]',
+        'article span[aria-hidden="true"], li[data-band="upcoming"] span[aria-hidden="true"]',
       ),
     ).map((circle) => circle.textContent ?? '');
     expect(circles).toEqual(['1', '2', '3']);
@@ -277,9 +277,9 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
     expect(cards[0]?.textContent).toContain('Completed');
     expect(cards[0]?.textContent).not.toContain('In progress');
     expect(cards[1]?.textContent).toContain('In progress');
-    const upcomingSection = container.querySelector('section[aria-label="Up next"]');
-    expect(upcomingSection?.textContent).toContain('Exercise C');
-    expect(upcomingSection?.textContent).toContain('3');
+    const upcomingRow = container.querySelector('li[data-band="upcoming"]');
+    expect(upcomingRow?.textContent).toContain('Exercise C');
+    expect(upcomingRow?.textContent).toContain('3');
   });
 
   it('keeps skipped, logged-set and substituted state attached through the reorder', async () => {
@@ -324,9 +324,9 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
     const partial = container.querySelectorAll('article')[1];
     expect(partial?.textContent).toContain('set row 40 kg × 10');
     // The substituted occurrence keeps performed identity + "Originally".
-    const upcomingSection = container.querySelector('section[aria-label="Up next"]');
-    expect(upcomingSection?.textContent).toContain('Exercise D Alt');
-    expect(upcomingSection?.textContent).toContain('Originally: Exercise D');
+    const upcomingRow = container.querySelector('li[data-band="upcoming"]');
+    expect(upcomingRow?.textContent).toContain('Exercise D Alt');
+    expect(upcomingRow?.textContent).toContain('Originally: Exercise D');
   });
 
   it('passes the domain move flags to each occurrence panel — first and last only move inward', async () => {
@@ -361,11 +361,11 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
 });
 
 describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #13 Finding 4)', () => {
-  /** The order circles in true DOCUMENT order — articles and upcoming rows interleaved as the DOM emits them. */
+  /** The order circles in true DOCUMENT order — cards and compact rows as the DOM emits them. */
   function documentOrderCircles(container: HTMLElement): string[] {
     return Array.from(
       container.querySelectorAll(
-        'article span[aria-hidden="true"], section[aria-label="Up next"] li span[aria-hidden="true"]',
+        'article span[aria-hidden="true"], li[data-band="upcoming"] span[aria-hidden="true"]',
       ),
     ).map((circle) => circle.textContent ?? '');
   }
@@ -413,7 +413,7 @@ describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #
     );
     // No occurrence was pulled into the quiet band: the untouched occurrence
     // 2 renders as its own full card between the active and skipped ones.
-    expect(container.querySelector('section[aria-label="Up next"]')).toBeNull();
+    expect(container.querySelectorAll('li[data-band="upcoming"]')).toHaveLength(0);
     // Move controls still face the REAL adjacent neighbor: the skipped
     // occurrence at the visual tail may move up but not down.
     const text = container.textContent ?? '';

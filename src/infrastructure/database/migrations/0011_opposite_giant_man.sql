@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "exercise_logs_session_occurrence_key_unique" ON "exercise_logs" USING btree ("session_id","occurrence_key") WHERE "exercise_logs"."occurrence_key" IS NOT NULL;

@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 import { programEnrollments } from './enrollments';
@@ -149,9 +150,14 @@ export const exerciseLogs = pgTable(
      * case, Server Action, or query. Nullable with no default: pre-fix legacy
      * rows hydrate with a fallback to their exercise_order (distinct within a
      * session by the PK) and self-heal to persisted values on their next
-     * whole-aggregate save. Deliberately no UNIQUE constraint, no index, no
-     * CHECK, no trigger: the domain factory owns the uniqueness invariant
-     * within a session aggregate.
+     * whole-aggregate save. The PR #13 corrective pass adds the database
+     * backstop for the domain's uniqueness invariant: the PARTIAL unique
+     * index `exercise_logs_session_occurrence_key_unique` on
+     * (session_id, occurrence_key) WHERE occurrence_key IS NOT NULL —
+     * non-null tokens must stay session-unique while every number of legacy
+     * NULL rows remains allowed (PostgreSQL does not index NULL-less rows
+     * under that predicate). The repository maps this index's violations to
+     * a dedicated error instead of the catch-all session-exists mapping.
      */
     occurrenceKey: integer('occurrence_key'),
   },
@@ -163,6 +169,15 @@ export const exerciseLogs = pgTable(
     authoredExerciseIdIdx: index('exercise_logs_authored_exercise_id_idx').on(
       table.authoredExerciseId,
     ),
+    // Database backstop for the domain's occurrence-key uniqueness invariant
+    // (PR #13 Finding 1 follow-up): a child-table unique violation is
+    // distinguished from the session-exists constraint BY NAME in the
+    // repository, so the invariant is enforced in depth without weakening
+    // the whole-aggregate rewrite's error mapping. Partial: legacy NULL
+    // rows (any number, any session) are simply not indexed.
+    occurrenceKeyUnique: uniqueIndex('exercise_logs_session_occurrence_key_unique')
+      .on(table.sessionId, table.occurrenceKey)
+      .where(sql`${table.occurrenceKey} IS NOT NULL`),
     exerciseOrderCheck: check('exercise_logs_exercise_order_check', sql`${table.exerciseOrder} > 0`),
     setsCheck: check('exercise_logs_sets_check', sql`${table.sets} > 0`),
     minRepsCheck: check('exercise_logs_min_reps_check', sql`${table.minReps} > 0`),

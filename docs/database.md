@@ -378,9 +378,15 @@ history/progression projection references the column.
 
 - Assigned at session creation (`occurrenceKey` defaults to the initial
   `exerciseOrder`); unique within a session — enforced by the domain at
-  construction, deliberately **not** by a database constraint (a child-table
-  unique violation would be misclassified by the repository's catch-all
-  unique-violation mapping).
+  construction AND by the partial unique index
+  `exercise_logs_session_occurrence_key_unique` (migration `0011`) on
+  `(session_id, occurrence_key) WHERE occurrence_key IS NOT NULL` — the
+  database backstop. The repository distinguishes this index BY NAME and maps
+  its violations to `SessionOccurrenceKeyConflictError`, so the catch-all
+  `SessionAlreadyExistsError` mapping (reserved for the
+  one-session-per-(enrollment, occurrence) constraint on `workout_sessions`)
+  never misclassifies it. The partial predicate keeps every number of legacy
+  NULL rows representable.
 - Immutable thereafter: reorder, skip/unskip, substitution/restore and set
   mutations never rewrite it, so React keys survive every adjustment —
   including for two completely identical duplicate occurrences, which no

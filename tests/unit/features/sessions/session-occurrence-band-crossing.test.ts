@@ -316,3 +316,91 @@ describe('ActiveWorkoutScreen / drafts cross the render bands (PR #13 P2)', () =
     expect(occurrenceRepsValue(container, 'Bench')).toBe('');
   });
 });
+
+describe('ActiveWorkoutScreen / skip does not discard the occurrence draft (PR #13 corrective pass)', () => {
+  /** Generic input lookup by `name` across the occurrence's card or row. */
+  function occurrenceInput(
+    container: HTMLElement,
+    occurrenceName: string,
+    inputName: string,
+  ): HTMLInputElement | undefined {
+    const holders = [
+      ...Array.from(container.querySelectorAll('article')),
+      ...Array.from(container.querySelectorAll('li[data-band="upcoming"]')),
+    ];
+    const holder = holders.find((element) => element.textContent?.includes(occurrenceName));
+    return Array.from(holder?.querySelectorAll('input') ?? []).find(
+      (element) => (element as HTMLInputElement).name === inputName,
+    ) as HTMLInputElement | undefined;
+  }
+
+  it('keeps weight/reps/RPE through skip → rerender → unskip', async () => {
+    // A (Squat, occurrenceKey 1) starts as the active full card with a
+    // logger; B (Bench, occurrenceKey 2) is the untouched upcoming row.
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]),
+    );
+
+    const draft = { weight: '52.5', reps: '10', rpe: '7' };
+    await typeInto(occurrenceInput(container, 'Squat', 'weightKg')!, draft.weight);
+    await typeInto(occurrenceInput(container, 'Squat', 'reps')!, draft.reps);
+    await typeInto(occurrenceInput(container, 'Squat', 'rpe')!, draft.rpe);
+    expect(occurrenceInput(container, 'Squat', 'weightKg')?.value).toBe(draft.weight);
+    expect(occurrenceInput(container, 'Squat', 'reps')?.value).toBe(draft.reps);
+    expect(occurrenceInput(container, 'Squat', 'rpe')?.value).toBe(draft.rpe);
+
+    // The user skips A. The skip clears the logged-set precondition is
+    // irrelevant here — A has no sets — so the domain allows the decision;
+    // the SERVER renders A skipped: no logger, muted card, no draft fields.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a', {
+          isSkipped: true,
+          substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
+          adjustmentEligibility: {
+            isSkipped: true,
+            blockedBy: null,
+            canSkip: false,
+            canUnskip: true,
+            canMoveUp: false,
+            canMoveDown: true,
+          },
+        }),
+        log(2, 'ex-b'),
+      ]),
+    );
+    expect(occurrenceInput(container, 'Squat', 'weightKg')).toBeUndefined();
+    expect(occurrenceInput(container, 'Squat', 'reps')).toBeUndefined();
+
+    // …and unskips. The boundary kept the draft: the restored logger shows
+    // the exact weight/reps/RPE the user had typed before the skip.
+    await rerender(sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]));
+    expect(occurrenceInput(container, 'Squat', 'weightKg')?.value).toBe(draft.weight);
+    expect(occurrenceInput(container, 'Squat', 'reps')?.value).toBe(draft.reps);
+    expect(occurrenceInput(container, 'Squat', 'rpe')?.value).toBe(draft.rpe);
+  });
+
+  it('still resets the draft when the logger identity genuinely changes (a logged set)', async () => {
+    // The intentional reset must survive: logging a set changes the resolved
+    // logger instance (prefill flips to the session value), which is a
+    // different logger identity — the boundary resets the draft then.
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]),
+    );
+    await typeInto(occurrenceInput(container, 'Squat', 'weightKg')!, '52.5');
+    expect(occurrenceInput(container, 'Squat', 'weightKg')?.value).toBe('52.5');
+
+    // A set is logged elsewhere in the session (B) — A's snapshot changes
+    // version but A's own logger identity does not, so A's draft survives.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        {
+          ...log(2, 'ex-b'),
+          sets: [{ setNumber: 1, type: 'reps' as const, reps: 8, weightKg: 60, rpe: null }],
+        },
+      ]),
+    );
+    expect(occurrenceInput(container, 'Squat', 'weightKg')?.value).toBe('52.5');
+  });
+});

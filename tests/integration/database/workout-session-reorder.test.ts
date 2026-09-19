@@ -11,7 +11,10 @@
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { SessionStaleVersionError } from '@/application/ports/workout-session-repository';
+import {
+  SessionOccurrenceKeyConflictError,
+  SessionStaleVersionError,
+} from '@/application/ports/workout-session-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import {
   createWorkoutSession,
@@ -28,6 +31,7 @@ import {
   createWorkoutSessionId,
 } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
+import { pgConstraintName } from '@/infrastructure/database/pg-error';
 import { exerciseLogs, setLogs, users } from '@/infrastructure/database/schema';
 
 import {
@@ -102,13 +106,16 @@ function reps() {
  * with two logged sets on the middle occurrence — three distinguishable
  * exercises so every adjacent swap is observable in the persisted rows.
  */
-function makeSession(id = 'session-reorder-1'): WorkoutSession {
+function makeSession(
+  id = 'session-reorder-1',
+  identity?: { scheduledWorkoutId: string; workoutId: string },
+): WorkoutSession {
   const result = createWorkoutSession({
     id,
     userId: userId('user-test-a'),
     enrollmentId: enrollmentId('enrollment-test-a'),
-    scheduledWorkoutId: scheduledWorkoutId('fit40-beginner-strength-w1-1'),
-    workoutId: workoutId('wo-beginner-strength-a'),
+    scheduledWorkoutId: scheduledWorkoutId(identity?.scheduledWorkoutId ?? 'fit40-beginner-strength-w1-1'),
+    workoutId: workoutId(identity?.workoutId ?? 'wo-beginner-strength-a'),
     startedAt: new Date('2025-01-01T10:00:00Z'),
     exerciseLogs: [
       { authoredExerciseId: exerciseId('ex-002'), order: 1, prescription: reps(), restSeconds: 90 },
@@ -330,6 +337,125 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
     expect(logRows.map((row) => row.exerciseId)).toEqual(['ex-015', 'ex-002', 'ex-010']);
     expect(logRows.map((row) => row.occurrenceKey)).toEqual([2, 1, 3]);
     expect(new Set(logRows.map((row) => row.occurrenceKey)).size).toBe(3);
+  });
+});
+
+describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
+  beforeEach(async () => {
+    await resetAndSeed();
+    await seedUser('user-test-a');
+    await seedEnrollment('enrollment-test-a', 'user-test-a', 'prog-beginner-strength');
+  });
+
+  it('maps a duplicate-occurrence-key save to the typed conflict error, never session-exists', async () => {
+    const session = makeSession('session-key-dupes');
+    await workoutSessionRepository.save(session);
+
+    // A snapshot whose tokens collide (order 1 stamped with order 2's key)
+    // is one the domain factory would never build — the repository trusts
+    // the domain, so only a hand-built object can reach the database with
+    // this corruption. PostgreSQL must reject it on
+    // `exercise_logs_session_occurrence_key_unique`, and the repository must
+    // classify it as the occurrence-key conflict — NOT the catch-all
+    // `SessionAlreadyExistsError` (which is reserved for the
+    // workout_sessions one-session-per-occurrence constraint).
+    const loaded = await workoutSessionRepository.findById(session.id);
+    if (!loaded) throw new Error('session not found');
+    const conflicted: WorkoutSession = {
+      ...loaded,
+      exerciseLogs: loaded.exerciseLogs.map((log) =>
+        log.order === 1 ? { ...log, occurrenceKey: 2 } : log,
+      ),
+    };
+    await expect(workoutSessionRepository.save(conflicted)).rejects.toThrow(
+      SessionOccurrenceKeyConflictError,
+    );
+
+    // The failed save persisted nothing; a legitimate snapshot of the same
+    // session still saves cleanly afterwards.
+    const healedRows = await loadLogRows('session-key-dupes');
+    expect(healedRows.map((row) => row.occurrenceKey)).toEqual([1, 2, 3]);
+  });
+
+  it('rejects the duplicate at the database level, not only through hydration', async () => {
+    const session = makeSession('session-key-db-reject');
+    await workoutSessionRepository.save(session);
+
+    // Prove the PARTIAL index itself fires: two non-null equal keys in one
+    // session violate `exercise_logs_session_occurrence_key_unique`. The
+    // statement is wrapped so the rejection is observed exactly once.
+    let rejected = false;
+    try {
+      await db
+        .update(exerciseLogs)
+        .set({ occurrenceKey: 3 })
+        .where(eq(exerciseLogs.sessionId, 'session-key-db-reject'));
+    } catch (error) {
+      rejected = true;
+      expect(pgConstraintName(error)).toBe('exercise_logs_session_occurrence_key_unique');
+    }
+    expect(rejected).toBe(true);
+  });
+
+  it('allows the same occurrence key across DIFFERENT sessions', async () => {
+    const first = makeSession('session-keys-first');
+    // A different scheduled workout of the same enrollment: the
+    // one-session-per-(enrollment, occurrence) constraint stays satisfied
+    // while the occurrence keys deliberately repeat across the sessions.
+    const second = makeSession('session-keys-second', {
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+      workoutId: 'wo-beginner-strength-b',
+    });
+    await workoutSessionRepository.save(first);
+    await workoutSessionRepository.save(second);
+
+    // Both sessions legitimately carry the tokens 1, 2, 3 — uniqueness is
+    // scoped to the session, not global.
+    const firstRows = await loadLogRows('session-keys-first');
+    const secondRows = await loadLogRows('session-keys-second');
+    expect(firstRows.map((row) => row.occurrenceKey)).toEqual([1, 2, 3]);
+    expect(secondRows.map((row) => row.occurrenceKey)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps allowing multiple NULL legacy occurrence_key rows in one session', async () => {
+    const session = makeSession('session-keys-null-legacy');
+    await workoutSessionRepository.save(session);
+    await db
+      .update(exerciseLogs)
+      .set({ occurrenceKey: null })
+      .where(eq(exerciseLogs.sessionId, 'session-keys-null-legacy'));
+
+    // Three NULL tokens in ONE session: the partial index does not index
+    // them, so any number of legacy rows remains representable.
+    const rows = await loadLogRows('session-keys-null-legacy');
+    expect(rows.map((row) => row.occurrenceKey)).toEqual([null, null, null]);
+  });
+
+  it('preserves the normal reorder/save round-trip and the legacy NULL self-heal', async () => {
+    // The whole-aggregate rewrite deletes and reinserts ALL child rows of a
+    // session inside one transaction — if the new index made that rewrite
+    // self-conflicting (e.g. rows reinserted in an order that collides with
+    // not-yet-deleted siblings), this exact M10 flow would break.
+    const session = makeSession('session-keys-reorder');
+    await workoutSessionRepository.save(session);
+    await db
+      .update(exerciseLogs)
+      .set({ occurrenceKey: null })
+      .where(eq(exerciseLogs.sessionId, 'session-keys-reorder'));
+
+    const hydrated = await workoutSessionRepository.findById(session.id);
+    if (!hydrated) throw new Error('session not found');
+    // Legacy NULLs hydrate via the order fallback and self-heal on the next
+    // save, WHILE a move reorders the aggregate in the same write.
+    expect(hydrated.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
+    const moved = moveSessionExercise(hydrated, { exerciseOrder: 2, direction: 'up' });
+    if (!moved.ok) throw new Error(moved.error.message);
+    await workoutSessionRepository.save(moved.data);
+
+    const rows = await loadLogRows('session-keys-reorder');
+    expect(rows.map((row) => row.exerciseId)).toEqual(['ex-015', 'ex-002', 'ex-010']);
+    expect(rows.map((row) => row.occurrenceKey)).toEqual([2, 1, 3]);
+    expect(new Set(rows.map((row) => row.occurrenceKey)).size).toBe(3);
   });
 });
 

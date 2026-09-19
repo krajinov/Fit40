@@ -6,6 +6,7 @@ import {
   SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
   type WorkoutSessionRepository,
+  SessionOccurrenceKeyConflictError,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import type {
@@ -32,6 +33,16 @@ import { exerciseLogs, setLogs, workoutSessions } from '../schema';
  */
 const ENROLLMENT_FK_CONSTRAINT = 'workout_sessions_enrollment_id_program_enrollments_id_fk';
 
+/**
+ * The partial unique index `exercise_logs_session_occurrence_key_unique`
+ * (migration 0011): (session_id, occurrence_key) is unique for non-null
+ * occurrence keys. It is the database backstop for the domain's
+ * session-unique occurrenceKey invariant; the name distinguishes its
+ * violations from the one-session-per-(enrollment, occurrence) constraint so
+ * the catch-all unique-violation mapping never misclassifies them.
+ */
+const OCCURRENCE_KEY_UNIQUE_INDEX = 'exercise_logs_session_occurrence_key_unique';
+
 type SessionRow = typeof workoutSessions.$inferSelect;
 
 /**
@@ -41,12 +52,16 @@ type SessionRow = typeof workoutSessions.$inferSelect;
  * reinsert for children. The session row upsert is guarded by an optimistic-
  * concurrency version check plus an enrollment-identity condition, so a stale
  * snapshot is rejected instead of silently overwriting concurrent changes,
- * and a session whose enrollment was detached or changed between load and
- * write can never commit (detached history is read-only). Unique-constraint
- * races on the one-session-per-(enrollment, occurrence) rule surface as
- * `SessionAlreadyExistsError`; a concurrently deleted enrollment (a leave
- * racing the insert) surfaces as `SessionEnrollmentNotFoundError`. Any other
- * constraint violation propagates untouched.
+  * and a session whose enrollment was detached or changed between load and
+  * write can never commit (detached history is read-only). Unique-constraint
+  * races on the one-session-per-(enrollment, occurrence) rule surface as
+  * `SessionAlreadyExistsError`; a violation of the partial unique index on
+  * (session_id, occurrence_key) — the database backstop for the domain's
+  * session-unique occurrenceKey invariant — surfaces as the distinct
+  * `SessionOccurrenceKeyConflictError` (never misclassified as a duplicate
+  * session); a concurrently deleted enrollment (a leave racing the insert)
+  * surfaces as `SessionEnrollmentNotFoundError`. Any other constraint
+  * violation propagates untouched.
  */
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: Database) {}
@@ -184,6 +199,12 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       // committed version attached.
       return { ...session, version: committedVersion };
     } catch (error) {
+      if (
+        isUniqueViolation(error) &&
+        pgConstraintName(error) === OCCURRENCE_KEY_UNIQUE_INDEX
+      ) {
+        throw new SessionOccurrenceKeyConflictError(session.id);
+      }
       if (isUniqueViolation(error)) {
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
       }

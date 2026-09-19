@@ -31,12 +31,18 @@ interface SessionOccurrenceProps {
 }
 
 /**
- * The occurrence's logger instance key: it changes exactly when the resolved
- * session data changes (a logged set, a new prefill), so the boundary resets
- * the draft then — and keeps it on a pure reorder/band change.
+ * The occurrence's logger instance identity, or null while the occurrence has
+ * no logger. The identity changes exactly when the resolved session data
+ * changes for THIS occurrence (a logged set, a new prefill) — that is the
+ * intentional reset. A temporary absence (skip) is NOT a new logger instance:
+ * the boundary remembers the last non-null identity below and keeps the draft
+ * until a genuinely different identity arrives.
  */
-function loggerInstanceKey(card: SessionExerciseCardView): string {
-  return `${card.renderKey}-${card.setRows.length}-${card.logger?.prefillWeightKg ?? card.logger?.prefillSeconds ?? 'none'}`;
+function loggerInstanceKey(card: SessionExerciseCardView): string | null {
+  if (card.logger === null) {
+    return null;
+  }
+  return `${card.renderKey}-${card.setRows.length}-${card.logger.prefillWeightKg ?? card.logger.prefillSeconds ?? 'none'}`;
 }
 
 /** The initial draft from the occurrence's resolved prefill. */
@@ -81,6 +87,12 @@ function upcomingGroupClassName(position: UpcomingGroupPosition | null): string 
  * boundary instance is never reparented, the draft and the open disclosure it
  * owns survive the representation change; the visual representations stay
  * distinct, and nothing is stored globally or persisted.
+ *
+ * The draft is owned by the occurrence (its `occurrenceKey`-derived key), so a
+ * skip does not discard it either: while the occurrence is skipped its logger
+ * is absent, but that absence is not a new logger instance — the boundary
+ * remembers the last non-null logger identity and restores the draft on
+ * unskip, resetting only on a genuinely different logger identity.
  */
 export function SessionOccurrence({
   card,
@@ -97,18 +109,20 @@ export function SessionOccurrence({
   const instanceKey = loggerInstanceKey(card);
 
   const [draft, setDraft] = useState<SetLoggerDraft>(() => draftFromCard(card));
-  const [loadedInstanceKey, setLoadedInstanceKey] = useState(instanceKey);
+  // The LAST NON-NULL logger identity this boundary has seen. A skip makes the
+  // logger vanish (identity null) without being a new logger instance, so the
+  // draft survives it; unskip restores the same identity, so the draft is
+  // still there. Only a genuinely different identity (a logged set, a changed
+  // prefill) resets the draft — the React "adjusting state when props change"
+  // pattern, evaluated during render.
+  const [loggerIdentity, setLoggerIdentity] = useState<string | null>(instanceKey);
   // An active card always shows its logger, so its disclosure starts revealed;
   // when it later crosses into the compact representation the logger stays
   // revealed instead of collapsing (open local UI state follows the occurrence).
   const [open, setOpen] = useState(card.kind === 'active');
 
-  // Adjust the draft during render when the resolved logger instance changes
-  // (a logged set or a new prefill) — the React "adjusting state when props
-  // change" pattern. A pure reorder/substitution keeps the same key and the
-  // draft survives untouched.
-  if (loadedInstanceKey !== instanceKey) {
-    setLoadedInstanceKey(instanceKey);
+  if (instanceKey !== null && loggerIdentity !== instanceKey) {
+    setLoggerIdentity(instanceKey);
     setDraft(draftFromCard(card));
   }
 

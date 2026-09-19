@@ -70,6 +70,27 @@ export class SessionEnrollmentChangedError extends Error {
   }
 }
 
+/**
+ * Thrown by `save` when PostgreSQL rejects the whole-aggregate write on the
+ * partial unique index `exercise_logs_session_occurrence_key_unique` — the
+ * database backstop for the domain's session-unique `occurrenceKey`
+ * invariant. Distinguished from the one-session-per-(enrollment, scheduled
+ * workout) constraint BY CONSTRAINT NAME, so a colliding/corrupt snapshot is
+ * a typed data-integrity failure instead of `SessionAlreadyExistsError`.
+ * Reaching it means the domain-enforced invariant was violated upstream of
+ * the repository; it is a persistence-backstop outcome, not a business rule,
+ * so use cases do not translate it — it propagates as an unexpected error.
+ */
+export class SessionOccurrenceKeyConflictError extends Error {
+  constructor(readonly sessionId: string) {
+    super(
+      `Workout session "${sessionId}" has duplicate non-null occurrence keys; ` +
+        'occurrence keys must be unique within a session',
+    );
+    this.name = 'SessionOccurrenceKeyConflictError';
+  }
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -109,7 +130,8 @@ export interface WorkoutSessionRepository {
    *
    * May throw {@link SessionAlreadyExistsError},
    * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
-   * or {@link SessionEnrollmentChangedError}.
+   * {@link SessionEnrollmentChangedError}, or
+   * {@link SessionOccurrenceKeyConflictError}.
    */
   save(session: WorkoutSession): Promise<WorkoutSession>;
 

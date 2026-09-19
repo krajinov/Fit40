@@ -236,16 +236,20 @@ ALTER TABLE "exercise_logs" ADD COLUMN "occurrence_key" integer;
 - **`is_skipped`** — `NOT NULL DEFAULT false`: rows written before M10
   hydrate as not skipped; skip is a stored fact, never inferred.
 - **`occurrence_key`** (PR #13 Finding 1) — nullable integer, **no default,
-  no index, no UNIQUE constraint, no CHECK, no trigger**, and never
-  backfilled. Assigned at session creation and immutable thereafter, it is
+  no CHECK, no trigger**, and never backfilled. Assigned at session creation
+  and immutable thereafter, it is
   the per-occurrence presentation-stability token (see
   [§2](#2-occurrence-identity)) — **not** an identity: the composite PK
   stays `(session_id, exercise_order)`, `set_logs`' composite FK stays on
   that pair, and no query, action schema or history projection ever
   references the column. Uniqueness within a session is enforced by the
-  domain at construction (the repository's catch-all unique-violation
-  mapping would misclassify a child-table constraint, so no DB constraint
-  is added — the same deliberate trade-off as the skip⇔logged-sets rule).
+  domain at construction AND at the database level: the partial unique index
+  `exercise_logs_session_occurrence_key_unique` (migration `0011`) covers
+  `(session_id, occurrence_key) WHERE occurrence_key IS NOT NULL` (PR #13
+  corrective pass). The repository maps that index's violations BY NAME to
+  the typed `SessionOccurrenceKeyConflictError` — never to the catch-all
+  `SessionAlreadyExistsError`, which stays reserved for the
+  one-session-per-(enrollment, occurrence) constraint on `workout_sessions`.
   Rows written before the column existed hydrate with
   `occurrenceKey ?? exerciseOrder` (the pre-M10-fix key source, so the
   transition causes no remount); the next whole-aggregate save persists the
@@ -461,8 +465,12 @@ stale-rendered-intent guard (PR #13):
   representations does not reparent the subtree — the boundary owns the logger
   draft and disclosure state and carries them across the representation change.
   The draft is controlled by that boundary (optional on `SetLoggerForm`), and
-  it resets only when the resolved logger instance changes (a logged set or a
-  new prefill) — never on a reorder, skip, substitution or band crossing.
+  it resets only when the resolved logger IDENTITY changes (a logged set or a
+  new prefill) — never on a reorder, skip, substitution or band crossing. A
+  skip makes the logger vanish, but that absence is NOT a new logger identity:
+  the boundary remembers the last non-null logger identity (PR #13 corrective
+  pass, Finding 3) and restores the exact draft on unskip. Only a genuinely
+  different identity — different prefill/set count — resets the fields.
 - The UI reacts centrally via `shouldRefreshAfterSessionMutationError`
   (`session-mutation-refresh.ts`), which treats exactly the stale
   server-state outcomes as reload-worthy — see the module's code docs.
@@ -501,7 +509,7 @@ M11.
 | Logging onto a skipped occurrence blocked at the use case | Application (unit) | `tests/unit/application/use-cases/log-session-set.test.ts` |
 | `isSkipped`/`occurrenceKey` DTO projection + skip-adjusted totals | Application (unit) | `tests/unit/application/dto/workout-session.test.ts` |
 | Skip persistence round-trip (false→true→false whole-aggregate), column-default hydration | Integration | `tests/integration/database/workout-session-skip.test.ts` |
-| Real-PostgreSQL reorder persistence, set_logs attachment to the correct occurrence, stale-version rejection (no silent relabel), `save()` returns the committed version; `occurrence_key` round-trip, legacy NULL hydration + self-heal, session-unique keys after reorder | Integration | `tests/integration/database/workout-session-reorder.test.ts` |
+| Real-PostgreSQL reorder persistence, set_logs attachment to the correct occurrence, stale-version rejection (no silent relabel), `save()` returns the committed version; `occurrence_key` round-trip, legacy NULL hydration + self-heal, session-unique keys after reorder; partial unique index rejects duplicate keys in-session (typed `SessionOccurrenceKeyConflictError`), allows keys across sessions and any number of legacy NULLs | Integration | `tests/integration/database/workout-session-reorder.test.ts` |
 | Skipped zero-set excluded from history/progression for both identities; reordered history keys on new order; completed-with-skips counts toward program progress; detached never counts | Integration | `tests/integration/database/training-history-repository.test.ts` |
 | Skip/unskip/move action schemas; no action schema exposes `occurrenceKey` | Presentation (unit) | `tests/unit/features/sessions/session-actions-schema.test.ts` |
 | Skip/unskip/move actions delegate to use cases with trusted identity | Presentation (unit) | `tests/unit/features/sessions/skip-actions.test.ts`, `move-actions.test.ts`, `session-mutation-actions.test.ts` |
@@ -510,6 +518,7 @@ M11.
 | `renderKey` derives from `occurrenceKey` only — distinct for duplicate identical occurrences, unchanged by reorder/substitution | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts` |
 | React draft state follows the occurrence, not the order slot (identical-duplicate reorder keeps each draft with its occurrence) | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | A draft + open disclosure survive an occurrence crossing between the full-card and compact "Up next" render bands (one keyed `SessionOccurrence` boundary), and never leak to the neighbor | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
+| A draft survives skip → rerender → unskip (logger absence is not a new logger identity); a genuinely changed logger identity still resets | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
 | Centralized refresh decision (stale codes refresh, ordinary failures never reload); shared submit factory (route fields, single action call, verbatim result) | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts`, `session-mutation-submit.test.ts` |
 | History truth: skipped visible, no performance link, substituted+skipped truthful, final reordered order, zero-set≠skipped | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |
 

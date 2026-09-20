@@ -175,8 +175,12 @@ export class StartWorkoutSessionUseCase {
     program: TrainingProgram,
     occurrence: ScheduledWorkoutOccurrence,
   ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
+    // The repository returns the PERSISTED aggregate carrying the committed
+    // version; the returned DTO is always built from that, never from the
+    // pre-save snapshot (PR #13 Finding 5).
+    let persisted: WorkoutSession;
     try {
-      await this.sessionRepository.save(session);
+      persisted = await this.sessionRepository.save(session);
     } catch (error) {
       if (error instanceof SessionAlreadyExistsError) {
         return err(sessionAlreadyExists(occurrence.scheduled.id));
@@ -201,7 +205,7 @@ export class StartWorkoutSessionUseCase {
       }
       throw error;
     }
-    return ok(toWorkoutSessionDto(session));
+    return ok(toWorkoutSessionDto(persisted));
   }
 
   /**
@@ -222,8 +226,9 @@ export class StartWorkoutSessionUseCase {
     occurrence: ScheduledWorkoutOccurrence,
   ): Promise<Result<WorkoutSessionDto, StartWorkoutSessionError>> {
     const replacement: WorkoutSession = { ...session, enrollmentId: replacementEnrollmentId };
+    let persisted: WorkoutSession;
     try {
-      await this.sessionRepository.save(replacement);
+      persisted = await this.sessionRepository.save(replacement);
     } catch (retryError) {
       if (retryError instanceof SessionAlreadyExistsError) {
         // The occurrence was already started under the replacement
@@ -249,7 +254,7 @@ export class StartWorkoutSessionUseCase {
       }
       throw retryError;
     }
-    return ok(toWorkoutSessionDto(replacement));
+    return ok(toWorkoutSessionDto(persisted));
   }
 }
 

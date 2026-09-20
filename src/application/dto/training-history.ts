@@ -23,6 +23,7 @@ import type {
   TrainingHistoryEntry,
 } from '@/application/ports/training-history-repository';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
+import { resolveOccurrenceAdjustmentEligibility } from '@/domain/services/occurrence-adjustment-rules';
 import {
   resolveOccurrenceSubstitutionEligibility,
   resolveOccurrenceSubstitutionState,
@@ -239,13 +240,24 @@ export function toTrainingHistorySessionDto(
     exerciseLogs: entry.session.exerciseLogs.map((log) => {
       const substitution = resolveOccurrenceSubstitutionState(log);
       const eligibility = resolveOccurrenceSubstitutionEligibility(entry.session, log);
+      const adjustment = resolveOccurrenceAdjustmentEligibility(entry.session, log);
       return {
         authoredExerciseId: substitution.authoredExerciseId,
         performedExerciseId: substitution.performedExerciseId,
         isSubstituted: substitution.isSubstituted,
+        isSkipped: log.isSkipped,
+        occurrenceKey: log.occurrenceKey,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,
+        },
+        adjustmentEligibility: {
+          isSkipped: adjustment.isSkipped,
+          blockedBy: adjustment.blockedBy,
+          canSkip: adjustment.canSkip,
+          canUnskip: adjustment.canUnskip,
+          canMoveUp: adjustment.canMoveUp,
+          canMoveDown: adjustment.canMoveDown,
         },
         order: log.order,
         prescription: log.prescription,

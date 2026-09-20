@@ -15,6 +15,7 @@ import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/w
 import {
   completeWorkoutSession,
   type SessionMutationError,
+  type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import { createUserId, createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
@@ -97,8 +98,13 @@ export class CompleteWorkoutSessionUseCase {
       return result;
     }
 
+    // The repository returns the PERSISTED aggregate, whose `version` is the
+    // one the database committed. Building the DTO from it — never from the
+    // pre-save snapshot — is what lets a caller feed this result straight back
+    // as its next mutation's `expectedSessionVersion` (PR #13 Finding 5).
+    let persisted: WorkoutSession;
     try {
-      await this.sessionRepository.save(result.data);
+      persisted = await this.sessionRepository.save(result.data);
     } catch (error) {
       if (error instanceof SessionStaleVersionError) {
         return err({
@@ -126,6 +132,6 @@ export class CompleteWorkoutSessionUseCase {
       result.data.scheduledWorkoutId,
     );
 
-    return ok({ session: toWorkoutSessionDto(result.data), route });
+    return ok({ session: toWorkoutSessionDto(persisted), route });
   }
 }

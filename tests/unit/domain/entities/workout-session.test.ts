@@ -7,9 +7,13 @@ import { describe, expect, it } from 'vitest';
 import {
   completeWorkoutSession,
   createWorkoutSession,
+  deleteSessionSet,
   getSessionStatus,
   logSessionSet,
+  resolveSessionCompletionReadiness,
+  updateSessionSet,
 } from '@/domain/entities/workout-session';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId, createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme, createDurationScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -238,6 +242,35 @@ describe('createWorkoutSession', () => {
     expect(result.data.exerciseLogs[0]?.authoredExerciseId).toBe('ex-001');
     expect(result.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-009');
   });
+
+  it('defaults isSkipped to false (skip is never inferred from zero sets)', () => {
+    const result = createWorkoutSession(makeValidInput());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const log of result.data.exerciseLogs) {
+      expect(log.isSkipped).toBe(false);
+    }
+  });
+
+  it('preserves an explicit isSkipped (rehydrated skip decision)', () => {
+    const result = createWorkoutSession({
+      ...makeValidInput(),
+      exerciseLogs: [
+        {
+          authoredExerciseId: validExerciseId('ex-001'),
+          order: 1,
+          prescription: validRepScheme(),
+          restSeconds: 60,
+          isSkipped: true,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs[0]?.isSkipped).toBe(true);
+  });
 });
 
 describe('completeWorkoutSession', () => {
@@ -298,5 +331,182 @@ describe('completeWorkoutSession', () => {
     const logs = result.data.exerciseLogs;
     expect(logs[0]?.sets).toHaveLength(1);
     expect(logs[1]?.sets).toHaveLength(0);
+  });
+});
+
+describe('logSessionSet skip guard (M10)', () => {
+  it('rejects logging onto a skipped occurrence with EXERCISE_OCCURRENCE_SKIPPED', () => {
+    const skipped = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+
+    const result = logSessionSet(skipped.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 7,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('EXERCISE_OCCURRENCE_SKIPPED');
+  });
+});
+
+describe('completeWorkoutSession with skipped occurrences (M10)', () => {
+  it('rejects an all-skipped session through the unchanged completion gate', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const allSkipped = skipSessionExercise(first.data, { exerciseOrder: 2 });
+    expect(allSkipped.ok).toBe(true);
+    if (!allSkipped.ok) return;
+
+    // Skipped occurrences carry no sets, so the ≥1-logged-set gate —
+    // unchanged by M10 — keeps an all-skipped session non-completable.
+    const result = completeWorkoutSession(allSkipped.data, new Date('2025-01-01T11:00:00Z'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('CANNOT_COMPLETE_EMPTY_SESSION');
+  });
+
+  it('completes a session with one set logged while another occurrence is skipped', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 2 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const withSet = logSessionSet(first.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 20,
+      rpe: 7,
+    });
+    expect(withSet.ok).toBe(true);
+    if (!withSet.ok) return;
+
+    const result = completeWorkoutSession(withSet.data, new Date('2025-01-01T11:00:00Z'));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(getSessionStatus(result.data)).toBe('completed');
+    // The skip decision is frozen as part of the completed history.
+    expect(result.data.exerciseLogs[0]?.isSkipped).toBe(false);
+    expect(result.data.exerciseLogs[1]?.isSkipped).toBe(true);
+  });
+});
+
+describe('resolveSessionCompletionReadiness', () => {
+  it('refuses a session with zero logged sets', () => {
+    expect(resolveSessionCompletionReadiness(validSession()).canComplete).toBe(false);
+  });
+
+  it('refuses an all-skipped session (skips carry no sets)', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const all = skipSessionExercise(first.data, { exerciseOrder: 2 });
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+
+    expect(resolveSessionCompletionReadiness(all.data).canComplete).toBe(false);
+  });
+
+  it('allows completion once at least one set is logged anywhere, even with skips', () => {
+    const first = skipSessionExercise(validSession(), { exerciseOrder: 2 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const logged = logSessionSet(first.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: null,
+      rpe: null,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+
+    expect(resolveSessionCompletionReadiness(logged.data).canComplete).toBe(true);
+  });
+});
+
+describe('createWorkoutSession / occurrenceKey (PR #13 Finding 1)', () => {
+  it('defaults each occurrence key to its creation order', () => {
+    const session = validSession();
+
+    expect(session.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
+  });
+
+  it('honors explicit rehydrated keys over the order default', () => {
+    const result = createWorkoutSession({
+      ...makeValidInput(),
+      exerciseLogs: [
+        { ...makeValidInput().exerciseLogs[0]!, occurrenceKey: 41, order: 1, prescription: validRepScheme(), restSeconds: 60 },
+        { ...makeValidInput().exerciseLogs[1]!, occurrenceKey: 7, order: 2, prescription: validDurationScheme(), restSeconds: 90 },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([41, 7]);
+  });
+
+  it('rejects duplicate occurrence keys within the aggregate', () => {
+    const base = makeValidInput();
+    const result = createWorkoutSession({
+      ...base,
+      exerciseLogs: [
+        { ...base.exerciseLogs[0]!, occurrenceKey: 5, order: 1, prescription: validRepScheme(), restSeconds: 60 },
+        { ...base.exerciseLogs[1]!, occurrenceKey: 5, order: 2, prescription: validDurationScheme(), restSeconds: 90 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INVALID_WORKOUT_SESSION');
+    expect(result.error.field).toBe('exerciseLogs');
+    expect(result.error.message).toContain('occurrence keys must be unique');
+  });
+});
+
+describe('occurrenceKey survives every session mutation (PR #13 Finding 1)', () => {
+  it('logSessionSet, updateSessionSet and deleteSessionSet keep the token', () => {
+    const session = validSession();
+
+    const logged = logSessionSet(session, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: 7,
+    });
+    expect(logged.ok).toBe(true);
+    if (!logged.ok) return;
+    expect(logged.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
+
+    const updated = updateSessionSet(logged.data, {
+      exerciseOrder: 1,
+      setNumber: 1,
+      type: 'reps',
+      reps: 12,
+      weightKg: 50,
+      rpe: 7,
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
+
+    const deleted = deleteSessionSet(updated.data, { exerciseOrder: 1, setNumber: 1 });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
+  });
+
+  it('completion keeps the token on the frozen history', () => {
+    const completed = completeWorkoutSession(sessionWithOneSet(), new Date('2025-01-01T11:00:00Z'));
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
   });
 });

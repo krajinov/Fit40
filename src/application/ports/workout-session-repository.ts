@@ -70,6 +70,27 @@ export class SessionEnrollmentChangedError extends Error {
   }
 }
 
+/**
+ * Thrown by `save` when PostgreSQL rejects the whole-aggregate write on the
+ * partial unique index `exercise_logs_session_occurrence_key_unique` — the
+ * database backstop for the domain's session-unique `occurrenceKey`
+ * invariant. Distinguished from the one-session-per-(enrollment, scheduled
+ * workout) constraint BY CONSTRAINT NAME, so a colliding/corrupt snapshot is
+ * a typed data-integrity failure instead of `SessionAlreadyExistsError`.
+ * Reaching it means the domain-enforced invariant was violated upstream of
+ * the repository; it is a persistence-backstop outcome, not a business rule,
+ * so use cases do not translate it — it propagates as an unexpected error.
+ */
+export class SessionOccurrenceKeyConflictError extends Error {
+  constructor(readonly sessionId: string) {
+    super(
+      `Workout session "${sessionId}" has duplicate non-null occurrence keys; ` +
+        'occurrence keys must be unique within a session',
+    );
+    this.name = 'SessionOccurrenceKeyConflictError';
+  }
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -90,18 +111,29 @@ export interface WorkoutSessionRepository {
   ): Promise<WorkoutSession | null>;
 
   /**
-   * Saves a session (insert or update by session ID).
+   * Saves a session (insert or update by session ID) and returns the
+   * PERSISTED aggregate carrying the committed `version`.
    *
    * Updates of enrollment-owned sessions are conditional on the snapshot's
    * version AND its enrollment identity, so a leave (or any enrollment
    * change) between load and write makes the mutation a no-op instead of
    * mutating detached history.
    *
+   * The versioning policy belongs to the repository, not to its callers: an
+   * UPDATE commits `version + 1` while a first INSERT stores the snapshot's
+   * own version. A caller that builds a DTO from a successful save MUST use
+   * this return value and never the pre-save snapshot — otherwise the DTO
+   * carries a version the database never held, and the caller's next
+   * occurrence mutation would send that stale token as
+   * `expectedSessionVersion` and be rejected with `SESSION_MODIFIED` despite
+   * the preceding write having succeeded.
+   *
    * May throw {@link SessionAlreadyExistsError},
    * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
-   * or {@link SessionEnrollmentChangedError}.
+   * {@link SessionEnrollmentChangedError}, or
+   * {@link SessionOccurrenceKeyConflictError}.
    */
-  save(session: WorkoutSession): Promise<void>;
+  save(session: WorkoutSession): Promise<WorkoutSession>;
 
   /**
    * Returns the IDs of the scheduled workouts the enrollment has completed

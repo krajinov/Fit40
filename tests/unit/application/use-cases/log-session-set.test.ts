@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { createWorkoutSession } from '@/domain/entities/workout-session';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -25,7 +26,7 @@ describe('LogSessionSetUseCase', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(makeSession());
     const uc = new LogSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 , expectedSessionVersion: 0 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.metrics.totalSets).toBe(1);
@@ -33,7 +34,7 @@ describe('LogSessionSetUseCase', () => {
 
   it('returns SESSION_NOT_FOUND for unknown session', async () => {
     const uc = new LogSessionSetUseCase(new InMemoryWorkoutSessionRepository());
-    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 'unknown', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_NOT_FOUND');
@@ -43,7 +44,7 @@ describe('LogSessionSetUseCase', () => {
     const repo = new InMemoryWorkoutSessionRepository();
     await repo.save(makeSession('user-1'));
     const uc = new LogSessionSetUseCase(repo);
-    const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('FORBIDDEN');
@@ -57,7 +58,7 @@ describe('LogSessionSetUseCase', () => {
     await repo.save(makeSession(OWNER_ID, null));
     const uc = new LogSessionSetUseCase(repo);
 
-    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
 
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -66,5 +67,26 @@ describe('LogSessionSetUseCase', () => {
     const untouched = await repo.findById(makeSession().id);
     expect(untouched?.enrollmentId).toBeNull();
     expect(untouched?.exerciseLogs[0]?.sets).toHaveLength(0);
+  });
+
+  it('returns EXERCISE_OCCURRENCE_SKIPPED when logging onto a skipped occurrence (M10)', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    const skipped = skipSessionExercise(makeSession(), { exerciseOrder: 1 });
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) return;
+    await repo.save(skipped.data);
+    const uc = new LogSessionSetUseCase(repo);
+
+    const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_OCCURRENCE_SKIPPED');
+
+    // The refused mutation persisted nothing: the occurrence stays skipped
+    // with zero sets (the skip⇔sets invariant held at the write boundary).
+    const stored = await repo.findById(skipped.data.id);
+    expect(stored?.exerciseLogs[0]?.isSkipped).toBe(true);
+    expect(stored?.exerciseLogs[0]?.sets).toHaveLength(0);
   });
 });

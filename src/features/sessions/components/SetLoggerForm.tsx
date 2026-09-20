@@ -11,6 +11,10 @@ import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
 import { logSetAction } from '@/features/sessions/actions/log-set';
 import type { SessionCalloutView } from '@/features/sessions/active-workout-logger-views';
+import {
+  setLoggerDraftFromPrefill,
+  type SetLoggerDraft,
+} from '@/features/sessions/set-logger-draft';
 import { SessionActionError } from '@/features/sessions/components/SessionActionError';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
 
@@ -19,6 +23,12 @@ const initialState: SessionActionState = { ok: true };
 interface SetLoggerFormProps {
   readonly sessionId: string;
   readonly exerciseOrder: number;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), submitted with
+   * the set so the use case can reject stale rendered intent before
+   * interpreting the mutable `exerciseOrder`.
+   */
+  readonly expectedSessionVersion: number;
   readonly prescription: RepPrescription;
   readonly programSlug: string;
   readonly weekNumber: number;
@@ -42,6 +52,14 @@ interface SetLoggerFormProps {
   readonly quietLabel: string | null;
   /** Advisory hint under the callout; null renders nothing. */
   readonly hintLabel: string | null;
+  /**
+   * Controlled draft (PR #13 P2 — occurrence boundary owns it). When provided
+   * together with `onDraftChange`, the caller owns the field values, so a draft
+   * survives the occurrence's representation change; otherwise the form owns
+   * its own state exactly as before.
+   */
+  readonly draft?: SetLoggerDraft;
+  readonly onDraftChange?: (draft: SetLoggerDraft) => void;
 }
 
 /**
@@ -60,6 +78,7 @@ interface SetLoggerFormProps {
 export function SetLoggerForm({
   sessionId,
   exerciseOrder,
+  expectedSessionVersion,
   prescription,
   programSlug,
   weekNumber,
@@ -69,6 +88,8 @@ export function SetLoggerForm({
   callout,
   quietLabel,
   hintLabel,
+  draft,
+  onDraftChange,
 }: SetLoggerFormProps) {
   const router = useRouter();
   const isReps = prescription.type === 'reps';
@@ -76,9 +97,21 @@ export function SetLoggerForm({
   const countId = useId();
   const rpeId = useId();
 
-  const [weight, setWeight] = useState(prefillWeightKg === null ? '' : String(prefillWeightKg));
-  const [count, setCount] = useState(prefillSeconds === null ? '' : String(prefillSeconds));
-  const [rpe, setRpe] = useState('');
+  const [internalDraft, setInternalDraft] = useState<SetLoggerDraft>(() =>
+    setLoggerDraftFromPrefill(prefillWeightKg, prefillSeconds),
+  );
+  // The occurrence boundary may own the draft; otherwise the form does.
+  const current = draft ?? internalDraft;
+  const { weight, count, rpe } = current;
+
+  function updateDraft(patch: Partial<SetLoggerDraft>): void {
+    const next: SetLoggerDraft = { ...current, ...patch };
+    if (draft !== undefined && onDraftChange !== undefined) {
+      onDraftChange(next);
+    } else {
+      setInternalDraft(next);
+    }
+  }
 
   async function submitAction(
     prev: SessionActionState,
@@ -86,6 +119,7 @@ export function SetLoggerForm({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('type', isReps ? 'reps' : 'duration');
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
@@ -143,7 +177,7 @@ export function SetLoggerForm({
                 step={0.5}
                 inputMode="decimal"
                 value={weight}
-                onChange={(event) => setWeight(event.target.value)}
+                onChange={(event) => updateDraft({ weight: event.target.value })}
                 aria-label="Weight in kilograms"
                 className={cn(fieldClass, 'pr-9')}
               />
@@ -171,7 +205,7 @@ export function SetLoggerForm({
               required
               inputMode="numeric"
               value={count}
-              onChange={(event) => setCount(event.target.value)}
+              onChange={(event) => updateDraft({ count: event.target.value })}
               className={fieldClass}
             />
           </div>
@@ -193,7 +227,7 @@ export function SetLoggerForm({
               step={1}
               inputMode="numeric"
               value={rpe}
-              onChange={(event) => setRpe(event.target.value)}
+              onChange={(event) => updateDraft({ rpe: event.target.value })}
               aria-label="Rate of perceived exertion from 1 to 10, optional"
               className={fieldClass}
             />

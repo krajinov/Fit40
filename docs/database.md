@@ -367,6 +367,46 @@ occurrence identity, so the same exercise can appear as two distinct
 occurrences in one session. Full substitution semantics:
 [`docs/exercise-substitution.md`](exercise-substitution.md).
 
+### Occurrence render token on `exercise_logs` (PR #13 Finding 1)
+
+`occurrence_key` (nullable `integer`, migration `0010`) is the per-occurrence
+**presentation-stability token** used to key React state. It is an *attribute
+of* the occurrence, **not** an identity: the business locator stays
+`(session_id, exercise_order)`, the composite PK and the `set_logs` FK are
+untouched, and no query, Server Action schema, mutation input or
+history/progression projection references the column.
+
+- Assigned at session creation (`occurrenceKey` defaults to the initial
+  `exerciseOrder`); unique within a session — enforced by the domain at
+  construction AND by the partial unique index
+  `exercise_logs_session_occurrence_key_unique` (migration `0011`) on
+  `(session_id, occurrence_key) WHERE occurrence_key IS NOT NULL` — the
+  database backstop. The repository distinguishes this index BY NAME and maps
+  its violations to `SessionOccurrenceKeyConflictError`, so the catch-all
+  `SessionAlreadyExistsError` mapping (reserved for the
+  one-session-per-(enrollment, occurrence) constraint on `workout_sessions`)
+  never misclassifies it. The partial predicate keeps every number of legacy
+  NULL rows representable.
+- Immutable thereafter: reorder, skip/unskip, substitution/restore and set
+  mutations never rewrite it, so React keys survive every adjustment —
+  including for two completely identical duplicate occurrences, which no
+  order- or exercise-derived composite could distinguish stably.
+- Nullable only for rows written before migration `0010`: the read mapper
+  hydrates `occurrenceKey ?? exerciseOrder` (the pre-token key source, so
+  the transition remounts nothing), and the next whole-aggregate save
+  persists the coalesced value. There is no backfill script.
+
+### Skip flag on `exercise_logs` (M10)
+
+`is_skipped` (`boolean NOT NULL DEFAULT false`, migration `0009`) stores the
+explicit user decision to not perform an occurrence in this session. It is
+never inferred from zero logged sets, and the skip⇔logged-sets mutual
+exclusion is enforced by the domain alone (deliberately no database CHECK).
+The composite PK stays `(session_id, exercise_order)`; the render token
+above (`occurrence_key`) is the only column added alongside it, and it is
+not a surrogate identity. Full skip/reorder semantics:
+[`docs/session-adjustments.md`](session-adjustments.md).
+
 ---
 
 ## Database Errors

@@ -19,7 +19,12 @@ import {
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
+import type { WorkoutSession } from '@/domain/entities/workout-session';
 import { restoreSessionExercise, type SessionSubstitutionError } from '@/domain/services/session-exercise-substitution';
+import {
+  isValidExpectedSessionVersion,
+  rejectStaleRenderedIntent,
+} from '@/application/use-cases/session-version-guard';
 import { createUserId, createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -38,6 +43,13 @@ export interface RestoreSessionExerciseInput {
   readonly sessionId: string;
   readonly userId: string;
   readonly exerciseOrder: number;
+  /**
+   * The session `version` of the snapshot the caller rendered (PR #13
+   * Finding 1): compared against the freshly loaded aggregate BEFORE
+   * `exerciseOrder` is interpreted, so a tab rendered before a concurrent
+   * reorder cannot restore the occurrence that now occupies its old order.
+   */
+  readonly expectedSessionVersion: number;
 }
 
 export class RestoreSessionExerciseUseCase {
@@ -61,6 +73,14 @@ export class RestoreSessionExerciseUseCase {
         code: 'INVALID_INPUT',
         message: 'exerciseOrder must be an integer of at least 1',
         field: 'exerciseOrder',
+      });
+    }
+
+    if (!isValidExpectedSessionVersion(input.expectedSessionVersion)) {
+      return err({
+        code: 'INVALID_INPUT',
+        message: 'expectedSessionVersion must be a non-negative integer',
+        field: 'expectedSessionVersion',
       });
     }
 
@@ -93,13 +113,25 @@ export class RestoreSessionExerciseUseCase {
       });
     }
 
+    // Stale rendered intent (PR #13 Finding 1): reject BEFORE interpreting
+    // the mutable `exerciseOrder` — the current occupant stays untouched.
+    const versionCheck = rejectStaleRenderedIntent(input.expectedSessionVersion, session);
+    if (!versionCheck.ok) {
+      return err(versionCheck.error);
+    }
+
     const result = restoreSessionExercise(session, { exerciseOrder: input.exerciseOrder });
     if (!result.ok) {
       return result;
     }
 
+    // The repository returns the PERSISTED aggregate, whose `version` is the
+    // one the database committed. Building the DTO from it — never from the
+    // pre-save snapshot — is what lets a caller feed this result straight back
+    // as its next mutation's `expectedSessionVersion` (PR #13 Finding 5).
+    let persisted: WorkoutSession;
     try {
-      await this.sessionRepository.save(result.data);
+      persisted = await this.sessionRepository.save(result.data);
     } catch (error) {
       if (error instanceof SessionStaleVersionError) {
         return err({
@@ -120,6 +152,6 @@ export class RestoreSessionExerciseUseCase {
       throw error;
     }
 
-    return ok(toWorkoutSessionDto(result.data));
+    return ok(toWorkoutSessionDto(persisted));
   }
 }

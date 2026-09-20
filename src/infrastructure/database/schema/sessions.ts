@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -10,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 import { programEnrollments } from './enrollments';
@@ -124,6 +126,40 @@ export const exerciseLogs = pgTable(
     maxReps: integer('max_reps'),
     durationSeconds: integer('duration_seconds'),
     restSeconds: integer('rest_seconds').notNull(),
+    /**
+     * The persisted user decision to not perform this occurrence in this
+     * session (M10). NOT NULL DEFAULT false: rows written before the column
+     * existed (pre-M10 legacy data) hydrate as not skipped — skip is a
+     * stored fact, never inferred from zero logged sets. The skip⇔logged-sets
+     * mutual exclusion is enforced by the domain alone; there is deliberately
+     * no database CHECK for that cross-table rule.
+     */
+    isSkipped: boolean('is_skipped').notNull().default(false),
+    /**
+     * Immutable per-occurrence persistence/render token (PR #13 Finding 1).
+     * Assigned once at session creation (defaulting to the creation order) and
+     * carried unchanged through reorder, skip/unskip, substitution/restore and
+     * every set mutation — the whole-aggregate rewrite persists it verbatim.
+     * It exists ONLY so React's render identity can travel WITH an occurrence
+     * through a reorder: `exerciseOrder` is rewritten by moves, so it cannot
+     * serve as a stable key, and two adjacent duplicate occurrences of the
+     * same exercise are otherwise key-indistinguishable.
+     *
+     * It is NOT the business occurrence locator — that remains the composite
+     * PK (session_id, exercise_order) — and it is never accepted by any use
+     * case, Server Action, or query. Nullable with no default: pre-fix legacy
+     * rows hydrate with a fallback to their exercise_order (distinct within a
+     * session by the PK) and self-heal to persisted values on their next
+     * whole-aggregate save. The PR #13 corrective pass adds the database
+     * backstop for the domain's uniqueness invariant: the PARTIAL unique
+     * index `exercise_logs_session_occurrence_key_unique` on
+     * (session_id, occurrence_key) WHERE occurrence_key IS NOT NULL —
+     * non-null tokens must stay session-unique while every number of legacy
+     * NULL rows remains allowed (PostgreSQL does not index NULL-less rows
+     * under that predicate). The repository maps this index's violations to
+     * a dedicated error instead of the catch-all session-exists mapping.
+     */
+    occurrenceKey: integer('occurrence_key'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.sessionId, table.exerciseOrder] }),
@@ -133,6 +169,15 @@ export const exerciseLogs = pgTable(
     authoredExerciseIdIdx: index('exercise_logs_authored_exercise_id_idx').on(
       table.authoredExerciseId,
     ),
+    // Database backstop for the domain's occurrence-key uniqueness invariant
+    // (PR #13 Finding 1 follow-up): a child-table unique violation is
+    // distinguished from the session-exists constraint BY NAME in the
+    // repository, so the invariant is enforced in depth without weakening
+    // the whole-aggregate rewrite's error mapping. Partial: legacy NULL
+    // rows (any number, any session) are simply not indexed.
+    occurrenceKeyUnique: uniqueIndex('exercise_logs_session_occurrence_key_unique')
+      .on(table.sessionId, table.occurrenceKey)
+      .where(sql`${table.occurrenceKey} IS NOT NULL`),
     exerciseOrderCheck: check('exercise_logs_exercise_order_check', sql`${table.exerciseOrder} > 0`),
     setsCheck: check('exercise_logs_sets_check', sql`${table.sets} > 0`),
     minRepsCheck: check('exercise_logs_min_reps_check', sql`${table.minReps} > 0`),

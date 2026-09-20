@@ -25,7 +25,10 @@ export type SessionActionErrorCode =
   | 'FORBIDDEN'
   | 'INVALID_INPUT'
   | 'EXERCISE_HAS_LOGGED_SETS'
+  | 'EXERCISE_OCCURRENCE_SKIPPED'
   | 'SUBSTITUTION_NO_CHANGE'
+  | 'ADJUSTMENT_NO_CHANGE'
+  | 'MOVE_OUT_OF_RANGE'
   | 'EXERCISE_NOT_FOUND';
 
 export interface SessionActionError {

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { Badge } from '@/components/shared/Badge';
+import { cn } from '@/lib/utils';
 import type { CompletedSessionEntryView } from '@/features/history/completed-session-view';
 
 interface CompletedSessionEntryListProps {
@@ -18,6 +20,12 @@ interface CompletedSessionEntryListProps {
  * primary identity; a substituted occurrence carries the read-only
  * "Originally: …" authored-exercise context line (history has no
  * substitution controls).
+ *
+ * Skipped occurrences (M10) stay visible in persisted order as de-emphasized
+ * cards: the neutral "Skipped" badge replaces any set output, no
+ * performance-history link renders (the view model resolves none), and the
+ * persisted skip decision is authoritative — zero logged sets never implies
+ * skipped. Completed history exposes no mutation controls.
  */
 export function CompletedSessionEntryList({ entries }: CompletedSessionEntryListProps) {
   if (entries.length === 0) {
@@ -31,7 +39,10 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
       {entries.map((entry) => (
         <li
           key={entry.exerciseOrder}
-          className="rounded-card border border-border bg-card p-5 md:p-6"
+          className={cn(
+            'rounded-card border border-border bg-card p-5 md:p-6',
+            entry.isSkipped && 'opacity-80',
+          )}
         >
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             {entry.historyHref !== null ? (
@@ -52,7 +63,11 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
           {entry.equipmentLabel !== null && (
             <p className="mt-0.5 text-sm text-ink-2">{entry.equipmentLabel}</p>
           )}
-          {entry.sets.length > 0 ? (
+          {entry.isSkipped ? (
+            <div className="mt-3">
+              <Badge variant="neutral">Skipped</Badge>
+            </div>
+          ) : entry.sets.length > 0 ? (
             <ol className="mt-3 flex flex-col divide-y divide-border">
               {entry.sets.map((set) => (
                 <li key={set.setNumber} className="flex items-baseline gap-3 py-2 text-sm">

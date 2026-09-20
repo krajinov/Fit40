@@ -69,11 +69,20 @@ function noTargets(count: number): (ExerciseTargetDto | null)[] {
 /**
  * Resolves the advisory overload targets for the session snapshot's logs.
  *
- * ONE batched request carries every log's `{exerciseId, prescription}` from
- * the snapshot (no per-log use-case calls; duplicate exercise ids are fine —
- * the use case deduplicates its queries and returns one target per request
- * position, in order). On any typed failure the session content stays intact
- * and recommendations/prefill are simply omitted — a personalization glitch
+ * ONE batched request carries every NON-SKIPPED log's
+ * `{exerciseId, prescription}` from the snapshot (no per-log use-case calls;
+ * duplicate exercise ids are fine — the use case deduplicates its queries and
+ * returns one target per request position, in order). Skipped occurrences
+ * are never requested: they render no logger, so their target would be dead
+ * weight — and a later unskip re-resolves it fresh on the next request.
+ *
+ * The RESULT stays positionally aligned with `session.exerciseLogs` — one
+ * entry per log, `null` at every skipped index — because
+ * `buildSessionExerciseCardViews` zips `targets` to `logs` by position. The
+ * batch is shorter than the log list whenever anything is skipped; zipping a
+ * shorter array would silently associate later logs with the wrong targets.
+ * On any typed failure the session content stays intact and
+ * recommendations/prefill are simply omitted — a personalization glitch
  * must not make an in-progress session unusable.
  */
 async function resolveSnapshotTargets(
@@ -84,7 +93,11 @@ async function resolveSnapshotTargets(
     readonly exerciseId: ExerciseId;
     readonly prescription: WorkoutSessionDto['exerciseLogs'][number]['prescription'];
   }[] = [];
-  for (const log of session.exerciseLogs) {
+  const nonSkippedIndexes: number[] = [];
+  for (const [index, log] of session.exerciseLogs.entries()) {
+    if (log.isSkipped) {
+      continue;
+    }
     const idResult = createExerciseId(log.performedExerciseId);
     if (!idResult.ok) {
       // Defensive: catalog ids are non-empty by the schema's constraints, so
@@ -92,20 +105,31 @@ async function resolveSnapshotTargets(
       return noTargets(session.exerciseLogs.length);
     }
     requests.push({ exerciseId: idResult.data, prescription: log.prescription });
+    nonSkippedIndexes.push(index);
   }
 
   if (requests.length === 0) {
-    return [];
+    return noTargets(session.exerciseLogs.length);
   }
 
   const result = await getNextExerciseTargetsUseCase.execute({ userId, requests });
-  if (!result.ok) {
+  if (!result.ok || result.data.length !== requests.length) {
     // Recoverable personalization failure (EXERCISE_NOT_FOUND: the catalog
     // changed mid-request): omit recommendations, keep the session content.
     return noTargets(session.exerciseLogs.length);
   }
 
-  return result.data;
+  // Re-expand the batched, order-preserving result back onto the full log
+  // positions — null fills every skipped slot (and any impossible short
+  // result, guarded above, already degraded to the all-null array).
+  const aligned: (ExerciseTargetDto | null)[] = Array.from(
+    { length: session.exerciseLogs.length },
+    () => null,
+  );
+  nonSkippedIndexes.forEach((logIndex, requestIndex) => {
+    aligned[logIndex] = result.data[requestIndex] ?? null;
+  });
+  return aligned;
 }
 
 /**
@@ -222,7 +246,7 @@ export async function buildActiveWorkoutView(
       candidatesByPerformedExerciseId: exerciseData.candidatesByPerformedExerciseId,
       sessionStatus: screenState,
     }),
-    progress: buildSessionProgress(session.exerciseLogs, session.metrics),
+    progress: buildSessionProgress(session),
     screenState,
   };
 }

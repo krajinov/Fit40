@@ -24,6 +24,11 @@
  *                          no matching candidates (honest empty state, never
  *                          unrelated exercises)
  * - `hidden`               completed/read-only session · no mutation controls
+ *
+ * M10 note: a domain block of `'skipped'` also maps to `hidden` — a skipped
+ * occurrence exposes no swap controls until the user unskips it (F4). The
+ * dedicated skip affordance arrives with the M10 skip UI; this mapping only
+ * guarantees the substitution controls never contradict the domain block.
  */
 
 import type {
@@ -101,6 +106,19 @@ export function buildSessionSubstitutionView(input: {
 }): SessionSubstitutionView {
   // Completed sessions are read-only: no mutation controls render at all.
   if (input.eligibility.blockedBy === 'session-completed') {
+    return {
+      state: 'hidden',
+      canRestore: false,
+      candidates: [],
+      candidatesLimited: false,
+      blockedLabel: null,
+    };
+  }
+
+  // A skipped occurrence exposes no swap controls either (M10 F4): the
+  // domain blocks substitution and restore until the user unskips it, and
+  // the affordance must never contradict that block.
+  if (input.eligibility.blockedBy === 'skipped') {
     return {
       state: 'hidden',
       canRestore: false,

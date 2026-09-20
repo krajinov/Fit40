@@ -1,9 +1,6 @@
-import { ChevronDown } from 'lucide-react';
-
 import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-session';
 import type { SessionExerciseCardView } from '@/features/sessions/active-workout-views';
-import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
-import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
+import { UpcomingExerciseRow } from '@/features/sessions/components/UpcomingExerciseRow';
 
 interface UpcomingExerciseListProps {
   /** Untouched exercise rows, in log order. */
@@ -11,34 +8,14 @@ interface UpcomingExerciseListProps {
   /** All session logs, keyed by order, for the hidden loggers' prescriptions. */
   readonly logs: ReadonlyMap<number, WorkoutSessionExerciseDto>;
   readonly sessionId: string;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), forwarded to
+   * every mutation island a row hosts.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
-}
-
-/**
- * Title area of one upcoming row: the performed exercise as the primary
- * name, with the same subtle "Originally: …" context used elsewhere when the
- * occurrence is substituted (the view mapper already resolved the authored
- * name; null renders no line).
- */
-interface UpcomingExerciseTitleProps {
-  readonly exercise: SessionExerciseCardView;
-}
-
-function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
-  return (
-    <span className="min-w-0 flex-1">
-      <span className="block truncate text-sm font-semibold text-ink-2 md:text-base">
-        {exercise.name}
-      </span>
-      {exercise.originallyName !== null && (
-        <span className="block truncate text-[11px] text-ink-3 md:text-xs">
-          Originally: {exercise.originallyName}
-        </span>
-      )}
-    </span>
-  );
 }
 
 /**
@@ -46,16 +23,26 @@ function UpcomingExerciseTitle({ exercise }: UpcomingExerciseTitleProps) {
  * (surface-2 order circle, ink-2 name, ink-3 prescription) in one surface
  * container.
  *
+ * The Active Workout screen no longer owns occurrence state through this
+ * grouping: every occurrence renders under the keyed `SessionOccurrence`
+ * boundary in ONE canonical-order list (PR #13 P2), and that list stamps each
+ * compact row with its grouping classes. This grouped composition remains the
+ * standalone presentational wrapper (and its regression tests): a row's local
+ * draft/disclosure state is owned by the occurrence boundary, never by this
+ * container.
+ *
  * Capability note: the domain allows logging sets in any order, and the
  * pre-redesign screen offered a logger on every exercise. The locked frames
  * show these rows quiet, so each row keeps a subtle expand affordance that
  * reveals the same set logger — the visual stays as designed while
- * out-of-order logging remains possible.
+ * out-of-order logging remains possible. Skipped occurrences never appear
+ * here (they render as their own muted card kind in the main list, M10).
  */
 export function UpcomingExerciseList({
   upcoming,
   logs,
   sessionId,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -70,82 +57,18 @@ export function UpcomingExerciseList({
       className="rounded-card border border-border bg-card px-4 py-0.5 md:px-6"
     >
       <ol className="divide-y divide-border">
-        {upcoming.map((exercise) => {
-          const log = logs.get(exercise.order);
-          const logger = exercise.logger;
-          if (log === undefined || logger === null) {
-            return (
-              <li key={exercise.order} className="flex items-center gap-2.5 py-3 md:gap-3.5 md:py-4">
-                <span
-                  aria-hidden="true"
-                  className="flex size-[26px] shrink-0 items-center justify-center rounded-pill bg-surface-2 text-xs font-semibold text-ink-3 md:size-[34px] md:text-sm"
-                >
-                  {exercise.order}
-                </span>
-                <UpcomingExerciseTitle exercise={exercise} />
-                <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
-                  {exercise.prescriptionLabel}
-                </span>
-              </li>
-            );
-          }
-
-          return (
-            <li key={exercise.order} className="py-1.5 md:py-2">
-              <details className="group/up">
-                <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg py-1.5 transition-colors hover:bg-surface-2/60 md:gap-3.5 [&::-webkit-details-marker]:hidden">
-                  <span
-                    aria-hidden="true"
-                    className="flex size-[26px] shrink-0 items-center justify-center rounded-pill bg-surface-2 text-xs font-semibold text-ink-3 md:size-[34px] md:text-sm"
-                  >
-                    {exercise.order}
-                  </span>
-                  <UpcomingExerciseTitle exercise={exercise} />
-                  <span className="shrink-0 text-xs text-ink-3 md:text-[13px]">
-                    {exercise.prescriptionLabel}
-                  </span>
-                  <ChevronDown
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-ink-3 transition-transform group-open/up:rotate-180"
-                  />
-                </summary>
-                <div className="pb-3 pt-1">
-                  <SetLoggerForm
-                    key={`${exercise.order}-${exercise.setRows.length}-${logger.prefillWeightKg ?? logger.prefillSeconds ?? 'none'}`}
-                    sessionId={sessionId}
-                    exerciseOrder={log.order}
-                    prescription={log.prescription}
-                    programSlug={programSlug}
-                    weekNumber={weekNumber}
-                    workoutOrder={workoutOrder}
-                    prefillWeightKg={logger.prefillWeightKg}
-                    prefillSeconds={logger.prefillSeconds}
-                    callout={logger.callout}
-                    quietLabel={logger.quietLabel}
-                    hintLabel={logger.hintLabel}
-                  />
-                  {/* Untouched rows are the prime substitution moment: the
-                      swap affordance (pure view-mapper state) sits under the
-                      logger inside the same expand. */}
-                  {(exercise.substitution.state === 'replace' ||
-                    exercise.substitution.state === 'restore-available' ||
-                    exercise.substitution.state === 'no-candidates') && (
-                    <div className="pt-3">
-                      <SessionExerciseSwapPanel
-                        sessionId={sessionId}
-                        exerciseOrder={log.order}
-                        programSlug={programSlug}
-                        weekNumber={weekNumber}
-                        workoutOrder={workoutOrder}
-                        substitution={exercise.substitution}
-                      />
-                    </div>
-                  )}
-                </div>
-              </details>
-            </li>
-          );
-        })}
+        {upcoming.map((exercise) => (
+          <UpcomingExerciseRow
+            key={exercise.renderKey}
+            exercise={exercise}
+            log={logs.get(exercise.order)}
+            sessionId={sessionId}
+            expectedSessionVersion={expectedSessionVersion}
+            programSlug={programSlug}
+            weekNumber={weekNumber}
+            workoutOrder={workoutOrder}
+          />
+        ))}
       </ol>
     </section>
   );

@@ -25,6 +25,12 @@ const initialState: SessionActionState = { ok: true };
 interface SessionExerciseSwapPanelProps {
   readonly sessionId: string;
   readonly exerciseOrder: number;
+  /**
+   * The rendered snapshot's session version (PR #13 Finding 1), submitted with
+   * the swap/restore so the use case can reject stale rendered intent before
+   * interpreting the mutable `exerciseOrder`.
+   */
+  readonly expectedSessionVersion: number;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
@@ -64,6 +70,7 @@ interface SessionExerciseSwapPanelProps {
 export function SessionExerciseSwapPanel({
   sessionId,
   exerciseOrder,
+  expectedSessionVersion,
   programSlug,
   weekNumber,
   workoutOrder,
@@ -77,6 +84,7 @@ export function SessionExerciseSwapPanel({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));
@@ -93,6 +101,7 @@ export function SessionExerciseSwapPanel({
   ): Promise<SessionActionState> {
     formData.set('sessionId', sessionId);
     formData.set('exerciseOrder', String(exerciseOrder));
+    formData.set('expectedSessionVersion', String(expectedSessionVersion));
     formData.set('programSlug', programSlug);
     formData.set('weekNumber', String(weekNumber));
     formData.set('workoutOrder', String(workoutOrder));

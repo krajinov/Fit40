@@ -112,6 +112,18 @@ describe('session-substitution-views / buildSessionSubstitutionView', () => {
     expect(view.state).toBe('blocked-logged-sets');
     expect(view.canRestore).toBe(false);
   });
+
+  it('hides the swap affordance entirely for a skipped occurrence (M10 F4)', () => {
+    const view = buildSessionSubstitutionView({
+      eligibility: eligibility('skipped', true),
+      candidates: withCandidates,
+    });
+
+    expect(view.state).toBe('hidden');
+    expect(view.canRestore).toBe(false);
+    expect(view.candidates).toEqual([]);
+    expect(view.blockedLabel).toBeNull();
+  });
 });
 
 describe('session-substitution-views / no-candidates and hidden states', () => {
@@ -195,10 +207,16 @@ describe('session-action-labels / sessionActionErrorLabel', () => {
       'This exercise could not be found in the session. Reload the page to see the latest state.',
     );
     expect(sessionActionErrorLabel('EXERCISE_HAS_LOGGED_SETS', 'fallback')).toBe(
-      'This exercise has logged sets. Delete them first to swap the exercise.',
+      'This exercise has logged sets. Delete them first before it can be skipped or swapped.',
     );
     expect(sessionActionErrorLabel('SUBSTITUTION_NO_CHANGE', 'fallback')).toBe(
       'That exercise is already selected here. Reloading the latest state…',
+    );
+    expect(sessionActionErrorLabel('ADJUSTMENT_NO_CHANGE', 'fallback')).toBe(
+      'That exercise is already in this state. Reloading the latest workout…',
+    );
+    expect(sessionActionErrorLabel('MOVE_OUT_OF_RANGE', 'fallback')).toBe(
+      'That exercise can no longer be moved in that direction. Reloading the latest workout…',
     );
     expect(sessionActionErrorLabel('EXERCISE_NOT_FOUND', 'fallback')).toBe(
       'That exercise is no longer available in the exercise catalog.',

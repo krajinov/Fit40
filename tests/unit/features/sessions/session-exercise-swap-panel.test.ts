@@ -71,6 +71,7 @@ async function renderPanel(): Promise<MountedPanel> {
   const props = {
     sessionId: 's-1',
     exerciseOrder: 1,
+    expectedSessionVersion: 0,
     programSlug: 'prog-1',
     weekNumber: 1,
     workoutOrder: 1,

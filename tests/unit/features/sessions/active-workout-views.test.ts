@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { ExerciseTargetDto, PreviousExerciseSetDto } from '@/application/dto/exercise';
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
+  WorkoutSessionDto,
   WorkoutSessionExerciseDto,
+  WorkoutSessionMetricsDto,
   WorkoutSessionSetDto,
 } from '@/application/dto/workout-session';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
@@ -13,6 +15,8 @@ import {
   buildSessionProgress,
   formatSessionClock,
   formatVolumeLabel,
+  splitSessionExerciseCardBands,
+  type SessionExerciseCardView,
 } from '@/features/sessions/active-workout-views';
 import {
   buildSessionLoggerView,
@@ -56,12 +60,47 @@ function log(
     authoredExerciseId: exerciseId,
     performedExerciseId: exerciseId,
     isSubstituted: false,
+    isSkipped: false,
+    // Defaults to the order (the fixture's implicit occurrenceKey); tests
+    // that exercise reorder stability override it explicitly.
+    occurrenceKey: order,
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    adjustmentEligibility: {
+      isSkipped: false,
+      blockedBy: null,
+      canSkip: true,
+      canUnskip: false,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
     order,
     prescription,
     sets,
     ...overrides,
   };
+}
+
+/**
+ * A skipped occurrence fixture (M10): the persisted flag plus the domain's
+ * eligibility projection of a mutable skipped occurrence.
+ */
+function skippedLog(
+  order: number,
+  exerciseId: string,
+  prescription: RepPrescription = threeByEightToTen,
+): WorkoutSessionExerciseDto {
+  return log(order, exerciseId, prescription, [], {
+    isSkipped: true,
+    substitutionEligibility: { blockedBy: 'skipped', canRestore: false },
+    adjustmentEligibility: {
+      isSkipped: true,
+      blockedBy: null,
+      canSkip: false,
+      canUnskip: true,
+      canMoveUp: true,
+      canMoveDown: true,
+    },
+  });
 }
 
 /** A substitution candidates DTO built from plain candidate facts. */
@@ -88,6 +127,30 @@ function candidatesDto(
       difficulty: 'intermediate',
       matchTier: 'same-pattern-same-muscle',
     })),
+  };
+}
+
+/** A minimal session DTO around given logs, metrics and domain-owned totals. */
+function sessionDto(
+  logs: WorkoutSessionExerciseDto[],
+  metrics: WorkoutSessionMetricsDto,
+  totals: { prescribedSets: number; skippedExerciseCount: number } = {
+    prescribedSets: 0,
+    skippedExerciseCount: 0,
+  },
+): WorkoutSessionDto {
+  return {
+    sessionId: 's-1',
+    scheduledWorkoutId: 'sw-1',
+    workoutId: 'w-1',
+    status: 'in-progress',
+    startedAt: '2026-09-01T17:00:00.000Z',
+    completedAt: null,
+    version: 0,
+    exerciseLogs: logs,
+    metrics,
+    prescribedSets: totals.prescribedSets,
+    skippedExerciseCount: totals.skippedExerciseCount,
   };
 }
 
@@ -527,6 +590,145 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
     expect(cards.every((c) => c.logger === null)).toBe(true);
   });
 
+  describe('skip display (M10)', () => {
+    it('gives a skipped occurrence the skipped kind with top precedence', () => {
+      // The skipped fixture sits first in log order with zero sets — the
+      // raw facts would otherwise mark it `active`. Skipped wins, and the
+      // NEXT non-skipped under-prescribed log becomes the active target.
+      const logs = [skippedLog(1, 'ex-1'), log(2, 'ex-2', threeByEightToTen, [])];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null, null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.kind).toBe('skipped');
+      expect(cards[1]?.kind).toBe('active');
+    });
+
+    it('badges a skipped occurrence neutrally with the locked copy', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.badge).toEqual({
+        style: 'neutral',
+        label: 'Skipped',
+        mobileVisible: true,
+      });
+    });
+
+    it('carries no logger on a skipped occurrence — even in progress, even with a target', () => {
+      // The target at the skipped position exists here deliberately: the
+      // mapper must still refuse to render a logger for a skipped log.
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [increaseFrom60],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.logger).toBeNull();
+    });
+
+    it('keeps the skipped card identity, prescription and order intact', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.name).toBe('Bench Press');
+      expect(cards[0]?.prescriptionLabel).toBe('3 × 8–10');
+      expect(cards[0]?.order).toBe(1);
+      expect(cards[0]?.equipmentLabel).toBe('Barbell');
+    });
+
+    it('maps the adjustment affordance from the domain eligibility, not raw facts', () => {
+      // The eligibility says blocked — the mapper must not soften it even
+      // though the raw DTO carries zero logged sets.
+      const cards = buildSessionExerciseCardViews({
+        logs: [
+          log(1, 'ex-1', threeByEightToTen, [], {
+            adjustmentEligibility: {
+              isSkipped: false,
+              blockedBy: 'logged-sets',
+              canSkip: false,
+              canUnskip: false,
+              // Logged sets block the skip decision only — moves stay open.
+              canMoveUp: true,
+              canMoveDown: true,
+            },
+          }),
+        ],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.adjustment.state).toBe('blocked-logged-sets');
+      expect(cards[0]?.adjustment.blockedLabel).toBe(
+        'Delete your logged sets to skip this exercise.',
+      );
+    });
+
+    it('maps the adjustment affordance to skipped for a mutable skipped occurrence', () => {
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.adjustment.state).toBe('skipped');
+    });
+
+    it('keeps the substitution affordance hidden for a skipped occurrence', () => {
+      // The domain already blocks substitution while skipped; the view must
+      // not contradict it (M10 F4 — no swap controls on a skipped card).
+      const cards = buildSessionExerciseCardViews({
+        logs: [skippedLog(1, 'ex-1')],
+        targets: [null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.substitution.state).toBe('hidden');
+      expect(cards[0]?.kind).toBe('skipped');
+    });
+
+    it('marks multiple skipped occurrences skipped while a done one stays done', () => {
+      const logs = [
+        skippedLog(1, 'ex-1'),
+        log(2, 'ex-2', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+        skippedLog(3, 'ex-3'),
+      ];
+      const cards = buildSessionExerciseCardViews({
+        logs,
+        targets: [null, null, null],
+        catalogByExerciseId: catalog,
+        candidatesByPerformedExerciseId: noCandidates,
+        sessionStatus: 'in-progress',
+      });
+
+      expect(cards[0]?.kind).toBe('skipped');
+      expect(cards[1]?.kind).toBe('done');
+      expect(cards[2]?.kind).toBe('skipped');
+    });
+  });
+
   describe('substitution display (M9)', () => {
     const substitutionCatalog = new Map([
       ['ex-bench', { name: 'Bench Press', equipment: 'barbell' as const }],
@@ -775,22 +977,160 @@ describe('active-workout-views / buildSessionExerciseCardViews', () => {
   });
 });
 
+// ─── Reorder display (M10 Slice 6) ────────────────────────────────────────────
+//
+// The Slice 5 invariant hands Presentation a canonical aggregate:
+// exerciseLogs[index].order === index + 1. The card mapper must consume the
+// array AS RECEIVED — never sorting by order, exercise identity or name. The
+// flagship fixture below is deliberately non-alphabetical (B, A, C): any
+// sort by name/id would render A, B, C and fail these tests.
+describe('active-workout-views / reorder display (M10 Slice 6)', () => {
+  const reorderCatalog = new Map([
+    ['ex-b', { name: 'Exercise B', equipment: 'barbell' as const }],
+    ['ex-a', { name: 'Exercise A', equipment: 'dumbbell' as const }],
+    ['ex-c', { name: 'Exercise C', equipment: 'barbell' as const }],
+    ['ex-c-alt', { name: 'Exercise C Alt', equipment: 'dumbbell' as const }],
+  ]);
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
+  it('renders cards in the DTO array order — B, A, C — never sorted by identity', () => {
+    // A canonically reordered snapshot: B moved to the front (order 1),
+    // A took order 2, C stays at 3.
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40)]),
+      log(3, 'ex-c', threeByEightToTen, []),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    expect(cards.map((card) => card.name)).toEqual(['Exercise B', 'Exercise A', 'Exercise C']);
+    expect(cards.map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('follows the reordered array for the active exercise and per-set state', () => {
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [repSet(1, 10, 50), repSet(2, 10, 50), repSet(3, 10, 50)]),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40)]),
+      log(3, 'ex-c', threeByEightToTen, []),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    // B is done; the FIRST under-prescribed occurrence in the reordered
+    // array — A at order 2 — is the active logger target.
+    expect(cards[0]?.kind).toBe('done');
+    expect(cards[1]?.kind).toBe('active');
+    expect(cards[2]?.kind).toBe('upcoming');
+    // Logged-set state stays attached to its own occurrence.
+    expect(cards[1]?.setRows).toHaveLength(1);
+    expect(cards[1]?.logger).not.toBeNull();
+  });
+
+  it('keeps skipped and substituted identity attached through the reorder', () => {
+    const logs = [
+      skippedLog(1, 'ex-b'),
+      log(2, 'ex-a', threeByEightToTen, [repSet(1, 10, 40), repSet(2, 9, 40)]),
+      log(3, 'ex-c-alt', threeByEightToTen, [], {
+        authoredExerciseId: 'ex-c',
+        performedExerciseId: 'ex-c-alt',
+        isSubstituted: true,
+      }),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    // The skipped decision, the substituted identity and the logged-set
+    // state all stay attached to their own occurrences in the new
+    // positions. (B is skipped, so A — with 2 of 3 sets — is the FIRST
+    // under-prescribed occurrence: `active`, still carrying its rows.)
+    expect(cards[0]?.kind).toBe('skipped');
+    expect(cards[0]?.adjustment.state).toBe('skipped');
+    expect(cards[1]?.kind).toBe('active');
+    expect(cards[1]?.setRows).toHaveLength(2);
+    expect(cards[2]?.name).toBe('Exercise C Alt');
+    expect(cards[2]?.originallyName).toBe('Exercise C');
+  });
+
+  it('maps the move flags from the DTO eligibility, never from the array position', () => {
+    // Contradictory fixture: the MID-list occurrence (order 2) carries a
+    // domain projection that says it cannot move at all, while the FIRST
+    // occurrence (order 1) projects canMoveUp: true. Position logic would
+    // say the opposite; only DTO consumption produces these flags.
+    const logs = [
+      log(1, 'ex-b', threeByEightToTen, [], {
+        adjustmentEligibility: {
+          isSkipped: false,
+          blockedBy: null,
+          canSkip: true,
+          canUnskip: false,
+          canMoveUp: true,
+          canMoveDown: true,
+        },
+      }),
+      log(2, 'ex-a', threeByEightToTen, [], {
+        adjustmentEligibility: {
+          isSkipped: false,
+          blockedBy: null,
+          canSkip: true,
+          canUnskip: false,
+          canMoveUp: false,
+          canMoveDown: false,
+        },
+      }),
+    ];
+    const cards = buildSessionExerciseCardViews({
+      logs,
+      targets: [null, null],
+      catalogByExerciseId: reorderCatalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+
+    expect(cards[0]?.adjustment.canMoveUp).toBe(true);
+    expect(cards[0]?.adjustment.canMoveDown).toBe(true);
+    expect(cards[1]?.adjustment.canMoveUp).toBe(false);
+    expect(cards[1]?.adjustment.canMoveDown).toBe(false);
+  });
+});
+
 describe('active-workout-views / buildSessionProgress', () => {
-  it('sums prescribed sets across logs and computes the percentage', () => {
+  it('uses the domain-owned prescribedSets denominator and computes the percentage', () => {
     const logs = [
       log(1, 'ex-1', threeByEightToTen, [repSet(1, 10, 50)]),
       log(2, 'ex-2', threeByFortySeconds, []),
     ];
-    const progress = buildSessionProgress(logs, {
+    const metrics = {
       totalSets: 1,
       totalReps: 10,
       totalDurationSeconds: 0,
       volume: 500,
-    });
+    };
+    // The domain already excluded nothing here: 6 prescribed sets across both
+    // non-skipped occurrences.
+    const progress = buildSessionProgress(
+      sessionDto(logs, metrics, { prescribedSets: 6, skippedExerciseCount: 0 }),
+    );
 
     expect(progress).toEqual({
       loggedSets: 1,
       prescribedSets: 6,
+      skippedCount: 0,
       percentage: 17,
       repsLabel: '10 reps',
       volumeLabel: '500 kg',
@@ -804,25 +1144,52 @@ describe('active-workout-views / buildSessionProgress', () => {
       repSet(3, 10, 50),
       repSet(4, 10, 50),
     ])];
-    const progress = buildSessionProgress(logs, {
-      totalSets: 4,
-      totalReps: 40,
-      totalDurationSeconds: 0,
-      volume: 2000,
-    });
+    const progress = buildSessionProgress(
+      sessionDto(logs, {
+        totalSets: 4,
+        totalReps: 40,
+        totalDurationSeconds: 0,
+        volume: 2000,
+      }, { prescribedSets: 3, skippedExerciseCount: 0 }),
+    );
 
     expect(progress.percentage).toBe(100);
     expect(progress.prescribedSets).toBe(3);
   });
 
   it('renders 0% when the snapshot has no logs', () => {
-    const progress = buildSessionProgress([], {
-      totalSets: 0,
-      totalReps: 0,
-      totalDurationSeconds: 0,
-      volume: 0,
-    });
+    const progress = buildSessionProgress(
+      sessionDto([], {
+        totalSets: 0,
+        totalReps: 0,
+        totalDurationSeconds: 0,
+        volume: 0,
+      }),
+    );
 
+    expect(progress.percentage).toBe(0);
+  });
+
+  it('never re-sums per-log prescriptions — the DTO totals are the only source', () => {
+    // Fixture deliberately contradicts the raw log facts: the session DTO
+    // says 4 prescribed sets across the non-skipped occurrences while the
+    // raw logs would sum to 6 (3+3). The mapper must consume the DTO's
+    // domain-owned totals and ignore the logs entirely.
+    const logs = [
+      log(1, 'ex-1', threeByEightToTen, []),
+      log(2, 'ex-2', threeByEightToTen, [], { isSkipped: true }),
+    ];
+    const progress = buildSessionProgress(
+      sessionDto(logs, {
+        totalSets: 0,
+        totalReps: 0,
+        totalDurationSeconds: 0,
+        volume: 0,
+      }, { prescribedSets: 4, skippedExerciseCount: 1 }),
+    );
+
+    expect(progress.prescribedSets).toBe(4);
+    expect(progress.skippedCount).toBe(1);
     expect(progress.percentage).toBe(0);
   });
 });
@@ -837,3 +1204,193 @@ describe('active-workout-views / formatting helpers', () => {
     expect(formatVolumeLabel(1240.4)).toBe('1,240 kg');
   });
 });
+
+// ─── Card bands: canonical render order (PR #13 Finding 4) ────────────────────
+
+/** A minimal card view carrying only what the band split consumes. */
+function bandCard(order: number, kind: SessionExerciseCardView['kind']): SessionExerciseCardView {
+  return {
+    order,
+    renderKey: `band:${order}`,
+    kind,
+    name: `Exercise ${order}`,
+    originallyName: null,
+    equipmentLabel: null,
+    prescriptionLabel: '3×8-10',
+    badge: { style: 'neutral', label: 'Upcoming', mobileVisible: true },
+    setRows: [],
+    logger: null,
+    substitution: { state: 'hidden', blockedLabel: null },
+    adjustment: { state: 'open', blockedLabel: null, canMoveUp: true, canMoveDown: true },
+  } as unknown as SessionExerciseCardView;
+}
+
+describe('splitSessionExerciseCardBands (canonical render order)', () => {
+  it('keeps a skipped occurrence behind an earlier untouched one: 1,2,3 stays 1,2,3', () => {
+    // The reported bug: order 1 active, order 2 upcoming, order 3 skipped.
+    // The old non-upcoming-first partition rendered 1, 3, 2.
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'active'),
+      bandCard(2, 'upcoming'),
+      bandCard(3, 'skipped'),
+    ]);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.upcoming).toEqual([]);
+  });
+
+  it('keeps an interleaved partial occurrence behind an earlier untouched one', () => {
+    // Not M10-specific: logging a set on order 3 while order 2 is untouched
+    // is the same interleaving shape and must render canonically too.
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'done'),
+      bandCard(2, 'upcoming'),
+      bandCard(3, 'partial'),
+    ]);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps the untouched trailing suffix in the Up next band', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'done'),
+      bandCard(2, 'active'),
+      bandCard(3, 'upcoming'),
+    ]);
+
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2]);
+    expect(bands.upcoming.map((card) => card.order)).toEqual([3]);
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+  });
+
+  it('returns an empty card band when every occurrence is untouched', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'upcoming'),
+      bandCard(2, 'upcoming'),
+    ]);
+
+    expect(bands.cards).toEqual([]);
+    expect(bands.upcoming.map((card) => card.order)).toEqual([1, 2]);
+  });
+
+  it('returns an empty upcoming band when every occurrence is touched', () => {
+    const bands = splitSessionExerciseCardBands([
+      bandCard(1, 'skipped'),
+      bandCard(2, 'done'),
+    ]);
+
+    expect(bands.cards.map((card) => card.order)).toEqual([1, 2]);
+    expect(bands.upcoming).toEqual([]);
+  });
+
+  it('never reorders: the concatenation is always the input, in order', () => {
+    const kinds: ReadonlyArray<SessionExerciseCardView['kind']> = [
+      'upcoming', 'skipped', 'upcoming', 'active', 'done', 'upcoming', 'partial', 'upcoming',
+    ];
+    const cards = kinds.map((kind, index) => bandCard(index + 1, kind));
+
+    const bands = splitSessionExerciseCardBands(cards);
+
+    expect([...bands.cards, ...bands.upcoming]).toEqual(cards);
+    // Post-condition: every member of the upcoming band is untouched.
+    for (const card of bands.upcoming) {
+      expect(card.kind).toBe('upcoming');
+    }
+  });
+
+  it('agrees with the real card mapper on a skipped-after-upcoming session', () => {
+    // The full pipeline (buildSessionExerciseCardViews → band split) on the
+    // reported fixture: the bands concatenated are the DTO's canonical order.
+    const cards = buildSessionExerciseCardViews({
+      logs: [
+        log(1, 'ex-a', threeByEightToTen, []),
+        log(2, 'ex-b', threeByEightToTen, []),
+        skippedLog(3, 'ex-c'),
+      ],
+      targets: [null, null, null],
+      catalogByExerciseId: new Map(),
+      candidatesByPerformedExerciseId: new Map(),
+      sessionStatus: 'in-progress',
+    });
+
+    const bands = splitSessionExerciseCardBands(cards);
+
+    expect([...bands.cards, ...bands.upcoming].map((card) => card.order)).toEqual([1, 2, 3]);
+    expect(bands.cards.map((card) => card.kind)).toEqual(['active', 'upcoming', 'skipped']);
+    expect(bands.upcoming).toEqual([]);
+  });
+
+describe('active-workout-views / renderKey derivation (PR #13 Finding 1)', () => {
+  const catalog = new Map<string, { name: string; equipment: 'barbell' }>();
+  const noCandidates = new Map<string, ExerciseSubstitutionCandidatesDto>();
+
+  function cardsFor(logs: WorkoutSessionExerciseDto[]) {
+    return buildSessionExerciseCardViews({
+      logs,
+      targets: logs.map(() => null),
+      catalogByExerciseId: catalog,
+      candidatesByPerformedExerciseId: noCandidates,
+      sessionStatus: 'in-progress',
+    });
+  }
+
+  it('derives the key only from the occurrenceKey, never order or exercise ids', () => {
+    const cards = cardsFor([
+      log(1, 'ex-a', threeByEightToTen, []),
+      log(2, 'ex-b', threeByEightToTen, []),
+    ]);
+
+    expect(cards[0]?.renderKey).toBe('occ:1');
+    expect(cards[1]?.renderKey).toBe('occ:2');
+  });
+
+  it('two completely identical duplicate occurrences get DISTINCT keys', () => {
+    // Same authored id, same performed id, same prescription — only their
+    // occurrenceKeys differ, and so must their render keys.
+    const cards = cardsFor([
+      log(1, 'ex-same', threeByEightToTen, [], { occurrenceKey: 1 }),
+      log(2, 'ex-same', threeByEightToTen, [], { occurrenceKey: 2 }),
+    ]);
+
+    expect(cards[0]?.renderKey).not.toBe(cards[1]?.renderKey);
+    expect(new Set(cards.map((card) => card.renderKey)).size).toBe(2);
+  });
+
+  it('the key travels with the occurrence through a reorder, unchanged', () => {
+    // Occurrence with key 1 moves from order 1 to order 2 (and vice versa):
+    // its renderKey stays `occ:1` even though its order is now 2.
+    const before = cardsFor([
+      log(1, 'ex-a', threeByEightToTen, [], { occurrenceKey: 1 }),
+      log(2, 'ex-b', threeByEightToTen, [], { occurrenceKey: 2 }),
+    ]);
+    const after = cardsFor([
+      log(1, 'ex-b', threeByEightToTen, [], { occurrenceKey: 2 }),
+      log(2, 'ex-a', threeByEightToTen, [], { occurrenceKey: 1 }),
+    ]);
+
+    // Same occurrence (key 1): same key before and after the reorder.
+    expect(before.find((card) => card.order === 1)?.renderKey).toBe('occ:1');
+    expect(after.find((card) => card.order === 2)?.renderKey).toBe('occ:1');
+    // And the order-1 slot's key genuinely changed — its new occupant has
+    // its own key, so React remounts the slot instead of reusing the
+    // previous occupant's local state.
+    expect(before.find((card) => card.order === 1)?.renderKey).not.toBe(
+      after.find((card) => card.order === 1)?.renderKey,
+    );
+  });
+
+  it('the key is stable across repeated builds of the same snapshot', () => {
+    const logs = [
+      log(1, 'ex-a', threeByEightToTen, []),
+      log(2, 'ex-b', threeByEightToTen, []),
+    ];
+
+    expect(cardsFor(logs).map((card) => card.renderKey)).toEqual(
+      cardsFor(logs).map((card) => card.renderKey),
+    );
+  });
+});
+
+});
+

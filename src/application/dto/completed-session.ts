@@ -73,6 +73,13 @@ export interface CompletedSessionEntryDto {
    * domain owns this derivation; it is never part of the persisted record.
    */
   readonly isSubstituted: boolean;
+  /**
+   * The persisted skip decision for this occurrence (M10): the user's
+   * explicit choice to not perform it in this session, never inferred from
+   * zero logged sets. Skipped occurrences carry zero logged sets, so they are
+   * naturally absent from per-exercise performance history regardless.
+   */
+  readonly isSkipped: boolean;
   /** Position within the session — the entry's identity component. */
   readonly exerciseOrder: number;
   /**
@@ -146,6 +153,7 @@ function serializeEntry(
     authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId,
     isSubstituted: substitution.isSubstituted,
+    isSkipped: log.isSkipped,
     exerciseOrder: log.order,
     exerciseName: performed?.name ?? null,
     authoredExerciseName: authored?.name ?? null,

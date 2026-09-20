@@ -356,3 +356,48 @@ Regression coverage: `tests/unit/features/history/completed-session-view.test.ts
 (history/progression key on the performed exercise). Full feature reference:
 [`docs/exercise-substitution.md`](exercise-substitution.md).
 
+## Screen notes: Active Workout · M10 skip & move controls
+
+The occurrence card gained a quiet adjustment panel
+(`SessionExerciseAdjustPanel`) whose affordances come verbatim from the
+domain's `adjustmentEligibility` DTO projection — never re-derived from
+position, skip state, or logged sets:
+
+- **Skip path:** "Skip exercise" (open) / "Undo skip" (skipped) as a quiet
+  pill posting to the skip/unskip actions; a skipped card renders a neutral
+  `Skipped` badge + truthful hint instead of a logger. An occurrence with
+  logged sets shows only the muted truthful copy ("Delete your logged sets
+  to skip this exercise.").
+- **Move path (adjacent):** "Move up"/"Move down" quiet pills render per the
+  domain's `canMoveUp`/`canMoveDown`. A skipped occurrence still moves; a
+  logged-sets occurrence still moves (logged sets freeze only the skip
+  decision). A combined pending flag across both forms prevents duplicate
+  submits; there is no client-side optimistic reorder — the canonical DTO
+  order renders as received after server revalidation.
+
+Completed/read-only sessions render no mutation controls at all. Full
+semantics: [`docs/session-adjustments.md`](session-adjustments.md).
+
+## Screen notes: History · M10 skipped-occurrence truth
+
+Completed-session detail keeps its locked read-only design; the M10 addition
+is truthful skip representation:
+
+- A skipped occurrence renders a de-emphasized card (`opacity-80`) with a
+  neutral `Skipped` badge instead of set rows — no fabricated metrics, no
+  "No sets were logged." line, and no link to exercise performance history
+  (the persisted flag is authoritative, never inferred from zero sets).
+- A substituted+skipped occurrence keeps the performed-first title plus the
+  subtle "Originally: …" line — truthful identity without implying
+  performance.
+- A zero-set non-skipped occurrence remains distinct: "No sets were logged."
+  + the exercise link, never labeled skipped.
+- Entries render in the final persisted session order (post-reorder), never
+  the template order.
+
+Regression coverage: `tests/unit/features/history/completed-session-view.test.ts`,
+`tests/unit/features/history/completed-session-entry-list.test.ts`, and the
+M10 integration tests in `tests/integration/database/training-history-repository.test.ts`.
+Full feature reference:
+[`docs/session-adjustments.md`](session-adjustments.md).
+

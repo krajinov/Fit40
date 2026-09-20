@@ -58,6 +58,7 @@ import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type {
   WorkoutSessionDto,
   WorkoutSessionExerciseDto,
+  WorkoutSessionSetDto,
 } from '@/application/dto/workout-session';
 import {
   buildSessionExerciseCardViews,
@@ -402,5 +403,77 @@ describe('ActiveWorkoutScreen / skip does not discard the occurrence draft (PR #
       ]),
     );
     expect(occurrenceInput(container, 'Squat', 'weightKg')?.value).toBe('52.5');
+  });
+});
+
+describe('ActiveWorkoutScreen / a completed occurrence retracts its logger disclosure (PR #13 P2)', () => {
+  /** One logged reps set, exactly as the server returns it after the mutation. */
+  function loggedSet(setNumber: number): WorkoutSessionSetDto {
+    return { setNumber, type: 'reps', reps: 10, weightKg: 50, rpe: 7 };
+  }
+
+  /** The logger disclosure of the occurrence carrying `name` (card or row). */
+  function loggerDetails(
+    container: HTMLElement,
+    name: string,
+  ): HTMLDetailsElement | undefined {
+    const holders = [
+      ...Array.from(container.querySelectorAll('article')),
+      ...Array.from(container.querySelectorAll('li[data-band="upcoming"]')),
+    ];
+    const holder = holders.find((element) => element.textContent?.includes(name));
+    return holder?.querySelector('details') ?? undefined;
+  }
+
+  it('closes the finished occurrence’s logger while the next active one stays available', async () => {
+    // A (Squat, occurrenceKey 1) starts ACTIVE: its logger form renders
+    // directly, without a disclosure to open. B (Bench, occurrenceKey 2) is
+    // the untouched upcoming row.
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]),
+    );
+    expect(bandOf(container, 'Squat')).toBe('card');
+    expect(loggerDetails(container, 'Squat')).toBeUndefined();
+    await typeInto(occurrenceRepsInput(container, 'Squat'), '10');
+    expect(occurrenceRepsValue(container, 'Squat')).toBe('10');
+
+    // The FINAL prescribed set lands: A becomes `done` (3/3 sets) and B
+    // becomes the first non-skipped, incomplete occurrence — the active
+    // logger target.
+    await rerender(
+      sessionWith([
+        { ...log(1, 'ex-a'), sets: [loggedSet(1), loggedSet(2), loggedSet(3)] },
+        log(2, 'ex-b'),
+      ]),
+    );
+
+    // A crossed active → done. The completion transition retracts the
+    // disclosure inherited from its active past, so the finished occurrence
+    // does not keep an expanded logging form.
+    const doneDetails = loggerDetails(container, 'Squat');
+    expect(doneDetails).toBeDefined();
+    expect(doneDetails?.open).toBe(false);
+
+    // The next active occurrence still exposes its logger for logging.
+    expect(bandOf(container, 'Bench')).toBe('card');
+    expect(loggerDetails(container, 'Bench')).toBeUndefined();
+    expect(occurrenceRepsInput(container, 'Bench')).toBeDefined();
+  });
+
+  it('keeps a `done` occurrence closed through an ordinary rerender (kind unchanged)', async () => {
+    const doneSession = sessionWith([
+      { ...log(1, 'ex-a'), sets: [loggedSet(1), loggedSet(2), loggedSet(3)] },
+      log(2, 'ex-b'),
+    ]);
+    const { container, rerender } = await renderScreenRerenderable(doneSession);
+
+    // Mounts already `done` — never active — so it never reveals a logger.
+    expect(loggerDetails(container, 'Squat')?.open).toBe(false);
+
+    // An ordinary rerender (fresh object identities, identical kind) must not
+    // toggle the disclosure in either direction.
+    await rerender({ ...doneSession, exerciseLogs: [...doneSession.exerciseLogs] });
+    expect(loggerDetails(container, 'Squat')?.open).toBe(false);
+    expect(bandOf(container, 'Bench')).toBe('card');
   });
 });

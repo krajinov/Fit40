@@ -471,6 +471,14 @@ stale-rendered-intent guard (PR #13):
   the boundary remembers the last non-null logger identity (PR #13 corrective
   pass, Finding 3) and restores the exact draft on unskip. Only a genuinely
   different identity — different prefill/set count — resets the fields.
+  The disclosure is likewise owned by the boundary, with ONE explicit
+  transition rule (PR #13 P2 follow-up): a change INTO `done` retracts it, so
+  an occurrence that logs its final prescribed set stops keeping the expanded
+  logger it inherited from its active past (which would otherwise accumulate
+  open logging forms behind the next active occurrence). Because the rule
+  fires only on a `kind` transition, a pure reorder or an ordinary rerender
+  never closes an open disclosure — it still follows the occurrence across
+  slots and bands.
 - The UI reacts centrally via `shouldRefreshAfterSessionMutationError`
   (`session-mutation-refresh.ts`), which treats exactly the stale
   server-state outcomes as reload-worthy — see the module's code docs.
@@ -519,6 +527,7 @@ M11.
 | React draft state follows the occurrence, not the order slot (identical-duplicate reorder keeps each draft with its occurrence) | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | A draft + open disclosure survive an occurrence crossing between the full-card and compact "Up next" render bands (one keyed `SessionOccurrence` boundary), and never leak to the neighbor | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
 | A draft survives skip → rerender → unskip (logger absence is not a new logger identity); a genuinely changed logger identity still resets | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
+| A completed occurrence (`active` → `done`) retracts its logger disclosure while the next active occurrence stays loggable; a `kind`-unchanged ordinary rerender toggles nothing | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |
 | Centralized refresh decision (stale codes refresh, ordinary failures never reload); shared submit factory (route fields, single action call, verbatim result) | Presentation (unit) | `tests/unit/features/sessions/session-mutation-refresh.test.ts`, `session-mutation-submit.test.ts` |
 | History truth: skipped visible, no performance link, substituted+skipped truthful, final reordered order, zero-set≠skipped | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |
 

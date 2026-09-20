@@ -120,10 +120,27 @@ export function SessionOccurrence({
   // when it later crosses into the compact representation the logger stays
   // revealed instead of collapsing (open local UI state follows the occurrence).
   const [open, setOpen] = useState(card.kind === 'active');
+  // The kind this boundary last rendered. An occurrence that finishes keeps its
+  // logger (extra sets stay loggable), but it stops being the active one: the
+  // card swaps the always-visible active logger for the collapsible one, and
+  // the disclosure inherited from its active past would stay expanded —
+  // leaving finished exercises open while the next active occurrence also
+  // shows its logger. Retracting it needs an explicit TRANSITION rule: only a
+  // change INTO `done` closes. A pure reorder or an ordinary rerender leaves
+  // `kind` unchanged, so an open disclosure still follows the occurrence
+  // across slots and bands (PR #13 P2).
+  const [renderedKind, setRenderedKind] = useState(card.kind);
 
   if (instanceKey !== null && loggerIdentity !== instanceKey) {
     setLoggerIdentity(instanceKey);
     setDraft(draftFromCard(card));
+  }
+
+  if (renderedKind !== card.kind) {
+    setRenderedKind(card.kind);
+    if (card.kind === 'done') {
+      setOpen(false);
+    }
   }
 
   const controlledDraft = hasLogger ? draft : undefined;

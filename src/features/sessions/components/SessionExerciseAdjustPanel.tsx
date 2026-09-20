@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { moveExerciseAction } from '@/features/sessions/actions/move-exercise';
@@ -15,6 +15,13 @@ import { type SessionAdjustmentView } from '@/features/sessions/session-adjustme
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
 
 const initialState: SessionActionState = { ok: true };
+
+/**
+ * Which of the panel's two independent submission paths most recently
+ * submitted. The skip path also covers unskip (same hook); the move path
+ * covers both directions (same hook, direction carried by the form).
+ */
+type AdjustmentPath = 'skip' | 'move';
 
 interface SessionExerciseAdjustPanelProps {
   readonly sessionId: string;
@@ -59,6 +66,12 @@ interface SessionExerciseAdjustPanelProps {
  * errors surface via `sessionActionErrorLabel`; the reload/retry decision
  * (`router.refresh()`) stays centralized in `shouldRefreshAfterSession-
  * MutationError`, applied once inside `createSessionMutationSubmit`.
+ *
+ * The two results stay independent, but only the MOST RECENTLY SUBMITTED path
+ * owns the visible error: the panel remembers which path submitted last (the
+ * form actions are wrapped here, never in the islands) and renders the result
+ * from that path alone — so a failed skip cannot outlive a later successful
+ * move, and an older skip error cannot mask a newer move error.
  */
 export function SessionExerciseAdjustPanel({
   sessionId,
@@ -105,8 +118,36 @@ export function SessionExerciseAdjustPanel({
     submitMove,
     initialState,
   );
+
+  // Which path submitted last. Each hook keeps its own result (they post to
+  // different actions and cannot share a form action), so WITHOUT this the
+  // panel could only pick a fixed precedence — and a stale failure from the
+  // other path would then outlive its own submission forever (a failed skip
+  // staying visible after a successful move) or hide a NEWER result (an older
+  // skip error masking a fresh move error). Remembering the most recent path
+  // makes the sibling non-authoritative for display the moment the other path
+  // is submitted; neither hook's state, pending flag nor behavior changes.
+  const [activePath, setActivePath] = useState<AdjustmentPath | null>(null);
+
+  /** Wraps the skip-path form action, claiming display ownership on submit. */
+  function submitSkipPath(formData: FormData): void {
+    setActivePath('skip');
+    skipFormAction(formData);
+  }
+
+  /** Wraps the move-path form action, claiming display ownership on submit. */
+  function submitMovePath(formData: FormData): void {
+    setActivePath('move');
+    moveFormAction(formData);
+  }
+
   const pending = skipPending || movePending;
-  const failed = !skipState.ok ? skipState : !moveState.ok ? moveState : null;
+  // Display rule: ONLY the most recently submitted path owns the visible
+  // result. Before any submission there is nothing to show (both hooks hold
+  // their initial ok state anyway).
+  const activeState =
+    activePath === 'skip' ? skipState : activePath === 'move' ? moveState : null;
+  const failed = activeState !== null && !activeState.ok ? activeState : null;
 
   // Completed/read-only occurrences render no mutation controls at all. The
   // card never mounts this panel for the mapper's `hidden` state — this is a
@@ -123,7 +164,7 @@ export function SessionExerciseAdjustPanel({
       ) : (
         <SessionSkipControl
           state={state}
-          formAction={skipFormAction}
+          formAction={submitSkipPath}
           pending={pending}
           busy={skipPending}
         />
@@ -132,7 +173,7 @@ export function SessionExerciseAdjustPanel({
       <SessionMoveControls
         canMoveUp={adjustment.canMoveUp}
         canMoveDown={adjustment.canMoveDown}
-        formAction={moveFormAction}
+        formAction={submitMovePath}
         pending={pending}
         busy={movePending}
       />

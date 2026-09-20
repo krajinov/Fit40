@@ -387,7 +387,11 @@ single Server Action, and refreshes only on the centralized stale codes.
 There is **no client-side optimistic reorder**: after a successful move the
 server revalidates the session route and the canonical DTO order renders as
 received. Error labels and the shared refresh semantics live in
-`session-action-labels.ts` / `session-mutation-refresh.ts`.
+`session-action-labels.ts` / `session-mutation-refresh.ts`. Each path's result
+stays independent, but only the MOST RECENTLY SUBMITTED path owns the visible
+error (PR #13 P2): the panel wraps both form actions to record which path
+submitted last, so a failed skip cannot outlive a later successful move and an
+older skip error cannot mask a newer move error.
 
 ---
 
@@ -523,6 +527,8 @@ M11.
 | Skip/unskip/move actions delegate to use cases with trusted identity | Presentation (unit) | `tests/unit/features/sessions/skip-actions.test.ts`, `move-actions.test.ts`, `session-mutation-actions.test.ts` |
 | Eligibility consumed verbatim from the DTO projection (never re-derived); blocked skip still moves; hidden states | Presentation (unit) | `tests/unit/features/sessions/session-adjustment-views.test.ts`, `session-exercise-adjust-panel.test.ts`, `session-exercise-card.test.ts` |
 | No client optimistic reorder; **canonical DTO order rendered as-is** (`1 active / 2 upcoming / 3 skipped` → DOM 1/2/3); pending prevents duplicate submits | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts`, `active-workout-screen.test.ts`, `session-exercise-adjust-panel.test.ts` |
+| Only the most recently submitted adjustment path owns the visible result/error: a stale skip error clears after a successful move, a newer move error is not masked by an older skip error, and vice versa | Presentation (unit) | `tests/unit/features/sessions/session-exercise-adjust-panel.test.ts` |
+
 | `renderKey` derives from `occurrenceKey` only — distinct for duplicate identical occurrences, unchanged by reorder/substitution | Presentation (unit) | `tests/unit/features/sessions/active-workout-views.test.ts` |
 | React draft state follows the occurrence, not the order slot (identical-duplicate reorder keeps each draft with its occurrence) | Presentation (unit) | `tests/unit/features/sessions/upcoming-exercise-list.test.ts` |
 | A draft + open disclosure survive an occurrence crossing between the full-card and compact "Up next" render bands (one keyed `SessionOccurrence` boundary), and never leak to the neighbor | Presentation (unit) | `tests/unit/features/sessions/session-occurrence-band-crossing.test.ts` |

@@ -503,3 +503,74 @@ describe('SessionExerciseAdjustPanel stale-state reload (unskip path)', () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 });
+
+describe('SessionExerciseAdjustPanel single authoritative result (PR #13 P2)', () => {
+  // Distinct, deterministic copy per path so assertions can tell WHICH hook's
+  // result is on screen: EXERCISE_LOG_NOT_FOUND maps to a fixed label while
+  // VALIDATION_ERROR surfaces its own message. Both are ordinary failures, so
+  // neither triggers router.refresh() and the display rule is what is tested.
+  const SKIP_ERROR = errorState('EXERCISE_LOG_NOT_FOUND', 'skip failed');
+  const SKIP_ERROR_COPY = 'This exercise could not be found in the session.';
+  const MOVE_ERROR = errorState('VALIDATION_ERROR', 'move rejected');
+  const MOVE_ERROR_COPY = 'move rejected';
+
+  it('1. shows a failed skip result', async () => {
+    skipExecute.mockResolvedValue(SKIP_ERROR);
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitSkip();
+
+    expect(panel.container.textContent).toContain(SKIP_ERROR_COPY);
+  });
+
+  it('2. clears a stale skip error after a successful move', async () => {
+    skipExecute.mockResolvedValue(SKIP_ERROR);
+    moveExecute.mockResolvedValue({ ok: true });
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitSkip();
+    expect(panel.container.textContent).toContain(SKIP_ERROR_COPY);
+
+    await panel.submitMoveUp();
+
+    expect(panel.container.textContent).not.toContain(SKIP_ERROR_COPY);
+  });
+
+  it('3. shows a newer move error instead of an older skip error', async () => {
+    skipExecute.mockResolvedValue(SKIP_ERROR);
+    moveExecute.mockResolvedValue(MOVE_ERROR);
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitSkip();
+    expect(panel.container.textContent).toContain(SKIP_ERROR_COPY);
+
+    await panel.submitMoveUp();
+
+    expect(panel.container.textContent).not.toContain(SKIP_ERROR_COPY);
+    expect(panel.container.textContent).toContain(MOVE_ERROR_COPY);
+  });
+
+  it('4. shows a move error even when an earlier skip succeeded', async () => {
+    skipExecute.mockResolvedValue({ ok: true });
+    moveExecute.mockResolvedValue(MOVE_ERROR);
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitSkip();
+    await panel.submitMoveUp();
+
+    expect(panel.container.textContent).toContain(MOVE_ERROR_COPY);
+  });
+
+  it('5. clears a stale move error after a successful skip', async () => {
+    skipExecute.mockResolvedValue({ ok: true });
+    moveExecute.mockResolvedValue(MOVE_ERROR);
+    const panel = await renderPanel(adjustmentView('open'));
+
+    await panel.submitMoveUp();
+    expect(panel.container.textContent).toContain(MOVE_ERROR_COPY);
+
+    await panel.submitSkip();
+
+    expect(panel.container.textContent).not.toContain(MOVE_ERROR_COPY);
+  });
+});

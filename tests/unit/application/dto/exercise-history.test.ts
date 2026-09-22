@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   toExerciseHistoryDto,
+  type ExerciseHistoryDto,
 } from '@/application/dto/exercise-history';
 import type { CompletedExerciseOccurrence } from '@/application/ports/training-history-repository';
 import { createExercise } from '@/domain/entities/exercise';
@@ -84,10 +85,14 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
     // The collision case: the same exercise twice in ONE completed session.
     // Both occurrences are externally loaded and share an identical
     // completedAt — only (sessionId, exerciseOrder) distinguishes them.
-    const dto = toExerciseHistoryDto(exercise, [
-      occurrence({ sessionId: 'session-dup', exerciseOrder: 1, weightKg: 40 }),
-      occurrence({ sessionId: 'session-dup', exerciseOrder: 2, weightKg: 44 }),
-    ]);
+    const dto = toExerciseHistoryDto(
+      exercise,
+      [
+        occurrence({ sessionId: 'session-dup', exerciseOrder: 1, weightKg: 40 }),
+        occurrence({ sessionId: 'session-dup', exerciseOrder: 2, weightKg: 44 }),
+      ],
+      [],
+    );
 
     // Both occurrences survive into the trend (chronological: newest-first
     // entries reversed — exerciseOrder 2 then 1 for the same instant).
@@ -103,12 +108,69 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
   });
 
   it('keys every trend point uniquely by (sessionId, exerciseOrder)', () => {
-    const dto = toExerciseHistoryDto(exercise, [
-      occurrence({ sessionId: 'session-a', exerciseOrder: 1, weightKg: 50 }),
-      occurrence({ sessionId: 'session-b', exerciseOrder: 1, weightKg: 52.5 }),
-    ]);
+    const dto = toExerciseHistoryDto(
+      exercise,
+      [
+        occurrence({ sessionId: 'session-a', exerciseOrder: 1, weightKg: 50 }),
+        occurrence({ sessionId: 'session-b', exerciseOrder: 1, weightKg: 52.5 }),
+      ],
+      [],
+    );
 
     const keys = dto.trend.map((point) => `${point.sessionId}#${point.exerciseOrder}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('toExerciseHistoryDto — personal bests (M12)', () => {
+  it('embeds the records exactly as delivered, alongside the occurrence window', () => {
+    const personalBests: ExerciseHistoryDto['personalBests'] = [
+      {
+        exerciseId: 'ex-001',
+        metric: 'max-load',
+        value: 0,
+        sessionId: 'session-bodyweight-bench',
+        exerciseOrder: 1,
+        setNumber: 2,
+        completedAt: '2026-02-15T11:00:00Z',
+      },
+    ];
+
+    const dto = toExerciseHistoryDto(
+      exercise,
+      [occurrence({ sessionId: 'session-new', exerciseOrder: 1, weightKg: 30 })],
+      personalBests,
+    );
+
+    expect(dto.personalBests).toEqual(personalBests);
+    // The occurrence window and its trend are untouched by the records.
+    expect(dto.entries).toHaveLength(1);
+    expect(dto.trend).toHaveLength(1);
+  });
+
+  it('keeps an empty record list empty', () => {
+    const dto = toExerciseHistoryDto(exercise, [], []);
+
+    expect(dto.personalBests).toEqual([]);
+  });
+
+  it('does not let records leak into the trend', () => {
+    const dto = toExerciseHistoryDto(
+      exercise,
+      [occurrence({ sessionId: 'session-new', exerciseOrder: 1, weightKg: 30 })],
+      [
+        {
+          exerciseId: 'ex-001',
+          metric: 'max-bodyweight-reps',
+          value: 40,
+          sessionId: 'session-other',
+          exerciseOrder: 1,
+          setNumber: 1,
+          completedAt: '2026-03-01T11:00:00Z',
+        },
+      ],
+    );
+
+    expect(dto.trend.map((point) => point.sessionId)).toEqual(['session-new']);
   });
 });

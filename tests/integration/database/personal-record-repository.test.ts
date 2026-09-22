@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TrainingHistoryCursor } from '@/application/ports/training-history-repository';
+import { GetExerciseHistoryUseCase } from '@/application/use-cases/get-exercise-history';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import { comparePerformancePositions, RecordMetric } from '@/domain/services/personal-record-metrics';
 import type { PersonalBest } from '@/domain/services/personal-records';
@@ -23,6 +24,7 @@ import {
 } from './personal-record-fixtures';
 import {
   closeDatabase,
+  exerciseRepository,
   personalRecordRepository,
   resetAndSeed,
   trainingHistoryRepository,
@@ -1165,5 +1167,101 @@ describe('personal record repository — oracle against the Domain fold', () => 
     // would change the event list.
     expect(folded.data.events.length).toBeGreaterThanOrEqual(8);
     expect(sqlEvents).toEqual(folded.data.events);
+  });
+});
+
+// ─── Exercise-history wiring (M12 Slice 3) ───────────────────────────────────
+
+/**
+ * One small end-to-end check of the presentation read path's wiring: the
+ * exercise-history use case, the catalog, and the personal-record repository
+ * composed exactly as the `/history/exercises/[slug]` route composes them. The
+ * record semantics themselves are proven above against the Domain fold; this
+ * only proves the composed path resolves the slug, reads the records for the
+ * resolved exercise, and surfaces them on the DTO.
+ */
+describe('exercise history use case — personal bests wiring', () => {
+  const exerciseHistory = new GetExerciseHistoryUseCase(
+    trainingHistoryRepository,
+    exerciseRepository,
+    personalRecordRepository,
+  );
+
+  it('surfaces the exercise’s records on the history DTO', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'wired-early',
+        userId: OWNER,
+        startedAt: '2025-01-01T09:00:00Z',
+        completedAt: '2025-01-01T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+      }),
+      prSession({
+        id: 'wired-mixed',
+        userId: OWNER,
+        occurrence: 2,
+        startedAt: '2025-01-08T09:00:00Z',
+        completedAt: '2025-01-08T10:00:00Z',
+        logs: [
+          { exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 20, weightKg: null }] },
+          { exerciseId: EX_CARRY, type: 'duration', sets: [{ durationSeconds: 45 }] },
+        ],
+      }),
+    );
+
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'bodyweight-squat' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.exercise.id).toBe(EX_BENCH);
+    // Deterministic repository order: exercise id, then metric ascending.
+    expect(result.data.personalBests).toEqual([
+      {
+        exerciseId: EX_BENCH,
+        metric: 'max-bodyweight-reps',
+        value: 20,
+        sessionId: 'wired-mixed',
+        exerciseOrder: 1,
+        setNumber: 1,
+        completedAt: '2025-01-08T10:00:00.000Z',
+      },
+      {
+        exerciseId: EX_BENCH,
+        metric: 'max-load',
+        value: 40,
+        sessionId: 'wired-early',
+        exerciseOrder: 1,
+        setNumber: 1,
+        completedAt: '2025-01-01T10:00:00.000Z',
+      },
+    ]);
+
+    // The record read matches the repository read directly (same owners) …
+    const direct = await personalRecordRepository.findCurrentPersonalBests(owner(), [
+      exerciseId(EX_BENCH),
+    ]);
+    expect(result.data.personalBests.map((best) => best.sessionId)).toEqual(
+      direct.map((best) => best.position.sessionId),
+    );
+    // … and the occurrence window still comes from the history port.
+    expect(result.data.entries).toHaveLength(2);
+  });
+
+  it('keeps an exercise without completed history as a successful empty result', async () => {
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'push-up' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.exercise.id).toBe('ex-007');
+    expect(result.data.personalBests).toEqual([]);
+    expect(result.data.entries).toEqual([]);
+  });
+
+  it('keeps the unknown-slug failure unchanged', async () => {
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'not-an-exercise' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('EXERCISE_NOT_FOUND');
   });
 });

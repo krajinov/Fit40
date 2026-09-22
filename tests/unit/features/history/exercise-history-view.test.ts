@@ -59,6 +59,17 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
         workingLoadKg: 50,
       },
     ],
+    personalBests: [
+      {
+        exerciseId: 'ex-001',
+        metric: 'max-load',
+        value: 82.5,
+        sessionId: 'session-owner',
+        exerciseOrder: 2,
+        setNumber: 3,
+        completedAt: '2026-02-15T11:00:00Z',
+      },
+    ],
     isLimited: false,
     ...overrides,
   };
@@ -273,6 +284,69 @@ describe('toExerciseHistoryView — occurrence count label', () => {
 
     const view = toExerciseHistoryView(dto);
     expect(view.occurrenceCountLabel).toBe('1 occurrence');
+  });
+});
+
+// ─── Personal Bests (M12) ────────────────────────────────────────────────────
+
+describe('toExerciseHistoryView — personal bests (M12)', () => {
+  it('maps the exercise’s records with their labels and owning-session links', () => {
+    const view = toExerciseHistoryView(
+      historyDto({
+        personalBests: [
+          {
+            exerciseId: 'ex-001',
+            metric: 'max-load',
+            value: 82.5,
+            sessionId: 'session-owner',
+            exerciseOrder: 2,
+            setNumber: 3,
+            completedAt: '2026-02-15T11:00:00Z',
+          },
+          {
+            exerciseId: 'ex-001',
+            metric: 'max-bodyweight-reps',
+            value: 18,
+            sessionId: 'session-body',
+            exerciseOrder: 1,
+            setNumber: 2,
+            completedAt: '2026-01-20T11:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    expect(view.personalBests).toEqual([
+      {
+        key: 'max-load',
+        metricLabel: 'Heaviest load',
+        valueLabel: '82.5 kg',
+        completedAtLabel: 'Feb 15, 2026',
+        sessionHref: '/history/sessions/session-owner',
+      },
+      {
+        key: 'max-bodyweight-reps',
+        metricLabel: 'Most bodyweight reps',
+        valueLabel: '18 reps',
+        completedAtLabel: 'Jan 20, 2026',
+        sessionHref: '/history/sessions/session-body',
+      },
+    ]);
+  });
+
+  it('maps a single applicable metric as a single entry — no fabricated metrics', () => {
+    const view = toExerciseHistoryView(historyDto());
+
+    expect(view.personalBests.map((best) => best.key)).toEqual(['max-load']);
+  });
+
+  it('keeps an exercise without records as an empty list, not an error', () => {
+    const view = toExerciseHistoryView(historyDto({ personalBests: [] }));
+
+    expect(view.personalBests).toEqual([]);
+    // The rest of the screen is unaffected by the missing records.
+    expect(view.heading).toBe('Goblet Squat');
+    expect(view.entries).toHaveLength(1);
   });
 });
 

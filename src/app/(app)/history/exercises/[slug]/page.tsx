@@ -10,6 +10,7 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { getCurrentUser, requireUser } from '@/features/auth/current-user';
 import { ExerciseHistoryOccurrenceList } from '@/features/history/components/ExerciseHistoryOccurrenceList';
 import { ExerciseHistoryTrend } from '@/features/history/components/ExerciseHistoryTrend';
+import { ExercisePersonalBests } from '@/features/history/components/ExercisePersonalBests';
 import { buildExerciseHistoryView } from '@/features/history/exercise-history-view';
 import { exerciseHistoryParamsSchema } from '@/features/history/schemas/exercise-history-page-schema';
 
@@ -118,6 +119,14 @@ export default async function ExerciseHistoryPage({ params }: ExerciseHistoryPag
               <ExerciseHistoryTrend trend={view.trend} />
             </SectionCard>
           )}
+
+          <SectionCard
+            id="exercise-history-personal-bests"
+            eyebrow="All-time"
+            title="Personal Bests"
+          >
+            <ExercisePersonalBests personalBests={view.personalBests} />
+          </SectionCard>
 
           <section
             aria-labelledby="exercise-history-occurrences-heading"

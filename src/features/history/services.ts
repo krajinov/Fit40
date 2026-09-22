@@ -11,6 +11,7 @@ import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-t
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import {
   exerciseRepository,
+  personalRecordRepository,
   trainingHistoryRepository,
 } from '@/infrastructure/database/repositories';
 
@@ -30,4 +31,5 @@ export const getCompletedSessionUseCase = new GetCompletedSessionUseCase(
 export const getExerciseHistoryUseCase = new GetExerciseHistoryUseCase(
   trainingHistoryRepository,
   exerciseRepository,
+  personalRecordRepository,
 );

@@ -15,19 +15,34 @@ interface AddExerciseCatalogOptionsProps {
 }
 
 /**
- * The catalog options of the Add Exercise picker: one native radio card per
- * displayed exercise, posting its stable `exerciseId`. Presentational only —
- * the caller owns the search/filter state, the SELECTION (the parent-owned Add
- * draft's `selectedExerciseId`) and the form action, so choosing an option
- * records draft state and never triggers a client-side mutation.
+ * Form-field name of the VISIBLE catalog card radio group.
  *
- * The radios are CONTROLLED (PR #14 review finding): React 19 resets a form's
- * DOM after its action resolves — including error resolutions — so an
- * uncontrolled selection would be wiped by a failed submit while the draft's
- * prescription survived, silently splitting the draft. Nothing is
- * preselected: the user must explicitly choose. The group is not `required`,
- * because the authoritative validation (exercise selected? known?) is the
- * server-side Zod schema.
+ * Deliberately NOT `exerciseId`: the cards are selection UI only, and a radio
+ * disappears from FormData the moment search filters it out of the list (native
+ * serialization only reads mounted successful controls). The authoritative
+ * `exerciseId` is serialized exactly once by the panel's draft-owned hidden
+ * input (PR #14 review finding), so the visible group carries its own
+ * display-only name to keep native radio semantics — one tab stop, arrow-key
+ * navigation — without ever creating a second `exerciseId` entry. The Server
+ * Action's Zod schema never reads this field.
+ */
+export const ADD_EXERCISE_CATALOG_GROUP_NAME = 'catalogExerciseId';
+
+/**
+ * The catalog options of the Add Exercise picker: one native radio card per
+ * displayed exercise. Presentational only — the caller owns the search/filter
+ * state, the SELECTION (the parent-owned Add draft's `selectedExerciseId`) and
+ * the form action, so choosing an option records draft state and never triggers
+ * a client-side mutation.
+ *
+ * The radios are CONTROLLED and are NOT the serialization source (PR #14 review
+ * findings): React 19 resets a form's DOM after its action resolves — including
+ * error resolutions — so an uncontrolled selection would be wiped by a failed
+ * submit, and a filtered-out selected card is unmounted entirely. The draft is
+ * the single source of truth for both the visible selection and the submitted
+ * `exerciseId`. Nothing is preselected: the user must explicitly choose. The
+ * group is not `required`, because the authoritative validation (exercise
+ * selected? known?) is the server-side Zod schema.
  */
 export function AddExerciseCatalogOptions({
   exercises,
@@ -46,7 +61,7 @@ export function AddExerciseCatalogOptions({
         {exercises.map((exercise) => (
           <SelectableRadioCard
             key={exercise.id}
-            name="exerciseId"
+            name={ADD_EXERCISE_CATALOG_GROUP_NAME}
             value={exercise.id}
             label={exercise.name}
             hint={formatAddableExerciseMeta(exercise)}

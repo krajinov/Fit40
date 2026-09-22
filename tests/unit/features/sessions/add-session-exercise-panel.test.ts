@@ -26,6 +26,7 @@ vi.mock('next/navigation', () => ({
 
 import type { ExerciseSummaryDto } from '@/application/dto/exercise';
 import { addExerciseAction } from '@/features/sessions/actions/add-exercise';
+import { ADD_EXERCISE_CATALOG_GROUP_NAME } from '@/features/sessions/components/AddExerciseCatalogOptions';
 import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
 import { AddSessionExercisePanel } from '@/features/sessions/components/AddSessionExercisePanel';
 import type { SessionActionState } from '@/features/sessions/types/session-action-state';
@@ -115,8 +116,11 @@ function required<T extends Element>(container: HTMLElement, selector: string): 
   return element;
 }
 
+/** CSS selector of the VISIBLE catalog card radios (selection UI only). */
+const CATALOG_RADIO_SELECTOR = `input[name="${ADD_EXERCISE_CATALOG_GROUP_NAME}"]`;
+
 function optionIds(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll<HTMLInputElement>('input[name="exerciseId"]')).map(
+  return Array.from(container.querySelectorAll<HTMLInputElement>(CATALOG_RADIO_SELECTOR)).map(
     (input) => input.value,
   );
 }
@@ -128,9 +132,22 @@ function checkedValues(container: HTMLElement, name: string): string[] {
   ).map((input) => input.value);
 }
 
-/** The draft's selected catalog exercise (`null` when nothing is selected). */
+/** The exercise currently selected in the VISIBLE catalog cards (`null` = none). */
 function selectedExerciseId(container: HTMLElement): string | null {
-  return checkedValues(container, 'exerciseId')[0] ?? null;
+  return checkedValues(container, ADD_EXERCISE_CATALOG_GROUP_NAME)[0] ?? null;
+}
+
+/** Clicks one visible catalog card radio by exercise id. */
+function catalogRadio(container: HTMLElement, exerciseId: string): HTMLElement {
+  return required(container, `${CATALOG_RADIO_SELECTOR}[value="${exerciseId}"]`);
+}
+
+/** The draft-owned hidden `exerciseId` — the ONE authoritative serialized value. */
+function draftExerciseId(container: HTMLElement): string {
+  return required<HTMLInputElement>(
+    container,
+    'form input[type="hidden"][name="exerciseId"]',
+  ).value;
 }
 
 /** The FormData handed to the Server Action on a given submission. */
@@ -177,11 +194,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     expect(container.textContent).toContain('Add to workout');
     expect(optionIds(container)).toEqual(['ex-squat', 'ex-bench', 'ex-row']);
     // No exercise is auto-selected.
-    expect(
-      Array.from(container.querySelectorAll<HTMLInputElement>('input[name="exerciseId"]')).some(
-        (input) => input.checked,
-      ),
-    ).toBe(false);
+    expect(selectedExerciseId(container)).toBeNull();
   });
 
   it('shows no prescription fields until the user explicitly chooses a scheme', async () => {
@@ -239,7 +252,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await click(catalogRadio(container, 'ex-bench'));
     await fillRepsFields(container, '4', '6');
     await submitForm(container);
 
@@ -248,6 +261,9 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     expect(submitted).toBeInstanceOf(FormData);
     const fd = submitted as FormData;
     expect(fd.get('sessionId')).toBe('s-1');
+    // Exactly one authoritative exerciseId entry — the visible cards never
+    // serialize their own copy while they are mounted.
+    expect(fd.getAll('exerciseId')).toEqual(['ex-bench']);
     expect(fd.get('exerciseId')).toBe('ex-bench');
     expect(fd.get('scheme')).toBe('reps');
     expect(fd.get('sets')).toBe('4');
@@ -262,7 +278,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await click(catalogRadio(container, 'ex-row'));
     await click(required(container, 'input[name="scheme"][value="duration"]'));
     await typeInto(required<HTMLInputElement>(container, 'input[name="sets"]'), '2');
     await typeInto(required<HTMLInputElement>(container, 'input[name="durationSeconds"]'), '45');
@@ -276,6 +292,85 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     expect(fd.get('targetReps')).toBeNull();
   });
 
+  it('serializes exerciseId from the draft-owned hidden input only, never from the visible cards', async () => {
+    const container = await renderPanel();
+
+    // The only `exerciseId` control in the form is the draft-owned hidden input;
+    // the visible cards live under their own display-only group name.
+    const authority = Array.from(
+      container.querySelectorAll<HTMLInputElement>('form [name="exerciseId"]'),
+    );
+    expect(authority).toHaveLength(1);
+    expect(authority[0]?.type).toBe('hidden');
+    // No auto-selection: the draft serializes nothing until the user chooses.
+    expect(authority[0]?.value).toBe('');
+    expect(
+      container.querySelector(`${CATALOG_RADIO_SELECTOR}[value="ex-row"]`)?.getAttribute('name'),
+    ).not.toBe('exerciseId');
+
+    await click(catalogRadio(container, 'ex-row'));
+
+    // The draft — not the DOM radio — is what the form will serialize.
+    expect(draftExerciseId(container)).toBe('ex-row');
+    expect(selectedExerciseId(container)).toBe('ex-row');
+  });
+
+  it('submits the draft-owned exerciseId while the search hides the selected card', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
+    const container = await renderPanel();
+
+    await click(catalogRadio(container, 'ex-bench'));
+    await fillRepsFields(container, '4', '6');
+
+    // Display-only search filters the SELECTED card out of the visible options.
+    await typeInto(required<HTMLInputElement>(container, 'input[type="search"]'), 'row');
+
+    expect(optionIds(container)).toEqual(['ex-row']);
+    expect(container.querySelector(`${CATALOG_RADIO_SELECTOR}[value="ex-bench"]`)).toBeNull();
+
+    await submitForm(container);
+
+    const fd = submittedFormData(0);
+    expect(fd.getAll('exerciseId')).toEqual(['ex-bench']);
+    expect(fd.get('exerciseId')).toBe('ex-bench');
+    expect(fd.get('scheme')).toBe('reps');
+    expect(fd.get('sets')).toBe('4');
+    expect(fd.get('targetReps')).toBe('6');
+  });
+
+  it('keeps the draft-owned selection after a failed submit while the card stays filtered out', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({
+      ok: false,
+      error: { code: 'EXERCISE_NOT_FOUND', message: 'gone' },
+    });
+    const container = await renderPanel();
+    const search = required<HTMLInputElement>(container, 'input[type="search"]');
+
+    await click(catalogRadio(container, 'ex-squat'));
+    await fillRepsFields(container, '3', '10');
+    await typeInto(search, 'bench');
+
+    await submitForm(container);
+
+    // Truthful failure, hidden draft value preserved even though its card is
+    // unmounted, and the prescription is untouched.
+    expect(container.textContent).toContain('no longer available in the exercise catalog');
+    expect(draftExerciseId(container)).toBe('ex-squat');
+    expect(required<HTMLInputElement>(container, 'input[name="sets"]').value).toBe('3');
+    expect(required<HTMLInputElement>(container, 'input[name="targetReps"]').value).toBe('10');
+
+    // Revealing it again renders it SELECTED because the draft still owns it.
+    await typeInto(search, '');
+    expect(selectedExerciseId(container)).toBe('ex-squat');
+
+    // Filtered out again, a retry still submits the preserved exercise.
+    await typeInto(search, 'bench');
+    vi.mocked(addExerciseAction).mockResolvedValueOnce({ ok: true });
+    await submitForm(container);
+
+    expect(submittedFormData(1).get('exerciseId')).toBe('ex-squat');
+  });
+
   it('disables the submit control while the action is pending, preventing a duplicate submit', async () => {
     let resolveAction: (state: SessionActionState) => void = () => {};
     vi.mocked(addExerciseAction).mockImplementation(
@@ -286,7 +381,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     );
 
     const container = await renderPanel();
-    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await click(catalogRadio(container, 'ex-squat'));
     await fillRepsFields(container);
 
     await submitForm(container);
@@ -315,7 +410,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await click(catalogRadio(container, 'ex-squat'));
     await fillRepsFields(container);
     await submitForm(container);
 
@@ -333,7 +428,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await click(catalogRadio(container, 'ex-squat'));
     await fillRepsFields(container, '5', '12');
     await submitForm(container);
 
@@ -363,7 +458,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await click(catalogRadio(container, 'ex-bench'));
     await fillRepsFields(container, '5', '12');
     await submitForm(container);
 
@@ -382,7 +477,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await click(catalogRadio(container, 'ex-row'));
     await click(required(container, 'input[name="scheme"][value="duration"]'));
     await typeInto(required<HTMLInputElement>(container, 'input[name="sets"]'), '2');
     await typeInto(required<HTMLInputElement>(container, 'input[name="durationSeconds"]'), '45');
@@ -401,7 +496,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await click(catalogRadio(container, 'ex-squat'));
     await fillRepsFields(container, '4', '6');
     await submitForm(container);
 
@@ -423,7 +518,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
       .mockResolvedValueOnce({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await click(catalogRadio(container, 'ex-bench'));
     await fillRepsFields(container, '5', '12');
     await submitForm(container);
 
@@ -441,7 +536,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await click(catalogRadio(container, 'ex-row'));
     await fillRepsFields(container, '3', '8');
     await submitForm(container);
 
@@ -457,7 +552,7 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await click(catalogRadio(container, 'ex-bench'));
     await click(required(container, 'input[name="scheme"][value="duration"]'));
     await typeInto(required<HTMLInputElement>(container, 'input[name="sets"]'), '2');
     await typeInto(required<HTMLInputElement>(container, 'input[name="durationSeconds"]'), '45');
@@ -478,12 +573,12 @@ describe('AddSessionExercisePanel — explicit flow', () => {
     vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
     const container = await renderPanel();
 
-    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await click(catalogRadio(container, 'ex-row'));
     await fillRepsFields(container, '3', '8');
     await submitForm(container);
 
     // Second Add: only an exercise is chosen — no prescription re-entered.
-    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await click(catalogRadio(container, 'ex-squat'));
     await submitForm(container);
 
     const second = submittedFormData(1);

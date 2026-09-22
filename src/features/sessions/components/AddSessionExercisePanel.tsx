@@ -64,9 +64,13 @@ interface AddSessionExercisePanelProps {
  * The search field filters the ALREADY-LOADED catalog for display only and
  * sits outside the `<form>`, so typing (including Enter) never submits. It is
  * deliberately NOT part of the draft: search text is display-only and never
- * submitted training prescription. Submission is a native form through
- * `useActionState`, and the reload decision for stale server state stays
- * centralized in `shouldRefreshAfterSessionMutationError` through
+ * submitted training prescription. Search also never invalidates the draft —
+ * the selected exercise reaches the Server Action through a draft-owned hidden
+ * input, not through the visible catalog cards, so a filtered-out selection is
+ * still submitted and stays selected until the user picks another exercise or
+ * the Add succeeds. Submission is a native form through `useActionState`, and
+ * the reload decision for stale server state stays centralized in
+ * `shouldRefreshAfterSessionMutationError` through
  * `createSessionMutationSubmit` (the same refresh path every other session
  * mutation uses — never a parallel one).
  */
@@ -159,6 +163,17 @@ export function AddSessionExercisePanel({
         </div>
 
         <form action={formAction} className="flex flex-col gap-4">
+          {/*
+            The ONE authoritative serialization of the selected exercise
+            (PR #14 review finding): the visible catalog cards are selection UI
+            only, and search can unmount the selected card — native FormData
+            then omits `exerciseId` entirely and the server rejects the Add.
+            Being draft-owned, this value survives a failed submit and a
+            filtered-out card, and it never competes with a second `exerciseId`
+            entry. Not `required`: the server-side Zod schema stays the
+            authority on whether an exercise was selected at all.
+          */}
+          <input type="hidden" name="exerciseId" value={draft.exerciseId ?? ''} />
           <AddExerciseCatalogOptions
             key={`catalog-${draftSyncRevision}`}
             exercises={visibleExercises}

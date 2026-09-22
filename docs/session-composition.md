@@ -477,6 +477,14 @@ the replacement exercise only.
   pre-selection, duplicates allowed), an explicit Reps/Duration choice, and
   explicitly **empty** sets/target fields. Submission is a native form through
   `useActionState` and the shared `createSessionMutationSubmit`.
+- **One serialized source for the selection:** the visible catalog cards are
+  selection UI only (their radio group carries the display-only name
+  `catalogExerciseId`); the authoritative `exerciseId` is posted by a
+  draft-owned hidden input, so display-only search can never invalidate the
+  selection — a filtered-out (unmounted) card still submits its id, exactly one
+  `exerciseId` entry enters FormData, and the Server Action's Zod schema stays
+  authoritative. Search filtering, no auto-selection and duplicate adds are
+  unchanged.
 - **One owner for the draft:** the panel owns the whole user-visible Add draft
   (`add-exercise-draft.ts`: `exerciseId`, `scheme`, `sets`, `targetReps`,
   `durationSeconds`) as a single controlled state object; the catalog and
@@ -548,7 +556,7 @@ M11 deliberately does **not** include:
 | `addableExercises` from ONE catalog read; candidates unchanged | Application (unit) | `tests/unit/application/use-cases/get-active-workout-exercise-data.test.ts` |
 | Add/Remove action schemas (no `occurrenceKey`/`nextOccurrenceKey`/`source`/`userId` authority) | Presentation (unit) | `tests/unit/features/sessions/session-actions-schema.test.ts` |
 | Add/Remove actions: trusted identity, delegation, revalidation, error mapping, rethrow | Presentation (unit) | `tests/unit/features/sessions/add-exercise-actions.test.ts`, `remove-exercise-actions.test.ts` |
-| Add panel flow (search/selection/scheme/fields/pending/errors/empty) + one-owner draft (failure preserves the complete draft, success clears it, no stale prescription on the next Add) | Presentation (unit) | `tests/unit/features/sessions/add-session-exercise-panel.test.ts` |
+| Add panel flow (search/selection/scheme/fields/pending/errors/empty) + one-owner draft (failure preserves the complete draft, success clears it, no stale prescription on the next Add) + one serialized `exerciseId` (draft-owned hidden input; a search-filtered selection still submits) | Presentation (unit) | `tests/unit/features/sessions/add-session-exercise-panel.test.ts` |
 | Remove control states + refresh semantics; card affordances | Presentation (unit) | `tests/unit/features/sessions/session-removal-control.test.ts`, `session-exercise-card.test.ts` |
 | Provenance mapping + card/upcoming rendering; render identities across append/remove | Presentation (unit) | `tests/unit/features/sessions/session-provenance-views.test.ts`, `session-occurrence-band-crossing.test.ts` |
 | Completed-history provenance rendering (template/substituted/skipped/zero-set) | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |

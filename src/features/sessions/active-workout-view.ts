@@ -58,6 +58,13 @@ export interface ActiveWorkoutView {
   readonly cards: ReadonlyArray<SessionExerciseCardView>;
   /** Null on the not-started and not-enrolled states. */
   readonly progress: SessionProgressView | null;
+  /**
+   * The full exercise catalog the user may explicitly add to the session
+   * (M11), in the repository's list order — resolved from the SAME single
+   * catalog read that feeds display metadata and substitution candidates.
+   * Empty when no session exists yet.
+   */
+  readonly addableExercises: ReadonlyArray<ExerciseSummaryDto>;
   readonly screenState: ActiveWorkoutScreenState;
 }
 
@@ -214,6 +221,7 @@ export async function buildActiveWorkoutView(
       session: null,
       cards: [],
       progress: null,
+      addableExercises: [],
       screenState: !enrolled ? 'not-enrolled' : 'not-started',
     };
   }
@@ -247,6 +255,7 @@ export async function buildActiveWorkoutView(
       sessionStatus: screenState,
     }),
     progress: buildSessionProgress(session),
+    addableExercises: exerciseData.addableExercises,
     screenState,
   };
 }

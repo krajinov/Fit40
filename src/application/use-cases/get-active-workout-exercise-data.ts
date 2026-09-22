@@ -42,6 +42,13 @@ export interface ActiveWorkoutExerciseData {
    * the caller requested; an id absent from the catalog is absent here too.
    */
   readonly candidatesByPerformedExerciseId: ReadonlyMap<string, ExerciseSubstitutionCandidatesDto>;
+  /**
+   * The FULL catalog, in the repository's own list order (M11): the exercises
+   * the user may explicitly add to the session. Exercises already present in
+   * the session are deliberately NOT filtered out — duplicates are valid
+   * occurrences — and the list adds no ordering or scoring of its own.
+   */
+  readonly addableExercises: ReadonlyArray<ExerciseSummaryDto>;
 }
 
 export interface GetActiveWorkoutExerciseDataInput {
@@ -99,6 +106,12 @@ export class GetActiveWorkoutExerciseDataUseCase {
       );
     }
 
-    return { summariesByExerciseId, candidatesByPerformedExerciseId };
+    // The FULL catalog for the M11 "Add exercise" picker, projected from the
+    // SAME single `list()` read — no second catalog query, no filtering of
+    // already-present exercises (duplicates are valid occurrences), and the
+    // repository's own order preserved.
+    const addableExercises = catalog.map(toExerciseSummaryDto);
+
+    return { summariesByExerciseId, candidatesByPerformedExerciseId, addableExercises };
   }
 }

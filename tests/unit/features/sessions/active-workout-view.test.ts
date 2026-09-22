@@ -39,6 +39,18 @@ vi.mock('@/features/sessions/services', () => ({
       return {
         summariesByExerciseId: new Map(),
         candidatesByPerformedExerciseId: new Map(),
+        // The addable catalog (M11) comes from the SAME read.
+        addableExercises: [
+          {
+            id: 'ex-catalog',
+            name: 'Catalog Squat',
+            slug: 'catalog-squat',
+            primaryMuscle: 'quadriceps',
+            equipment: 'barbell',
+            difficulty: 'beginner',
+            movementPattern: 'squat',
+          },
+        ],
         input,
       };
     }),
@@ -166,6 +178,17 @@ describe('active-workout-view / one catalog read (M9)', () => {
     expect(exerciseDataList).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes the addable catalog (M11) from the same single catalog read', async () => {
+    mockIngestedSession([sessionLog()]);
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.addableExercises.map((exercise) => exercise.id)).toEqual(['ex-catalog']);
+    // Display metadata, candidates and the addable list share ONE read.
+    expect(exerciseDataList).toHaveBeenCalledTimes(1);
+  });
+
   it('performs only one catalog read even with many distinct source exercises', async () => {
     mockIngestedSession(
       Array.from({ length: 6 }, (_, i) =>
@@ -212,6 +235,7 @@ describe('active-workout-view / one catalog read (M9)', () => {
 
     expect(view.screenState).toBe('not-started');
     expect(view.cards).toEqual([]);
+    expect(view.addableExercises).toEqual([]);
     expect(exerciseDataList).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema, moveExerciseSchema, expectedSessionVersionSchema } from '@/features/sessions/schemas/session-actions-schema';
+import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema, moveExerciseSchema, addExerciseSchema, expectedSessionVersionSchema } from '@/features/sessions/schemas/session-actions-schema';
 
 describe('logSetSchema', () => {
   it('parses valid rep set input', () => {
@@ -246,6 +246,10 @@ describe('stale rendered intent: every occurrence-addressed schema requires the 
       unskipExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: -1 })],
     ['moveExerciseSchema', () =>
       moveExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: -1, direction: 'up' })],
+    ['addExerciseSchema (reps)', () =>
+      addExerciseSchema.safeParse({ sessionId: 's-1', exerciseId: 'ex-1', scheme: 'reps', sets: 3, targetReps: 8, expectedSessionVersion: -1 })],
+    ['addExerciseSchema (duration)', () =>
+      addExerciseSchema.safeParse({ sessionId: 's-1', exerciseId: 'ex-1', scheme: 'duration', sets: 3, durationSeconds: 30, expectedSessionVersion: -1 })],
   ] as const)('%s rejects a stale (negative) expected version', (_name, parse) => {
     expect(parse().success).toBe(false);
   });
@@ -320,5 +324,176 @@ describe('occurrence-key boundary (PR #13 Finding 1)', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data).not.toHaveProperty('occurrenceKey');
+  });
+});
+
+describe('addExerciseSchema (M11)', () => {
+  it('parses a valid reps payload, coercing FormData strings', () => {
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseId: 'ex-1',
+      scheme: 'reps',
+      sets: '3',
+      targetReps: '8',
+      expectedSessionVersion: '0',
+    });
+
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data).toEqual({
+      sessionId: 's-1',
+      exerciseId: 'ex-1',
+      scheme: 'reps',
+      sets: 3,
+      targetReps: 8,
+      expectedSessionVersion: 0,
+    });
+  });
+
+  it('parses a valid duration payload, coercing FormData strings', () => {
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseId: 'ex-1',
+      scheme: 'duration',
+      sets: '2',
+      durationSeconds: '45',
+      expectedSessionVersion: 0,
+    });
+
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data).toEqual({
+      sessionId: 's-1',
+      exerciseId: 'ex-1',
+      scheme: 'duration',
+      sets: 2,
+      durationSeconds: 45,
+      expectedSessionVersion: 0,
+    });
+  });
+
+  it('requires the field of the selected scheme and never lets the other drive it', () => {
+    // A reps payload missing targetReps is invalid even if durationSeconds is
+    // present — the non-matching scheme's field can never substitute.
+    expect(
+      addExerciseSchema.safeParse({
+        sessionId: 's-1', exerciseId: 'ex-1', scheme: 'reps', sets: 3,
+        durationSeconds: 45, expectedSessionVersion: 0,
+      }).success,
+    ).toBe(false);
+    // A duration payload missing durationSeconds is invalid even if targetReps
+    // is present.
+    expect(
+      addExerciseSchema.safeParse({
+        sessionId: 's-1', exerciseId: 'ex-1', scheme: 'duration', sets: 3,
+        targetReps: 8, expectedSessionVersion: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('strips the non-matching scheme field from the parsed command', () => {
+    const reps = addExerciseSchema.safeParse({
+      sessionId: 's-1', exerciseId: 'ex-1', scheme: 'reps', sets: 3, targetReps: 8,
+      durationSeconds: 45, expectedSessionVersion: 0,
+    });
+    expect(reps.success).toBe(true);
+    if (reps.success) expect(reps.data).not.toHaveProperty('durationSeconds');
+
+    const duration = addExerciseSchema.safeParse({
+      sessionId: 's-1', exerciseId: 'ex-1', scheme: 'duration', sets: 3, durationSeconds: 45,
+      targetReps: 8, expectedSessionVersion: 0,
+    });
+    expect(duration.success).toBe(true);
+    if (duration.success) expect(duration.data).not.toHaveProperty('targetReps');
+  });
+
+  it('rejects an unsupported scheme', () => {
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1', exerciseId: 'ex-1', scheme: 'weight', sets: 3, targetReps: 8,
+      expectedSessionVersion: 0,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it.each([
+    ['zero sets', { sets: '0', targetReps: '8' }],
+    ['negative sets', { sets: '-3', targetReps: '8' }],
+    ['fractional sets', { sets: '1.5', targetReps: '8' }],
+    ['empty sets', { sets: '', targetReps: '8' }],
+    ['missing sets', { targetReps: '8' }],
+    ['zero targetReps', { sets: '3', targetReps: '0' }],
+    ['negative targetReps', { sets: '3', targetReps: '-4' }],
+    ['empty targetReps', { sets: '3', targetReps: '' }],
+    ['non-numeric targetReps', { sets: '3', targetReps: 'many' }],
+  ] as const)('rejects a reps payload with %s', (_name, fields) => {
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1', exerciseId: 'ex-1', scheme: 'reps', expectedSessionVersion: 0, ...fields,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it.each([
+    ['zero sets', { sets: '0', durationSeconds: '30' }],
+    ['negative sets', { sets: '-2', durationSeconds: '30' }],
+    ['zero durationSeconds', { sets: '3', durationSeconds: '0' }],
+    ['negative durationSeconds', { sets: '3', durationSeconds: '-30' }],
+    ['fractional durationSeconds', { sets: '3', durationSeconds: '12.5' }],
+    ['missing durationSeconds', { sets: '3' }],
+    ['non-numeric durationSeconds', { sets: '3', durationSeconds: 'long' }],
+  ] as const)('rejects a duration payload with %s', (_name, fields) => {
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1', exerciseId: 'ex-1', scheme: 'duration', expectedSessionVersion: 0, ...fields,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects an empty session or exercise id', () => {
+    expect(
+      addExerciseSchema.safeParse({
+        sessionId: '', exerciseId: 'ex-1', scheme: 'reps', sets: 3, targetReps: 8, expectedSessionVersion: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      addExerciseSchema.safeParse({
+        sessionId: 's-1', exerciseId: '', scheme: 'reps', sets: 3, targetReps: 8, expectedSessionVersion: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('never accepts a client-supplied trusted or domain-derived field', () => {
+    // The command surface is exactly the explicit user input: a client cannot
+    // supply identity, occurrence addressing or the domain-derived occurrence
+    // shape, and every such extra field is stripped by the schema.
+    const r = addExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseId: 'ex-1',
+      scheme: 'reps',
+      sets: 3,
+      targetReps: 8,
+      expectedSessionVersion: 0,
+      userId: 'attacker',
+      exerciseOrder: 99,
+      occurrenceKey: 999,
+      nextOccurrenceKey: 999,
+      source: 'template',
+      authoredExerciseId: 'ex-9',
+      performedExerciseId: 'ex-9',
+      restSeconds: 300,
+    });
+
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    for (const forbidden of [
+      'userId',
+      'exerciseOrder',
+      'occurrenceKey',
+      'nextOccurrenceKey',
+      'source',
+      'authoredExerciseId',
+      'performedExerciseId',
+      'restSeconds',
+    ]) {
+      expect(r.data).not.toHaveProperty(forbidden);
+    }
   });
 });

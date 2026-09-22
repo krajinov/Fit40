@@ -1,6 +1,7 @@
 import type { ActiveWorkoutView } from '@/features/sessions/active-workout-view';
 import { formatSessionClock, splitSessionExerciseCardBands } from '@/features/sessions/active-workout-views';
 import { ActiveWorkoutHeader } from '@/features/sessions/components/ActiveWorkoutHeader';
+import { AddSessionExercisePanel } from '@/features/sessions/components/AddSessionExercisePanel';
 import { SessionProgressCard } from '@/features/sessions/components/SessionProgressCard';
 import {
   SessionOccurrence,
@@ -104,6 +105,18 @@ export function ActiveWorkoutScreen({
           );
         })}
       </ol>
+
+      {/* M11 Add Exercise: the explicit session-added occurrence flow. The
+          panel is NOT occurrence-owned state, so appending an occurrence
+          leaves every existing keyed occurrence subtree untouched. */}
+      <AddSessionExercisePanel
+        sessionId={session.sessionId}
+        expectedSessionVersion={session.version}
+        programSlug={programSlug}
+        weekNumber={weekNumber}
+        workoutOrder={workoutOrder}
+        addableExercises={view.addableExercises}
+      />
 
       <SessionFinishBar
         sessionId={session.sessionId}

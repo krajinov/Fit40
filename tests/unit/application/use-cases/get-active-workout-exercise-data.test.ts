@@ -180,3 +180,68 @@ describe('GetActiveWorkoutExerciseDataUseCase', () => {
   });
 });
 
+describe('GetActiveWorkoutExerciseDataUseCase — addable catalog (M11)', () => {
+  it('projects the FULL catalog from the SAME single read, in repository order', async () => {
+    const repo = makeExerciseRepo(CATALOG);
+
+    const data = await new GetActiveWorkoutExerciseDataUseCase(repo).execute({
+      displayExerciseIds: ['ex-bench'],
+      performedExerciseIds: ['ex-bench'],
+    });
+
+    // Exactly one catalog read for the whole request: display metadata,
+    // candidates AND the addable list all come from it.
+    expect(repo.list).toHaveBeenCalledTimes(1);
+    expect(repo.findByIds).not.toHaveBeenCalled();
+    expect(data.addableExercises.map((exercise) => exercise.id)).toEqual([
+      'ex-bench',
+      'ex-db-bench',
+      'ex-pushup',
+      'ex-row',
+    ]);
+    expect(data.addableExercises.map((exercise) => exercise.name)).toEqual([
+      'Bench Press',
+      'Dumbbell Bench Press',
+      'Push-up',
+      'Bent-Over Row',
+    ]);
+  });
+
+  it('keeps exercises already present in the session addable (duplicates allowed)', async () => {
+    const repo = makeExerciseRepo(CATALOG);
+
+    const data = await new GetActiveWorkoutExerciseDataUseCase(repo).execute({
+      // ex-bench is already performed in the session.
+      displayExerciseIds: ['ex-bench'],
+      performedExerciseIds: ['ex-bench'],
+    });
+
+    expect(data.addableExercises.some((exercise) => exercise.id === 'ex-bench')).toBe(true);
+  });
+
+  it('adds no filtering, ordering or scoring of its own — even with empty display inputs', async () => {
+    const repo = makeExerciseRepo(CATALOG);
+
+    const data = await new GetActiveWorkoutExerciseDataUseCase(repo).execute({
+      displayExerciseIds: [],
+      performedExerciseIds: [],
+    });
+
+    expect(repo.list).toHaveBeenCalledTimes(1);
+    expect(data.addableExercises.map((exercise) => exercise.id)).toEqual(
+      CATALOG.map((exercise) => exercise.id),
+    );
+  });
+
+  it('returns an empty addable list when the catalog is empty', async () => {
+    const repo = makeExerciseRepo([]);
+
+    const data = await new GetActiveWorkoutExerciseDataUseCase(repo).execute({
+      displayExerciseIds: [],
+      performedExerciseIds: [],
+    });
+
+    expect(data.addableExercises).toEqual([]);
+  });
+});
+

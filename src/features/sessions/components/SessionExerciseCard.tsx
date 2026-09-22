@@ -99,6 +99,9 @@ export function SessionExerciseCard({
           <h2 className={cn('text-[15px] font-semibold md:text-[17px]', isSkipped ? 'text-ink-2' : 'text-ink')}>
             {card.name}
           </h2>
+          {card.provenanceLabel !== null && (
+            <p className="text-[11px] text-ink-3 md:text-xs">{card.provenanceLabel}</p>
+          )}
           {card.originallyName !== null && (
             <p className="text-[11px] text-ink-3 md:text-xs">
               Originally: {card.originallyName}

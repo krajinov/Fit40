@@ -1,3 +1,5 @@
+import type { ChangeEvent } from 'react';
+
 import { cn } from '@/lib/utils';
 
 /**
@@ -14,6 +16,14 @@ export interface SelectableRadioCardProps {
   /** Optional muted secondary line under the label (e.g. "Dumbbell · Chest"). */
   readonly hint?: string;
   readonly defaultChecked?: boolean;
+  /**
+   * Controlled selection. Omit for the uncontrolled (`defaultChecked`) usage;
+   * when provided, `onChange` must be provided too.
+   */
+  readonly checked?: boolean;
+  readonly onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
+  /** Native required flag; one required radio satisfies the whole group. */
+  readonly required?: boolean;
   readonly className?: string;
 }
 
@@ -23,6 +33,9 @@ export function SelectableRadioCard({
   label,
   hint,
   defaultChecked,
+  checked,
+  onChange,
+  required,
   className,
 }: SelectableRadioCardProps) {
   return (
@@ -40,6 +53,9 @@ export function SelectableRadioCard({
         name={name}
         value={value}
         defaultChecked={defaultChecked}
+        checked={checked}
+        onChange={onChange}
+        required={required}
         className="sr-only"
       />
       <span

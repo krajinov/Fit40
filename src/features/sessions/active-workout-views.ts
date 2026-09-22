@@ -38,6 +38,7 @@ import {
   type SessionAdjustmentView,
   SKIPPED_BADGE_LABEL,
 } from '@/features/sessions/session-adjustment-views';
+import { resolveOccurrenceProvenanceLabel } from '@/features/sessions/session-provenance-views';
 
 /** How one exercise log is presented on the session screen. */
 export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming' | 'skipped';
@@ -85,6 +86,13 @@ export interface SessionExerciseCardView {
    * catalog, or the authored id equals the performed one.
    */
   readonly originallyName: string | null;
+  /**
+   * Provenance label for a session-added occurrence ("Added during workout"),
+   * or null for a template-authored one. Derived ONLY from the persisted
+   * `source` (M11) — never from order, occurrenceKey, the identities or
+   * substitution state. A substituted user-added occurrence keeps its label.
+   */
+  readonly provenanceLabel: string | null;
   readonly equipmentLabel: string | null;
   readonly prescriptionLabel: string;
   readonly badge: SessionExerciseBadgeView;
@@ -292,6 +300,10 @@ export function buildSessionExerciseCardViews(
       // authoredExerciseId is never rewritten.
       originallyName:
         log.isSubstituted && authoredMeta !== undefined ? authoredMeta.name : null,
+      // Provenance (M11) is the persisted `source` projected straight through
+      // the pure mapper — never inferred from order, occurrenceKey, the
+      // identities or substitution state.
+      provenanceLabel: resolveOccurrenceProvenanceLabel(log.source),
       equipmentLabel: meta === undefined ? null : EQUIPMENT_LABELS[meta.equipment],
       prescriptionLabel: formatPrescription(log.prescription),
       badge: buildBadge(kind, log.sets.length, prescribed),

@@ -56,6 +56,10 @@ vi.mock('@/features/sessions/components/SessionFinishBar', () => ({
   SessionFinishBar: () => createElement('div', null, 'finish bar'),
 }));
 
+vi.mock('@/features/sessions/components/AddSessionExercisePanel', () => ({
+  AddSessionExercisePanel: () => createElement('div', null, 'add exercise panel'),
+}));
+
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type {
   WorkoutSessionDto,
@@ -164,6 +168,7 @@ async function renderScreen(session: WorkoutSessionDto): Promise<HTMLElement> {
     session,
     cards,
     progress: buildSessionProgress(session),
+    addableExercises: [],
     screenState: 'in-progress',
   };
 

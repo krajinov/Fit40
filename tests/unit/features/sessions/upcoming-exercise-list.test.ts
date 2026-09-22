@@ -121,6 +121,7 @@ function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): Session
     kind: 'upcoming',
     name: 'Dumbbell Bench Press',
     originallyName: null,
+    provenanceLabel: null,
     equipmentLabel: 'Dumbbell',
     prescriptionLabel: '3 × 8–10',
     badge: { style: 'neutral', label: 'Upcoming', mobileVisible: false },

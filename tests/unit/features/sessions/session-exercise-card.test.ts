@@ -44,6 +44,7 @@ import type {
 import type { SessionLoggerView } from '@/features/sessions/active-workout-logger-views';
 import type { SessionSubstitutionView } from '@/features/sessions/session-substitution-views';
 import { SKIPPED_HINT_LABEL } from '@/features/sessions/session-adjustment-views';
+import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
 import { SessionExerciseCard } from '@/features/sessions/components/SessionExerciseCard';
 import { SessionProgressCard } from '@/features/sessions/components/SessionProgressCard';
 
@@ -122,6 +123,7 @@ function cardView(overrides: Partial<SessionExerciseCardView> = {}): SessionExer
     kind: 'upcoming',
     name: 'Bench Press',
     originallyName: null,
+    provenanceLabel: null,
     equipmentLabel: 'Barbell',
     prescriptionLabel: '3 × 8–10',
     badge: { style: 'neutral', label: 'Upcoming', mobileVisible: false },
@@ -394,6 +396,37 @@ describe('SessionProgressCard / skipped count suffix (M10)', () => {
     expect(withSkipped.textContent).toContain('2 of 6 sets logged · 2 skipped');
     expect(withoutSkipped.textContent).toContain('2 of 6 sets logged');
     expect(withoutSkipped.textContent).not.toContain('skipped');
+  });
+});
+
+describe('SessionExerciseCard / occurrence provenance (M11)', () => {
+  it('shows no provenance label for a template-authored occurrence', async () => {
+    const container = await renderCard(cardView({ provenanceLabel: null }), sessionLog(1, false));
+
+    expect(container.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('shows the subtle "Added during workout" label for a user-added occurrence', async () => {
+    const container = await renderCard(
+      cardView({ provenanceLabel: ADDED_DURING_WORKOUT_LABEL }),
+      { ...sessionLog(1, false), source: 'user_added' },
+    );
+
+    expect(container.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+    // The label is a provenance note only: the ordinary affordances remain,
+    // and no Remove control exists yet (that is the Remove slice).
+    expect(container.textContent).toContain('Skip exercise');
+    expect(container.textContent).not.toContain('Remove');
+  });
+
+  it('keeps the provenance label alongside the "Originally: …" substitution context', async () => {
+    const container = await renderCard(
+      cardView({ provenanceLabel: ADDED_DURING_WORKOUT_LABEL, originallyName: 'Bench Press' }),
+      { ...sessionLog(1, false), source: 'user_added' },
+    );
+
+    expect(container.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(container.textContent).toContain('Originally: Bench Press');
   });
 });
 

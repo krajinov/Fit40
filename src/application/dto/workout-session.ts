@@ -6,7 +6,11 @@
  */
 
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
-import type { WorkoutSession, WorkoutSessionStatus } from '@/domain/entities/workout-session';
+import type {
+  OccurrenceSource,
+  WorkoutSession,
+  WorkoutSessionStatus,
+} from '@/domain/entities/workout-session';
 import { getSessionStatus } from '@/domain/entities/workout-session';
 import {
   resolveOccurrenceAdjustmentEligibility,
@@ -63,6 +67,15 @@ export interface WorkoutSessionExerciseDto {
    * use case, Server Action, or query.
    */
   readonly occurrenceKey: number;
+  /**
+   * How this occurrence entered the session (M11), projected verbatim from
+   * the aggregate: `'template'` when the workout template authored it,
+   * `'user_added'` when the user explicitly added it during the session.
+   * Presentation derives its provenance treatment from this persisted fact —
+   * never inferred from order, occurrenceKey, the authored/performed
+   * identities or substitution state.
+   */
+  readonly source: OccurrenceSource;
   /**
    * Whether the occurrence's skip decision may currently change — the
    * domain's mutation rules, projected by
@@ -199,6 +212,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
         isSubstituted: substitution.isSubstituted,
         isSkipped: log.isSkipped,
         occurrenceKey: log.occurrenceKey,
+        source: log.source,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,

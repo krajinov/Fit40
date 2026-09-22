@@ -132,6 +132,9 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
               startedAt: session.startedAt,
               completedAt: session.completedAt,
               version: session.version + 1,
+              // The occurrence-key high-water mark is session-row state and
+              // must ride every whole-aggregate update (M11).
+              nextOccurrenceKey: session.nextOccurrenceKey,
             },
             // The write must match BOTH the snapshot's version (optimistic
             // concurrency) and its enrollment identity: if a concurrent leave

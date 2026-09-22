@@ -64,6 +64,7 @@ function log(
     // Defaults to the order (the fixture's implicit occurrenceKey); tests
     // that exercise reorder stability override it explicitly.
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
     adjustmentEligibility: {
       isSkipped: false,

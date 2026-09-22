@@ -194,6 +194,51 @@ describe('toCompletedSessionDto — detail entries carry the skip fact (M10 Slic
   });
 });
 
+describe('toWorkoutSessionDto — provenance projection (M11 Slice 1)', () => {
+  it('exposes the persisted source on every occurrence DTO, verbatim', () => {
+    const r = createWorkoutSession({
+      id: 'session-dto-provenance',
+      userId: uid('user-1'),
+      enrollmentId: null,
+      scheduledWorkoutId: sid('sw-1'),
+      workoutId: wid('w-1'),
+      startedAt: new Date('2026-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 90 },
+        {
+          authoredExerciseId: eid('ex-002'),
+          order: 2,
+          prescription: rep(),
+          restSeconds: 0,
+          source: 'user_added',
+        },
+      ],
+    });
+    if (!r.ok) throw Error(r.error.message);
+
+    const dto = toWorkoutSessionDto(r.data);
+
+    // Verbatim domain projection — the DTO never re-infers provenance.
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(r.data.exerciseLogs.map((log) => log.source));
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(['template', 'user_added']);
+  });
+
+  it('defaults every occurrence of an unchanged session to template', () => {
+    const dto = toWorkoutSessionDto(baseSession());
+
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(['template', 'template']);
+  });
+
+  it('never exposes the occurrence-key high-water mark on the session DTO', () => {
+    const dto = toWorkoutSessionDto(baseSession());
+
+    expect(dto).not.toHaveProperty('nextOccurrenceKey');
+    expect(Object.keys(dto)).not.toContain('nextOccurrenceKey');
+    // The aggregate still carries it internally.
+    expect(baseSession().nextOccurrenceKey).toBe(3);
+  });
+});
+
 describe('toWorkoutSessionDto — move projection (M10 Slice 5)', () => {
   it('exposes one movable direction per boundary occurrence', () => {
     const dto = toWorkoutSessionDto(baseSession());

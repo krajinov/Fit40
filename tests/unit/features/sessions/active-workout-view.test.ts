@@ -53,7 +53,9 @@ function rep(): { type: 'reps'; sets: 3; minReps: 8; maxReps: 10 } {
   return { type: 'reps', sets: 3, minReps: 8, maxReps: 10 };
 }
 
-function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]> = {}) {
+function sessionLog(
+  overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]> = {},
+): WorkoutSessionDto['exerciseLogs'][number] {
   return {
     authoredExerciseId: 'ex-bench',
     performedExerciseId: 'ex-bench',
@@ -61,6 +63,7 @@ function sessionLog(overrides: Partial<WorkoutSessionDto['exerciseLogs'][number]
     isSkipped: false,
     // Defaults to the order (the fixture's implicit occurrenceKey).
     occurrenceKey: 1,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
     adjustmentEligibility: {
       isSkipped: false,

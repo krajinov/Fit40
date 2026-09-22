@@ -10,6 +10,7 @@ import {
   deleteSessionSet,
   getSessionStatus,
   logSessionSet,
+  OccurrenceSource,
   resolveSessionCompletionReadiness,
   updateSessionSet,
 } from '@/domain/entities/workout-session';
@@ -508,5 +509,125 @@ describe('occurrenceKey survives every session mutation (PR #13 Finding 1)', () 
     expect(completed.ok).toBe(true);
     if (!completed.ok) return;
     expect(completed.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2]);
+  });
+});
+
+describe('ExerciseLog.source provenance (M11 Slice 1)', () => {
+  it('defaults every fresh occurrence to template-authored', () => {
+    const session = validSession();
+
+    expect(session.exerciseLogs.map((log) => log.source)).toEqual([
+      OccurrenceSource.Template,
+      OccurrenceSource.Template,
+    ]);
+  });
+
+  it('carries an explicit user_added source through construction untouched', () => {
+    const base = makeValidInput();
+    const result = createWorkoutSession({
+      ...base,
+      exerciseLogs: [
+        { ...base.exerciseLogs[0]!, source: OccurrenceSource.Template },
+        { ...base.exerciseLogs[1]!, source: OccurrenceSource.UserAdded },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs.map((log) => log.source)).toEqual([
+      OccurrenceSource.Template,
+      OccurrenceSource.UserAdded,
+    ]);
+  });
+
+  it('never infers provenance from the authored/performed divergence', () => {
+    const base = makeValidInput();
+    const result = createWorkoutSession({
+      ...base,
+      exerciseLogs: [
+        // A substituted occurrence (performed != authored) is still
+        // template-authored unless source says otherwise.
+        {
+          ...base.exerciseLogs[0]!,
+          performedExerciseId: validExerciseId('ex-999'),
+        },
+        base.exerciseLogs[1]!,
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.exerciseLogs[0]?.source).toBe(OccurrenceSource.Template);
+    expect(result.data.exerciseLogs[0]?.performedExerciseId).toBe('ex-999');
+  });
+});
+
+describe('WorkoutSession.nextOccurrenceKey (M11 Slice 1)', () => {
+  it('defaults to max(occurrenceKey) + 1 for a fresh session', () => {
+    const session = validSession();
+
+    // Keys default to the dense creation order 1..2, so the mark is 3.
+    expect(session.nextOccurrenceKey).toBe(3);
+  });
+
+  it('defaults to one past the highest explicit occurrence key', () => {
+    const base = makeValidInput();
+    const result = createWorkoutSession({
+      ...base,
+      exerciseLogs: [
+        { ...base.exerciseLogs[0]!, occurrenceKey: 41, order: 1 },
+        { ...base.exerciseLogs[1]!, occurrenceKey: 7, order: 2 },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The mark follows the MAXIMUM key, not the array position.
+    expect(result.data.nextOccurrenceKey).toBe(42);
+  });
+
+  it('honors an explicit valid high-water mark (removal / rehydration case)', () => {
+    const result = createWorkoutSession({ ...makeValidInput(), nextOccurrenceKey: 9 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.nextOccurrenceKey).toBe(9);
+  });
+
+  it('rejects a mark that does not exceed every existing occurrence key', () => {
+    for (const invalid of [2, 1, 0, -1]) {
+      const result = createWorkoutSession({ ...makeValidInput(), nextOccurrenceKey: invalid });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.code).toBe('INVALID_WORKOUT_SESSION');
+      expect(result.error.field).toBe('nextOccurrenceKey');
+      expect(result.error.message).toContain('nextOccurrenceKey');
+    }
+  });
+
+  it('rejects a non-integer mark', () => {
+    for (const invalid of [1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = createWorkoutSession({ ...makeValidInput(), nextOccurrenceKey: invalid });
+
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it('still rejects duplicate occurrence keys when a valid mark is supplied', () => {
+    const base = makeValidInput();
+    const result = createWorkoutSession({
+      ...base,
+      nextOccurrenceKey: 100,
+      exerciseLogs: [
+        { ...base.exerciseLogs[0]!, occurrenceKey: 5, order: 1 },
+        { ...base.exerciseLogs[1]!, occurrenceKey: 5, order: 2 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.field).toBe('exerciseLogs');
+    expect(result.error.message).toContain('occurrence keys must be unique');
   });
 });

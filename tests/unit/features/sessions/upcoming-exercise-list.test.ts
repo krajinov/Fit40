@@ -140,6 +140,7 @@ function sessionLog(order: number): WorkoutSessionExerciseDto {
     isSkipped: false,
     // Defaults to the order (the fixture's implicit occurrenceKey).
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: true },
     adjustmentEligibility: {
       isSkipped: false,

@@ -53,6 +53,16 @@ export const workoutSessions = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     version: integer('version').notNull().default(0),
+    /**
+     * Monotonic session-local high-water mark for occurrence keys (M11): the
+     * next `occurrence_key` a newly added occurrence must take. Nullable with
+     * no default and never backfilled: a legacy row hydrates through the
+     * domain fallback (`max(occurrence_key) + 1`), which is safe because only
+     * a session that has performed a removal has a persisted mark. Adding an
+     * occurrence advances it; removal never decrements it, so a removed key
+     * is never reused.
+     */
+    nextOccurrenceKey: integer('next_occurrence_key'),
   },
   (table) => ({
     userIdIdx: index('workout_sessions_user_id_idx').on(table.userId),
@@ -160,6 +170,17 @@ export const exerciseLogs = pgTable(
      * a dedicated error instead of the catch-all session-exists mapping.
      */
     occurrenceKey: integer('occurrence_key'),
+    /**
+     * How this occurrence entered the session (M11): `'template'` when the
+     * workout template authored it, `'user_added'` when the user explicitly
+     * added it during the session. NOT NULL DEFAULT 'template': rows written
+     * before the column existed are template-authored by construction, and
+     * provenance is an explicit persisted fact — never inferred from
+     * exercise_order, occurrence_key, the authored/performed identities or
+     * substitution state. The CHECK mirrors the domain's OccurrenceSource
+     * union.
+     */
+    source: text('source').notNull().default('template'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.sessionId, table.exerciseOrder] }),
@@ -179,6 +200,12 @@ export const exerciseLogs = pgTable(
       .on(table.sessionId, table.occurrenceKey)
       .where(sql`${table.occurrenceKey} IS NOT NULL`),
     exerciseOrderCheck: check('exercise_logs_exercise_order_check', sql`${table.exerciseOrder} > 0`),
+    // Provenance is a closed two-value fact; the CHECK is the database
+    // backstop for the domain's OccurrenceSource union.
+    sourceCheck: check(
+      'exercise_logs_source_check',
+      sql`${table.source} IN ('template', 'user_added')`,
+    ),
     setsCheck: check('exercise_logs_sets_check', sql`${table.sets} > 0`),
     minRepsCheck: check('exercise_logs_min_reps_check', sql`${table.minReps} > 0`),
     maxRepsCheck: check('exercise_logs_max_reps_check', sql`${table.maxReps} >= ${table.minReps}`),

@@ -100,6 +100,7 @@ function log(
     isSubstituted: false,
     isSkipped: false,
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
     adjustmentEligibility: {
       isSkipped: false,

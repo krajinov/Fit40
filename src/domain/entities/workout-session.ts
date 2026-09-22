@@ -9,6 +9,10 @@
  * - startedAt must be a valid Date
  * - At least one exercise log is required
  * - Exercise orders must be unique and sequential starting at 1
+ * - occurrenceKey values must be unique within the session, and
+ *   nextOccurrenceKey (the monotonic high-water mark) must be a positive
+ *   integer strictly greater than every existing occurrenceKey
+ * - source defaults to 'template'; provenance is never inferred
  *
  * Lifecycle:
  * - Session starts in-progress (completedAt === null)
@@ -28,6 +32,31 @@ import type {
 } from '@/domain/types/ids';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
+
+// ─── Occurrence source ───────────────────────────────────────────────────────
+
+/**
+ * How one exercise occurrence came to be part of the session (M11).
+ *
+ * - `template`: authored by the program's workout template at session start.
+ * - `user_added`: explicitly chosen by the user during this session.
+ *
+ * Persisted verbatim (`exercise_logs.source`, NOT NULL DEFAULT 'template') so
+ * provenance survives reorder, skip/unskip, substitution/restore, persistence
+ * round-trips and completion/history rendering. It is an explicit fact and is
+ * NEVER inferred from exerciseOrder, occurrenceKey, the authored/performed
+ * identities or substitution state.
+ */
+export const OccurrenceSource = {
+  Template: 'template',
+  UserAdded: 'user_added',
+} as const;
+
+export type OccurrenceSource = (typeof OccurrenceSource)[keyof typeof OccurrenceSource];
+
+export const OCCURRENCE_SOURCE_VALUES = Object.values(
+  OccurrenceSource,
+) as ReadonlyArray<OccurrenceSource>;
 
 // ─── Set Log ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +122,12 @@ export interface ExerciseLog {
    * an attribute, not an identity.
    */
   readonly occurrenceKey: number;
+  /**
+   * How this occurrence entered the session (M11): authored by the workout
+   * template, or explicitly added by the user during this session. A
+   * persisted fact, never inferred — see {@link OccurrenceSource}.
+   */
+  readonly source: OccurrenceSource;
   readonly sets: ReadonlyArray<SetLog>;
 }
 
@@ -118,6 +153,19 @@ export interface WorkoutSession {
   readonly startedAt: Date;
   readonly completedAt: Date | null;
   readonly exerciseLogs: ReadonlyArray<ExerciseLog>;
+  /**
+   * Monotonic session-local high-water mark for occurrence keys (M11): the
+   * next `occurrenceKey` a newly added occurrence must take. Persisted
+   * sessions carry their own mark, and it is only ever advanced — adding an
+   * occurrence consumes it and removal never decrements it, so a removed
+   * occurrence's key is NEVER reused (React render identity must not
+   * resurrect a discarded occurrence's subtree).
+   *
+   * It is a counter, not an identity: never a business occurrence locator
+   * (that stays `(sessionId, exerciseOrder)`), never an action input, never a
+   * DTO field and never a query predicate.
+   */
+  readonly nextOccurrenceKey: number;
   /**
    * Optimistic-concurrency token: the row revision this aggregate was read at.
    * The repository bumps it on every successful save and rejects saves whose
@@ -153,6 +201,13 @@ export interface CreateExerciseLogInput {
    * uniqueness within the aggregate either way.
    */
   readonly occurrenceKey?: number;
+  /**
+   * The occurrence's provenance for rehydrating a persisted session. Fresh
+   * sessions omit it: the factory then defaults to `'template'` (every
+   * occurrence of a freshly created session is template-authored). Existing
+   * and legacy rows hydrate as template-authored through the same default.
+   */
+  readonly source?: OccurrenceSource;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly restSeconds: number;
@@ -166,6 +221,13 @@ export interface CreateWorkoutSessionInput {
   readonly workoutId: WorkoutId;
   readonly startedAt: Date;
   readonly exerciseLogs: ReadonlyArray<CreateExerciseLogInput>;
+  /**
+   * The persisted occurrence-key high-water mark for rehydrating a session.
+   * Fresh sessions and legacy rows without one omit it: the factory then
+   * falls back to `max(existing occurrenceKey) + 1`, which is safe because a
+   * session that has performed a removal always has a persisted mark.
+   */
+  readonly nextOccurrenceKey?: number;
 }
 
 export interface LogSetInput {
@@ -355,6 +417,31 @@ export function createWorkoutSession(
     });
   }
 
+  // The occurrence-key high-water mark (M11): the next key a newly added
+  // occurrence must take. A persisted session carries its own mark, which
+  // removal never decrements, so a removed key is never reused. A fresh
+  // session — or a legacy row written before the column existed — falls back
+  // to one past the highest existing key. Because occurrenceKey defaults to
+  // the dense creation order, a fresh session's mark is N + 1 (and the empty
+  // list is impossible: rejected above). The mark must stay a positive
+  // integer strictly greater than EVERY existing key, or the next add would
+  // hand out a duplicate token.
+  const maxOccurrenceKey =
+    occurrenceKeys.length === 0 ? 0 : Math.max(...occurrenceKeys);
+  const nextOccurrenceKey = input.nextOccurrenceKey ?? maxOccurrenceKey + 1;
+  if (
+    !Number.isInteger(nextOccurrenceKey) ||
+    nextOccurrenceKey <= 0 ||
+    nextOccurrenceKey <= maxOccurrenceKey
+  ) {
+    return err({
+      code: 'INVALID_WORKOUT_SESSION',
+      message:
+        'nextOccurrenceKey must be a positive integer greater than every existing occurrence key',
+      field: 'nextOccurrenceKey',
+    });
+  }
+
   const exerciseLogs: ReadonlyArray<ExerciseLog> = input.exerciseLogs.map((log) => ({
     authoredExerciseId: log.authoredExerciseId,
     performedExerciseId: log.performedExerciseId ?? log.authoredExerciseId,
@@ -363,6 +450,9 @@ export function createWorkoutSession(
     restSeconds: log.restSeconds,
     isSkipped: log.isSkipped ?? false,
     occurrenceKey: log.occurrenceKey ?? log.order,
+    // Provenance is a persisted fact; a fresh session omits it and every
+    // occurrence of a freshly created session is template-authored.
+    source: log.source ?? OccurrenceSource.Template,
     sets: [],
   }));
 
@@ -375,6 +465,7 @@ export function createWorkoutSession(
     startedAt: input.startedAt,
     completedAt: null,
     exerciseLogs,
+    nextOccurrenceKey,
     version: 0,
   });
 }

@@ -60,6 +60,19 @@ vi.mock('@/features/sessions/components/AddSessionExercisePanel', () => ({
   AddSessionExercisePanel: () => createElement('div', null, 'add exercise panel'),
 }));
 
+vi.mock('@/features/sessions/components/SessionRemovalControl', () => ({
+  SessionRemovalControl: (props: {
+    readonly exerciseOrder: number;
+    readonly removalEligibility: { readonly canRemove: boolean; readonly blockedBy: string | null };
+  }) =>
+    createElement(
+      'div',
+      null,
+      `remove ${props.exerciseOrder} can:${props.removalEligibility.canRemove ? 'yes' : 'no'} ` +
+        `blocked:${props.removalEligibility.blockedBy ?? 'none'}`,
+    ),
+}));
+
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type {
   WorkoutSessionDto,
@@ -123,6 +136,7 @@ function log(
     occurrenceKey: order,
     source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: eligibility(false, order > 1, order < 3),
     order,
     prescription: threeByEightToTen,

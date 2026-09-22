@@ -77,6 +77,7 @@ function sessionLog(
     occurrenceKey: 1,
     source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,

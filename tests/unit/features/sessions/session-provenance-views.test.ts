@@ -37,6 +37,7 @@ function log(
     occurrenceKey: order,
     source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,
@@ -125,5 +126,45 @@ describe('buildSessionExerciseCardViews / provenance (M11)', () => {
       'occ:3',
     ]);
     expect(new Set(after.map((card) => card.renderKey)).size).toBe(3);
+  });
+
+  it('keeps a survivor\u2019s render identity when a preceding occurrence is removed (M11 Slice 4)', () => {
+    const before = cards([
+      log(1, 'ex-a'),
+      log(2, 'ex-b', { source: 'user_added' }),
+      log(3, 'ex-c', { source: 'user_added' }),
+    ]);
+
+    // Removal renumbers orders only: C moves 3 → 2 and keeps occurrenceKey 3.
+    const after = cards([
+      log(1, 'ex-a'),
+      log(2, 'ex-c', { source: 'user_added', occurrenceKey: 3 }),
+    ]);
+
+    expect(after.map((card) => card.renderKey)).toEqual(['occ:1', 'occ:3']);
+    // The survivor's subtree identity is literally the same React key it had
+    // before the removal, so its local state stays with it.
+    expect(after[1]?.renderKey).toBe(before[2]?.renderKey);
+    expect(after[1]?.name).toBe('Row');
+  });
+
+  it('copies the domain-derived removal eligibility verbatim onto the card view', () => {
+    const cardsForLogs = cards([
+      log(1, 'ex-a'), // template-authored
+      log(2, 'ex-b', {
+        source: 'user_added',
+        removalEligibility: { canRemove: true, blockedBy: null },
+      }),
+      log(3, 'ex-c', {
+        source: 'user_added',
+        removalEligibility: { canRemove: false, blockedBy: 'logged-sets' },
+      }),
+    ]);
+
+    expect(cardsForLogs.map((card) => card.removalEligibility)).toEqual([
+      { canRemove: false, blockedBy: 'template-authored' },
+      { canRemove: true, blockedBy: null },
+      { canRemove: false, blockedBy: 'logged-sets' },
+    ]);
   });
 });

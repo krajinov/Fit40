@@ -16,7 +16,13 @@ import {
   OccurrenceSource,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
-import { addSessionExercise } from '@/domain/services/session-exercise-composition';
+import {
+  addSessionExercise,
+  removeSessionExercise,
+  resolveOccurrenceRemovalEligibility,
+} from '@/domain/services/session-exercise-composition';
+import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
+import { substituteSessionExercise } from '@/domain/services/session-exercise-substitution';
 import { createExerciseId, createScheduledWorkoutId, createUserId, createWorkoutId } from '@/domain/types/ids';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -260,5 +266,269 @@ describe('addSessionExercise — completed session', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('SESSION_ALREADY_COMPLETED');
+  });
+});
+
+// ─── M11 removal ─────────────────────────────────────────────────────────────
+
+/** A `count`-occurrence template session with ONE appended user-added occurrence. */
+function withUserAdded(count = 2, exerciseId = 'ex-100'): WorkoutSession {
+  const r = addSessionExercise(session(count), {
+    exerciseId: eid(exerciseId),
+    prescription: rep(),
+    restSeconds: 0,
+  });
+  if (!r.ok) throw Error(r.error.message);
+  return r.data;
+}
+
+function skipOrder(target: WorkoutSession, exerciseOrder: number): WorkoutSession {
+  const r = skipSessionExercise(target, { exerciseOrder });
+  if (!r.ok) throw Error(r.error.message);
+  return r.data;
+}
+
+function substituteOrder(target: WorkoutSession, exerciseOrder: number, replacement: string): WorkoutSession {
+  const r = substituteSessionExercise(target, {
+    exerciseOrder,
+    replacementExerciseId: eid(replacement),
+  });
+  if (!r.ok) throw Error(r.error.message);
+  return r.data;
+}
+
+function logSetOn(target: WorkoutSession, exerciseOrder: number): WorkoutSession {
+  const r = logSessionSet(target, {
+    exerciseOrder,
+    type: 'reps',
+    reps: 10,
+    weightKg: 20,
+    rpe: null,
+  });
+  if (!r.ok) throw Error(r.error.message);
+  return r.data;
+}
+
+describe('removeSessionExercise — happy path', () => {
+  it('removes a user-added zero-set occurrence and leaves the survivors dense and canonical', () => {
+    // Template orders 1..2, user-added at order 3.
+    const before = withUserAdded(2);
+    expect(before.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
+
+    const r = removeSessionExercise(before, { exerciseOrder: 3 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.exerciseLogs).toHaveLength(2);
+    expect(r.data.exerciseLogs.map((log) => log.order)).toEqual([1, 2]);
+    // Canonical: array position agrees with order.
+    r.data.exerciseLogs.forEach((log, index) => expect(log.order).toBe(index + 1));
+    expect(r.data.exerciseLogs.some((log) => log.source === OccurrenceSource.UserAdded)).toBe(false);
+  });
+
+  it('renumbers a middle removal so trailing orders stay dense', () => {
+    // A(order 1, template), B(order 2, user-added), C(order 3, user-added).
+    const first = withUserAdded(1); // ex-001 + ex-100
+    const second = addSessionExercise(first, {
+      exerciseId: eid('ex-200'),
+      prescription: rep(),
+      restSeconds: 0,
+    });
+    if (!second.ok) throw Error();
+    const before = second.data;
+    expect(before.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3]);
+    expect(before.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
+
+    const r = removeSessionExercise(before, { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // C moved from order 3 to order 2 but KEEPS its occurrenceKey 3.
+    expect(r.data.exerciseLogs.map((log) => log.order)).toEqual([1, 2]);
+    expect(r.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 3]);
+    expect(r.data.exerciseLogs.map((log) => log.performedExerciseId)).toEqual(['ex-001', 'ex-200']);
+  });
+
+  it('never mutates the source aggregate', () => {
+    const before = withUserAdded(2);
+    const ordersBefore = before.exerciseLogs.map((log) => log.order);
+    const keysBefore = before.exerciseLogs.map((log) => log.occurrenceKey);
+    const markBefore = before.nextOccurrenceKey;
+
+    removeSessionExercise(before, { exerciseOrder: 3 });
+
+    expect(before.exerciseLogs.map((log) => log.order)).toEqual(ordersBefore);
+    expect(before.exerciseLogs.map((log) => log.occurrenceKey)).toEqual(keysBefore);
+    expect(before.nextOccurrenceKey).toBe(markBefore);
+  });
+
+  it('leaves nextOccurrenceKey untouched (removed keys are never reusable)', () => {
+    const before = withUserAdded(2); // keys 1,2,3; mark 4
+    expect(before.nextOccurrenceKey).toBe(4);
+
+    const removed = removeSessionExercise(before, { exerciseOrder: 3 });
+    if (!removed.ok) throw Error();
+
+    expect(removed.data.nextOccurrenceKey).toBe(4);
+
+    // The next Add takes the HIGH-WATER key (4), never the removed key (3).
+    const reAdded = addSessionExercise(removed.data, {
+      exerciseId: eid('ex-101'),
+      prescription: rep(),
+      restSeconds: 0,
+    });
+    if (!reAdded.ok) throw Error();
+    expect(reAdded.data.exerciseLogs.at(-1)?.occurrenceKey).toBe(4);
+    expect(reAdded.data.exerciseLogs.at(-1)?.occurrenceKey).not.toBe(3);
+    expect(reAdded.data.nextOccurrenceKey).toBe(5);
+  });
+
+  it('removes a SKIPPED user-added occurrence directly, without an unskip', () => {
+    const skipped = skipOrder(withUserAdded(1), 2);
+    expect(skipped.exerciseLogs[1]?.isSkipped).toBe(true);
+
+    const r = removeSessionExercise(skipped, { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.exerciseLogs).toHaveLength(1);
+  });
+
+  it('removes a SUBSTITUTED user-added occurrence directly, without a restore', () => {
+    const substituted = substituteOrder(withUserAdded(1), 2, 'ex-999');
+    expect(substituted.exerciseLogs[1]?.performedExerciseId).toBe('ex-999');
+
+    const r = removeSessionExercise(substituted, { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.exerciseLogs).toHaveLength(1);
+  });
+
+  it('handles duplicate ExerciseIds by occurrence, not by exercise identity', () => {
+    // ex-001 template, then ex-001 added twice: three identical occurrences.
+    const first = withUserAdded(1, 'ex-001');
+    const second = addSessionExercise(first, {
+      exerciseId: eid('ex-001'),
+      prescription: rep(),
+      restSeconds: 0,
+    });
+    if (!second.ok) throw Error();
+    const before = second.data;
+    expect(before.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
+
+    const r = removeSessionExercise(before, { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // The FIRST duplicate (key 2) is gone; the survivor keeps key 3.
+    expect(r.data.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 3]);
+    expect(r.data.exerciseLogs.map((log) => log.performedExerciseId)).toEqual([
+      'ex-001',
+      'ex-001',
+    ]);
+  });
+});
+
+describe('removeSessionExercise — guards', () => {
+  it('rejects an unknown occurrence order', () => {
+    const r = removeSessionExercise(withUserAdded(2), { exerciseOrder: 99 });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_LOG_NOT_FOUND');
+    if (r.error.code !== 'EXERCISE_LOG_NOT_FOUND') return;
+    expect(r.error.exerciseOrder).toBe(99);
+  });
+
+  it('rejects a template-authored occurrence with EXERCISE_NOT_REMOVABLE', () => {
+    const r = removeSessionExercise(withUserAdded(2), { exerciseOrder: 1 });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_NOT_REMOVABLE');
+  });
+
+  it('rejects a user-added occurrence with logged sets', () => {
+    const r = removeSessionExercise(logSetOn(withUserAdded(1), 2), { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('EXERCISE_HAS_LOGGED_SETS');
+    if (r.error.code !== 'EXERCISE_HAS_LOGGED_SETS') return;
+    expect(r.error.exerciseOrder).toBe(2);
+  });
+
+  it('rejects a completed session before any other rule', () => {
+    const withSet = logSetOn(withUserAdded(1), 1);
+    const completed = completeWorkoutSession(withSet, new Date('2025-01-01T11:00:00Z'));
+    if (!completed.ok) throw Error();
+
+    // Order 2 is a user-added zero-set occurrence: removable while in
+    // progress, frozen once the session completes.
+    const r = removeSessionExercise(completed.data, { exerciseOrder: 2 });
+
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('SESSION_ALREADY_COMPLETED');
+  });
+});
+
+describe('resolveOccurrenceRemovalEligibility', () => {
+  it('agrees with the mutation for every occurrence state', () => {
+    const cases: ReadonlyArray<{
+      readonly session: WorkoutSession;
+      readonly order: number;
+    }> = [
+      { session: withUserAdded(2), order: 1 }, // template
+      { session: withUserAdded(2), order: 3 }, // user-added, zero sets
+      { session: logSetOn(withUserAdded(1), 2), order: 2 }, // user-added, logged
+      { session: skipOrder(withUserAdded(1), 2), order: 2 }, // user-added, skipped
+    ];
+
+    for (const { session: target, order } of cases) {
+      const log = target.exerciseLogs.find((entry) => entry.order === order);
+      if (log === undefined) throw Error('fixture occurrence missing');
+      const eligibility = resolveOccurrenceRemovalEligibility(target, log);
+      const mutation = removeSessionExercise(target, { exerciseOrder: order });
+      expect(eligibility.canRemove).toBe(mutation.ok);
+      if (!eligibility.canRemove) expect(eligibility.blockedBy).not.toBeNull();
+      if (eligibility.canRemove) expect(eligibility.blockedBy).toBeNull();
+    }
+  });
+
+  it('applies the documented block precedence', () => {
+    const inProgress = withUserAdded(1);
+    const logged = logSetOn(inProgress, 2);
+
+    // session-completed outranks template-authored outranks logged-sets.
+    const completedTemplate = completeWorkoutSession(logSetOn(inProgress, 1), new Date('2025-01-01T11:00:00Z'));
+    if (!completedTemplate.ok) throw Error();
+    const completedTemplateLog = completedTemplate.data.exerciseLogs[0];
+    if (completedTemplateLog === undefined) throw Error();
+    expect(
+      resolveOccurrenceRemovalEligibility(completedTemplate.data, completedTemplateLog).blockedBy,
+    ).toBe('session-completed');
+
+    // A template occurrence with logged sets reports provenance, not sets.
+    const templateWithSets = logSetOn(inProgress, 1);
+    const templateLog = templateWithSets.exerciseLogs[0];
+    if (templateLog === undefined) throw Error();
+    expect(resolveOccurrenceRemovalEligibility(templateWithSets, templateLog).blockedBy).toBe(
+      'template-authored',
+    );
+
+    // A user-added occurrence with logged sets reports the set block.
+    const loggedLog = logged.exerciseLogs[1];
+    if (loggedLog === undefined) throw Error();
+    expect(resolveOccurrenceRemovalEligibility(logged, loggedLog).blockedBy).toBe('logged-sets');
+
+    // Removable state.
+    const removableLog = inProgress.exerciseLogs[1];
+    if (removableLog === undefined) throw Error();
+    expect(resolveOccurrenceRemovalEligibility(inProgress, removableLog)).toEqual({
+      canRemove: true,
+      blockedBy: null,
+    });
   });
 });

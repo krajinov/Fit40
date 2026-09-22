@@ -29,7 +29,8 @@ export type SessionActionErrorCode =
   | 'SUBSTITUTION_NO_CHANGE'
   | 'ADJUSTMENT_NO_CHANGE'
   | 'MOVE_OUT_OF_RANGE'
-  | 'EXERCISE_NOT_FOUND';
+  | 'EXERCISE_NOT_FOUND'
+  | 'EXERCISE_NOT_REMOVABLE';
 
 export interface SessionActionError {
   readonly code: SessionActionErrorCode;

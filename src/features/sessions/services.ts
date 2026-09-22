@@ -7,6 +7,7 @@ import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-se
 import { LogSessionSetUseCase } from '@/application/use-cases/log-session-set';
 import { MoveSessionExerciseUseCase } from '@/application/use-cases/move-session-exercise';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
+import { RemoveSessionExerciseUseCase } from '@/application/use-cases/remove-session-exercise';
 import { RestoreSessionExerciseUseCase } from '@/application/use-cases/restore-session-exercise';
 import { SkipSessionExerciseUseCase } from '@/application/use-cases/skip-session-exercise';
 import { StartWorkoutSessionUseCase } from '@/application/use-cases/start-workout-session';
@@ -75,6 +76,10 @@ export const moveSessionExerciseUseCase = new MoveSessionExerciseUseCase(
 export const addSessionExerciseUseCase = new AddSessionExerciseUseCase(
   workoutSessionRepository,
   exerciseRepository,
+);
+
+export const removeSessionExerciseUseCase = new RemoveSessionExerciseUseCase(
+  workoutSessionRepository,
 );
 
 export const getActiveWorkoutExerciseDataUseCase = new GetActiveWorkoutExerciseDataUseCase(

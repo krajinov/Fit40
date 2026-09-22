@@ -161,3 +161,15 @@ export const addExerciseSchema = z.discriminatedUnion('scheme', [
     durationSeconds: z.coerce.number().int().positive(),
   }),
 ]);
+
+/**
+ * Remove Exercise (M11): the user-added occurrence to remove, addressed by its
+ * business locator and the rendered session version. No userId — identity
+ * comes from the trusted authenticated session — and no occurrenceKey,
+ * provenance or identity field: those are never command authority.
+ */
+export const removeExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
+});

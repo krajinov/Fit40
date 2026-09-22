@@ -32,6 +32,9 @@ vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
 vi.mock('@/features/sessions/actions/move-exercise', () => ({
   moveExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/remove-exercise', () => ({
+  removeExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -129,6 +132,9 @@ function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): Session
     logger,
     substitution: mutableSubstitution,
     adjustment: openAdjustment,
+    // Template-authored by default: the Remove control only renders for a
+    // user-added occurrence, which a test overrides explicitly.
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     ...overrides,
   };
 }
@@ -143,6 +149,7 @@ function sessionLog(order: number): WorkoutSessionExerciseDto {
     occurrenceKey: order,
     source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: true },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,

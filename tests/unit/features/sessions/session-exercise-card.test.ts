@@ -32,6 +32,9 @@ vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
 vi.mock('@/features/sessions/actions/move-exercise', () => ({
   moveExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/remove-exercise', () => ({
+  removeExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -45,6 +48,7 @@ import type { SessionLoggerView } from '@/features/sessions/active-workout-logge
 import type { SessionSubstitutionView } from '@/features/sessions/session-substitution-views';
 import { SKIPPED_HINT_LABEL } from '@/features/sessions/session-adjustment-views';
 import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
+import { REMOVAL_BLOCKED_LABEL } from '@/features/sessions/components/SessionRemovalControl';
 import { SessionExerciseCard } from '@/features/sessions/components/SessionExerciseCard';
 import { SessionProgressCard } from '@/features/sessions/components/SessionProgressCard';
 
@@ -93,6 +97,7 @@ function sessionLog(order: number, isSkipped = false): WorkoutSessionExerciseDto
     occurrenceKey: order,
     source: 'template',
     substitutionEligibility: { blockedBy: isSkipped ? 'skipped' : null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: isSkipped
       ? {
           isSkipped: true,
@@ -131,6 +136,9 @@ function cardView(overrides: Partial<SessionExerciseCardView> = {}): SessionExer
     logger,
     substitution: noCandidatesSubstitution,
     adjustment: { state: 'open', blockedLabel: null, canMoveUp: true, canMoveDown: true },
+    // Template-authored by default: the Remove control only renders for a
+    // user-added occurrence, which a test overrides explicitly.
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     ...overrides,
   };
 }
@@ -413,10 +421,8 @@ describe('SessionExerciseCard / occurrence provenance (M11)', () => {
     );
 
     expect(container.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
-    // The label is a provenance note only: the ordinary affordances remain,
-    // and no Remove control exists yet (that is the Remove slice).
+    // The label is a provenance note only: the ordinary affordances remain.
     expect(container.textContent).toContain('Skip exercise');
-    expect(container.textContent).not.toContain('Remove');
   });
 
   it('keeps the provenance label alongside the "Originally: …" substitution context', async () => {
@@ -426,6 +432,82 @@ describe('SessionExerciseCard / occurrence provenance (M11)', () => {
     );
 
     expect(container.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(container.textContent).toContain('Originally: Bench Press');
+  });
+});
+
+describe('SessionExerciseCard / removal affordance (M11 Slice 4)', () => {
+  it('renders the Remove control for a removable user-added occurrence', async () => {
+    const container = await renderCard(
+      cardView({
+        provenanceLabel: ADDED_DURING_WORKOUT_LABEL,
+        removalEligibility: { canRemove: true, blockedBy: null },
+      }),
+      { ...sessionLog(1, false), source: 'user_added' },
+    );
+
+    expect(container.textContent).toContain('Remove exercise');
+    // The existing controls are untouched by a user-added occurrence.
+    expect(container.textContent).toContain('Skip exercise');
+    expect(container.textContent).toContain('Move up');
+  });
+
+  it('renders NO Remove control for a template-authored occurrence', async () => {
+    const container = await renderCard(
+      cardView({ removalEligibility: { canRemove: false, blockedBy: 'template-authored' } }),
+      sessionLog(1, false),
+    );
+
+    expect(container.textContent).not.toContain('Remove exercise');
+    // Skip/Unskip remains the template occurrence's exclusion mechanism.
+    expect(container.textContent).toContain('Skip exercise');
+  });
+
+  it('shows the delete-sets copy instead of a control when logged sets block removal', async () => {
+    const container = await renderCard(
+      cardView({
+        adjustment: { state: 'blocked-logged-sets', blockedLabel: 'Delete your logged sets to skip this exercise.', canMoveUp: true, canMoveDown: true },
+        removalEligibility: { canRemove: false, blockedBy: 'logged-sets' },
+      }),
+      { ...sessionLog(1, false), source: 'user_added' },
+    );
+
+    expect(container.textContent).toContain(REMOVAL_BLOCKED_LABEL);
+    expect(container.textContent).not.toContain('Remove exercise');
+  });
+
+  it('keeps a SKIPPED zero-set user-added occurrence removable', async () => {
+    const container = await renderCard(
+      cardView({
+        kind: 'skipped',
+        badge: { style: 'neutral', label: 'Skipped', mobileVisible: true },
+        logger: null,
+        substitution: hiddenSubstitution,
+        adjustment: { state: 'skipped', blockedLabel: null, canMoveUp: true, canMoveDown: true },
+        removalEligibility: { canRemove: true, blockedBy: null },
+      }),
+      { ...sessionLog(1, true), source: 'user_added' },
+    );
+
+    expect(container.textContent).toContain('Remove exercise');
+    expect(container.textContent).toContain('Undo skip');
+  });
+
+  it('keeps a SUBSTITUTED zero-set user-added occurrence removable', async () => {
+    const container = await renderCard(
+      cardView({
+        originallyName: 'Bench Press',
+        removalEligibility: { canRemove: true, blockedBy: null },
+      }),
+      {
+        ...sessionLog(1, false),
+        source: 'user_added',
+        isSubstituted: true,
+        performedExerciseId: 'ex-db-bench',
+      },
+    );
+
+    expect(container.textContent).toContain('Remove exercise');
     expect(container.textContent).toContain('Originally: Bench Press');
   });
 });

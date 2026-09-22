@@ -10,6 +10,7 @@ import type { SetLoggerDraft } from '@/features/sessions/set-logger-draft';
 import { LoggedSetRow } from '@/features/sessions/components/LoggedSetRow';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
+import { SessionRemovalControl } from '@/features/sessions/components/SessionRemovalControl';
 import { SKIPPED_HINT_LABEL } from '@/features/sessions/session-adjustment-views';
 
 interface SessionExerciseCardProps {
@@ -263,6 +264,22 @@ export function SessionExerciseCard({
           weekNumber={weekNumber}
           workoutOrder={workoutOrder}
           adjustment={card.adjustment}
+        />
+      )}
+
+      {/* M11 removal affordance: the control decides nothing — it formats the
+          domain-derived removalEligibility the card view carries verbatim. A
+          template-authored or completed occurrence renders nothing here, and
+          the existing Skip/Unskip affordance above is untouched. */}
+      {!readOnly && (
+        <SessionRemovalControl
+          sessionId={sessionId}
+          exerciseOrder={log.order}
+          expectedSessionVersion={expectedSessionVersion}
+          programSlug={programSlug}
+          weekNumber={weekNumber}
+          workoutOrder={workoutOrder}
+          removalEligibility={card.removalEligibility}
         />
       )}
     </article>

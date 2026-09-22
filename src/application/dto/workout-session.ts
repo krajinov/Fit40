@@ -23,6 +23,10 @@ import {
   resolveOccurrenceSubstitutionState,
   type OccurrenceSubstitutionBlock,
 } from '@/domain/services/session-exercise-substitution';
+import {
+  resolveOccurrenceRemovalEligibility,
+  type OccurrenceRemovalBlock,
+} from '@/domain/services/session-exercise-composition';
 
 export type WorkoutSessionSetDto =
   | {
@@ -90,6 +94,13 @@ export interface WorkoutSessionExerciseDto {
    * instead of re-deriving blocking from raw session facts.
    */
   readonly substitutionEligibility: OccurrenceSubstitutionEligibilityDto;
+  /**
+   * Whether the occurrence may currently be REMOVED (M11) — the domain's
+   * removal rules, projected by `resolveOccurrenceRemovalEligibility`.
+   * Presentation consumes this instead of re-deriving removability from
+   * `source` or raw set counts.
+   */
+  readonly removalEligibility: OccurrenceRemovalEligibilityDto;
   readonly order: number;
   readonly prescription: RepPrescription;
   readonly sets: ReadonlyArray<WorkoutSessionSetDto>;
@@ -111,6 +122,18 @@ export interface WorkoutSessionMetricsDto {
 export interface OccurrenceSubstitutionEligibilityDto {
   readonly blockedBy: OccurrenceSubstitutionBlock | null;
   readonly canRestore: boolean;
+}
+
+/**
+ * The domain's REMOVAL-mutation eligibility of one occurrence (M11), stripped
+ * of branded ids and fully serializable. `canRemove` is true only for an
+ * in-progress, zero-set, user-added occurrence; otherwise `blockedBy` carries
+ * the canonical reason (precedence: session-completed > template-authored >
+ * logged-sets). Presentation formats it and never re-derives removability.
+ */
+export interface OccurrenceRemovalEligibilityDto {
+  readonly canRemove: boolean;
+  readonly blockedBy: OccurrenceRemovalBlock | null;
 }
 
 /**
@@ -206,6 +229,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
       const substitution = resolveOccurrenceSubstitutionState(log);
       const eligibility = resolveOccurrenceSubstitutionEligibility(session, log);
       const adjustment = resolveOccurrenceAdjustmentEligibility(session, log);
+      const removal = resolveOccurrenceRemovalEligibility(session, log);
       return {
         authoredExerciseId: substitution.authoredExerciseId as string,
         performedExerciseId: substitution.performedExerciseId as string,
@@ -216,6 +240,10 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,
+        },
+        removalEligibility: {
+          canRemove: removal.canRemove,
+          blockedBy: removal.blockedBy,
         },
         adjustmentEligibility: {
           isSkipped: adjustment.isSkipped,

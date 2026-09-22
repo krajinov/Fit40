@@ -54,6 +54,7 @@ vi.mock('@/features/sessions/actions/restore-exercise', () => ({
 vi.mock('@/features/sessions/actions/skip-exercise', () => ({ skipExerciseAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/unskip-exercise', () => ({ unskipExerciseAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/move-exercise', () => ({ moveExerciseAction: vi.fn() }));
+vi.mock('@/features/sessions/actions/remove-exercise', () => ({ removeExerciseAction: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -107,6 +108,7 @@ function log(
     occurrenceKey: order,
     source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,
@@ -562,5 +564,107 @@ describe('ActiveWorkoutScreen / appending an occurrence preserves existing ident
     // Substitution and provenance are independent facts: both render.
     expect(rows[1]?.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
     expect(rows[1]?.textContent).toContain('Originally: Bench');
+  });
+});
+
+// ─── M11 Slice 4: removing an occurrence must not disturb the survivors ──────
+
+/** One occurrence's reps input by DOM position in the canonical list. */
+function repsInputAt(container: HTMLElement, index: number): HTMLInputElement {
+  const rows = Array.from(container.querySelectorAll('ol > li'));
+  const row = rows[index];
+  if (row === undefined) throw new Error(`missing occurrence row ${index}`);
+  const input = Array.from(row.querySelectorAll('input')).find(
+    (element) => (element as HTMLInputElement).name === 'reps',
+  );
+  if (input === undefined) throw new Error(`missing reps input in row ${index}`);
+  return input as HTMLInputElement;
+}
+
+/** The reps draft of the occurrence at DOM position `index` ('' when absent). */
+function repsValueAt(container: HTMLElement, index: number): string {
+  const rows = Array.from(container.querySelectorAll('ol > li'));
+  return rows[index]?.querySelector<HTMLInputElement>('input[name="reps"]')?.value ?? '';
+}
+
+describe('ActiveWorkoutScreen / removing an occurrence preserves the survivors (M11 Slice 4)', () => {
+  it('moves a surviving occurrence up a slot without transferring its state', async () => {
+    // A (template, key 1, order 1), B (user-added, key 2, order 2),
+    // C (user-added, key 3, order 3).
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b', { occurrenceKey: 2, source: 'user_added' }),
+        log(3, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    // The user is mid-way through logging C (order 3, the last row).
+    await typeInto(repsInputAt(container, 2), '14');
+    expect(repsValueAt(container, 2)).toBe('14');
+
+    // B is removed server-side: C renumbers 3 → 2 but KEEPS occurrenceKey 3,
+    // so the refreshed screen must hand C its own state back.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain('Squat');
+    expect(rows[1]?.textContent).toContain('Row');
+    // C kept its draft across the renumber; the neighbour gained nothing.
+    expect(repsValueAt(container, 1)).toBe('14');
+    expect(repsValueAt(container, 0)).toBe('');
+  });
+
+  it('never misassociates state when the removed occurrence shares an ExerciseId with a survivor', async () => {
+    // Three IDENTICAL occurrences: only the occurrenceKey distinguishes them.
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-a', { occurrenceKey: 2, source: 'user_added' }),
+        log(3, 'ex-a', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    // Draft typed into the THIRD occurrence (order 3, key 3).
+    await typeInto(repsInputAt(container, 2), '9');
+    expect(repsValueAt(container, 2)).toBe('9');
+
+    // The middle duplicate (key 2) is removed; the survivor keeps key 3.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-a', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows).toHaveLength(2);
+    // The surviving duplicate carries the draft; the first occurrence is fresh.
+    expect(repsValueAt(container, 1)).toBe('9');
+    expect(repsValueAt(container, 0)).toBe('');
+  });
+
+  it('keeps the removal affordance reachable from the compact row of a just-added occurrence', async () => {
+    const { container } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b', {
+          occurrenceKey: 2,
+          source: 'user_added',
+          removalEligibility: { canRemove: true, blockedBy: null },
+        }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows[1]?.textContent).toContain('Remove exercise');
+    // A template occurrence exposes no removal affordance.
+    expect(rows[0]?.textContent).not.toContain('Remove exercise');
   });
 });

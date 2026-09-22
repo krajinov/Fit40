@@ -17,6 +17,7 @@
 import type { ExerciseTargetDto } from '@/application/dto/exercise';
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
+  OccurrenceRemovalEligibilityDto,
   WorkoutSessionDto,
   WorkoutSessionExerciseDto,
   WorkoutSessionSetDto,
@@ -103,6 +104,13 @@ export interface SessionExerciseCardView {
   readonly substitution: SessionSubstitutionView;
   /** The M10 skip affordance of this occurrence. */
   readonly adjustment: SessionAdjustmentView;
+  /**
+   * The M11 removal eligibility of this occurrence, copied verbatim from the
+   * domain-derived DTO projection (`WorkoutSessionExerciseDto
+   * .removalEligibility`). Presentation renders the Remove affordance (or its
+   * truthful blocked copy) from THIS — never from `source` or raw set counts.
+   */
+  readonly removalEligibility: OccurrenceRemovalEligibilityDto;
 }
 
 export interface SessionProgressView {
@@ -321,6 +329,9 @@ export function buildSessionExerciseCardViews(
           input.candidatesByPerformedExerciseId.get(log.performedExerciseId) ?? null,
       }),
       adjustment: buildSessionAdjustmentView(log.adjustmentEligibility),
+      // Removal eligibility is a domain-derived DTO projection: copied
+      // verbatim so presentation never re-derives removability.
+      removalEligibility: log.removalEligibility,
     };
   });
 }

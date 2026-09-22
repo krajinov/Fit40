@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema, moveExerciseSchema, addExerciseSchema, expectedSessionVersionSchema } from '@/features/sessions/schemas/session-actions-schema';
+import { logSetSchema, deleteSetSchema, completeSessionSchema, startSessionSchema, substituteExerciseSchema, restoreExerciseSchema, skipExerciseSchema, unskipExerciseSchema, moveExerciseSchema, addExerciseSchema, removeExerciseSchema, expectedSessionVersionSchema } from '@/features/sessions/schemas/session-actions-schema';
 
 describe('logSetSchema', () => {
   it('parses valid rep set input', () => {
@@ -250,6 +250,8 @@ describe('stale rendered intent: every occurrence-addressed schema requires the 
       addExerciseSchema.safeParse({ sessionId: 's-1', exerciseId: 'ex-1', scheme: 'reps', sets: 3, targetReps: 8, expectedSessionVersion: -1 })],
     ['addExerciseSchema (duration)', () =>
       addExerciseSchema.safeParse({ sessionId: 's-1', exerciseId: 'ex-1', scheme: 'duration', sets: 3, durationSeconds: 30, expectedSessionVersion: -1 })],
+    ['removeExerciseSchema', () =>
+      removeExerciseSchema.safeParse({ sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: -1 })],
   ] as const)('%s rejects a stale (negative) expected version', (_name, parse) => {
     expect(parse().success).toBe(false);
   });
@@ -315,6 +317,13 @@ describe('occurrence-key boundary (PR #13 Finding 1)', () => {
       parse: () =>
         moveExerciseSchema.safeParse({
           sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999, direction: 'up',
+        }),
+    },
+    {
+      name: 'removeExerciseSchema',
+      parse: () =>
+        removeExerciseSchema.safeParse({
+          sessionId: 's-1', exerciseOrder: 1, expectedSessionVersion: 0, occurrenceKey: 999,
         }),
     },
   ] as const;
@@ -492,6 +501,69 @@ describe('addExerciseSchema (M11)', () => {
       'authoredExerciseId',
       'performedExerciseId',
       'restSeconds',
+    ]) {
+      expect(r.data).not.toHaveProperty(forbidden);
+    }
+  });
+});
+
+describe('removeExerciseSchema (M11)', () => {
+  it('parses a valid command, coercing FormData strings', () => {
+    const r = removeExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseOrder: '3',
+      expectedSessionVersion: '7',
+    });
+
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data).toEqual({ sessionId: 's-1', exerciseOrder: 3, expectedSessionVersion: 7 });
+  });
+
+  it.each([
+    ['a missing order', { exerciseOrder: undefined }],
+    ['a zero order', { exerciseOrder: 0 }],
+    ['a negative order', { exerciseOrder: -2 }],
+    ['a fractional order', { exerciseOrder: 1.5 }],
+    ['a non-numeric order', { exerciseOrder: 'third' }],
+    ['an empty session id', { sessionId: '' }],
+  ] as const)('rejects %s', (_name, overrides) => {
+    const r = removeExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseOrder: 1,
+      expectedSessionVersion: 0,
+      ...overrides,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('never accepts a client-supplied trusted or domain-derived field', () => {
+    // The command surface is exactly the occurrence locator plus the rendered
+    // version: a client cannot supply identity, provenance or the
+    // domain-derived high-water mark, and every such field is stripped.
+    const r = removeExerciseSchema.safeParse({
+      sessionId: 's-1',
+      exerciseOrder: 2,
+      expectedSessionVersion: 0,
+      userId: 'attacker',
+      occurrenceKey: 999,
+      nextOccurrenceKey: 999,
+      source: 'user_added',
+      exerciseId: 'ex-9',
+      authoredExerciseId: 'ex-9',
+      performedExerciseId: 'ex-9',
+    });
+
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    for (const forbidden of [
+      'userId',
+      'occurrenceKey',
+      'nextOccurrenceKey',
+      'source',
+      'exerciseId',
+      'authoredExerciseId',
+      'performedExerciseId',
     ]) {
       expect(r.data).not.toHaveProperty(forbidden);
     }

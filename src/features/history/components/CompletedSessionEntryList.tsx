@@ -57,6 +57,9 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
             )}
             <p className="text-sm text-ink-3">{entry.prescriptionLabel}</p>
           </div>
+          {entry.provenanceLabel !== null && (
+            <p className="mt-0.5 text-xs text-ink-3">{entry.provenanceLabel}</p>
+          )}
           {entry.originallyName !== null && (
             <p className="mt-0.5 text-xs text-ink-3">Originally: {entry.originallyName}</p>
           )}

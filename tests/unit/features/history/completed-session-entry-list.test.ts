@@ -33,6 +33,7 @@ vi.mock('@/features/history/services', () => ({
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
 import { toCompletedSessionView } from '@/features/history/completed-session-view';
 import { CompletedSessionEntryList } from '@/features/history/components/CompletedSessionEntryList';
+import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
 
 // React 19 requires an explicit opt-in for act() outside react-dom/test-utils.
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,6 +46,7 @@ function entry(
     performedExerciseId: 'ex-001',
     isSubstituted: false,
     isSkipped: false,
+    source: 'template',
     exerciseOrder: 1,
     exerciseName: 'Goblet Squat',
     authoredExerciseName: 'Goblet Squat',
@@ -177,5 +179,96 @@ describe('CompletedSessionEntryList — skipped occurrences (M10 Slice 7)', () =
     expect(document.body.textContent).toContain('Skipped');
     expect(document.body.textContent).toContain('50 kg × 10 @ RPE 7');
     expect(document.body.textContent).toContain('45 s');
+  });
+});
+
+// ─── M11 provenance rendering in completed history ───────────────────────────
+
+/** A completed entry the user explicitly added during the workout. */
+function userAddedEntry(
+  overrides: Partial<CompletedSessionDto['entries'][number]> = {},
+): CompletedSessionDto['entries'][number] {
+  return entry({
+    authoredExerciseId: 'ex-100',
+    performedExerciseId: 'ex-100',
+    source: 'user_added',
+    exerciseOrder: 2,
+    exerciseName: 'Face Pull',
+    authoredExerciseName: 'Face Pull',
+    exerciseSlug: 'face-pull',
+    equipment: 'resistance-band',
+    restSeconds: 0,
+    sets: [{ type: 'reps', setNumber: 1, reps: 12, weightKg: 20, rpe: null }],
+    ...overrides,
+  });
+}
+
+describe('CompletedSessionEntryList / occurrence provenance (M11)', () => {
+  it('never labels a template-authored occurrence', async () => {
+    await renderList([entry({})]);
+
+    expect(document.body.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('labels a user-added occurrence with "Added during workout"', async () => {
+    await renderList([userAddedEntry()]);
+
+    expect(document.body.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+    // Its genuine logged work still renders normally.
+    expect(document.body.textContent).toContain('20 kg × 12');
+  });
+
+  it('keeps the label on a substituted user-added occurrence, with "Originally: …"', async () => {
+    await renderList([
+      userAddedEntry({
+        performedExerciseId: 'ex-008',
+        isSubstituted: true,
+        exerciseName: 'Dumbbell Bench Press',
+        authoredExerciseName: 'Face Pull',
+        exerciseSlug: 'dumbbell-bench-press',
+        equipment: 'dumbbell',
+      }),
+    ]);
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(text).toContain('Dumbbell Bench Press');
+    expect(text).toContain('Originally: Face Pull');
+  });
+
+  it('keeps a skipped user-added occurrence visible: label, Skipped state, no link, no set rows', async () => {
+    await renderList([userAddedEntry({ isSkipped: true, sets: [] })]);
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(text).toContain('Face Pull');
+    expect(text).toContain('Skipped');
+    // No fabricated performance: no link, no set lines, no "No sets" line.
+    expect(text).not.toContain('No sets were logged.');
+    expect(
+      Array.from(document.querySelectorAll('a')).some((anchor) =>
+        anchor.textContent?.includes('Face Pull'),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps a zero-set NON-skipped user-added occurrence distinct from a skipped one', async () => {
+    await renderList([userAddedEntry({ isSkipped: false, sets: [] })]);
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(text).toContain('No sets were logged.');
+    expect(text).not.toContain('Skipped');
+    const link = Array.from(document.querySelectorAll('a')).find((anchor) =>
+      anchor.textContent?.includes('Face Pull'),
+    );
+    expect(link?.getAttribute('href')).toBe('/history/exercises/face-pull');
+  });
+
+  it('exposes no mutation controls in completed history', async () => {
+    await renderList([entry({}), userAddedEntry()]);
+
+    expect(document.querySelectorAll('form')).toHaveLength(0);
+    expect(document.querySelectorAll('button')).toHaveLength(0);
   });
 });

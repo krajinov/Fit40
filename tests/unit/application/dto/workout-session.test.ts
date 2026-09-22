@@ -193,6 +193,51 @@ describe('toCompletedSessionDto — detail entries carry the skip fact (M10 Slic
 
     expect(dto.entries.map((entry) => entry.isSkipped)).toEqual([false, true]);
   });
+
+  it('carries the persisted source on every completed-session entry (M11)', () => {
+    const r = createWorkoutSession({
+      id: 'session-completed-provenance',
+      userId: uid('user-1'),
+      enrollmentId: null,
+      scheduledWorkoutId: sid('sw-1'),
+      workoutId: wid('w-1'),
+      startedAt: new Date('2026-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 90 },
+        {
+          authoredExerciseId: eid('ex-002'),
+          order: 2,
+          prescription: rep(),
+          restSeconds: 0,
+          source: 'user_added',
+        },
+      ],
+    });
+    if (!r.ok) throw Error(r.error.message);
+    const withSet = logSessionSet(r.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!withSet.ok) throw Error(withSet.error.message);
+    const completed = completeWorkoutSession(withSet.data, new Date('2026-01-01T11:00:00Z'));
+    if (!completed.ok) throw Error(completed.error.message);
+
+    const dto = toCompletedSessionDto(
+      {
+        session: { ...completed.data, completedAt: new Date('2026-01-01T11:00:00Z') },
+        programName: 'Fit40 Beginner Strength',
+        workoutName: 'Full Body A',
+      },
+      new Map(),
+    );
+
+    // Provenance is projected straight from the persisted aggregate — the
+    // completed-history detail never infers it.
+    expect(dto.entries.map((entry) => entry.source)).toEqual(['template', 'user_added']);
+  });
 });
 
 describe('toWorkoutSessionDto — provenance projection (M11 Slice 1)', () => {

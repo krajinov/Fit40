@@ -121,6 +121,8 @@ interface HistoryLogSpec {
   readonly performedExerciseId?: string;
   /** Marks the occurrence explicitly skipped (M10) — never inferred. */
   readonly isSkipped?: boolean;
+  /** Persisted provenance (M11); omit for a template-authored occurrence. */
+  readonly source?: 'template' | 'user_added';
   readonly type: 'reps' | 'duration';
   readonly sets: ReadonlyArray<HistorySetSpec>;
 }
@@ -165,6 +167,9 @@ function historySession(spec: {
       order: index + 1,
       prescription: log.type === 'reps' ? reps() : duration(),
       restSeconds: 90,
+      // Persisted provenance (M11); omitted → the factory defaults to
+      // template-authored.
+      ...(log.source === undefined ? {} : { source: log.source }),
     })),
   });
   if (!created.ok) throw new Error(created.error.message);
@@ -1977,6 +1982,242 @@ describe('training history — skipped and reordered occurrences (M10)', () => {
       enrollmentId('enrollment-hist-a'),
     );
     expect(afterDetached.map(String)).not.toContain('fit40-beginner-strength-w2-1');
+  });
+});
+
+// ─── M11: user-added occurrences in history, progression and program progress ─
+
+describe('training history — user-added occurrences (M11)', () => {
+  it('includes a performed user-added occurrence in per-exercise history and progression', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-work',
+        startedAt: '2025-05-01T10:00:00Z',
+        completedAt: '2025-05-01T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          // Added during the workout (dead-bug) and performed normally.
+          {
+            exerciseId: 'ex-015',
+            type: 'reps',
+            sets: [{ reps: 12, weightKg: 15 }],
+            source: 'user_added',
+          },
+        ],
+      }),
+    );
+
+    // Per-exercise history keys on the PERFORMED id + set_logs existence; a
+    // user-added occurrence is an ordinary occurrence there.
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    expect(history.ok).toBe(true);
+    if (!history.ok) return;
+    expect(history.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-added-work', 2],
+    ]);
+    expect(history.data.entries[0]?.workingLoadKg).toBe(15);
+
+    // …and it feeds the progression window identically.
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-015')],
+      5,
+    );
+    expect(performances.map((p) => [p.exerciseId, p.sessionId, p.exerciseOrder])).toEqual([
+      ['ex-015', 'session-added-work', 2],
+    ]);
+  });
+
+  it('excludes a ZERO-SET user-added occurrence from per-exercise history and progression', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-zero',
+        startedAt: '2025-05-02T10:00:00Z',
+        completedAt: '2025-05-02T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          { exerciseId: 'ex-015', type: 'reps', sets: [], source: 'user_added' },
+        ],
+      }),
+    );
+
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    expect(history.ok).toBe(true);
+    if (!history.ok) return;
+    expect(history.data.entries).toEqual([]);
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-015')],
+      5,
+    );
+    expect(performances).toEqual([]);
+  });
+
+  it('excludes a SKIPPED user-added occurrence from per-exercise history and progression', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-skipped',
+        startedAt: '2025-05-03T10:00:00Z',
+        completedAt: '2025-05-03T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          { exerciseId: 'ex-015', type: 'reps', sets: [], isSkipped: true, source: 'user_added' },
+        ],
+      }),
+    );
+
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    expect(history.ok).toBe(true);
+    if (!history.ok) return;
+    expect(history.data.entries).toEqual([]);
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-015')],
+      5,
+    );
+    expect(performances).toEqual([]);
+  });
+
+  it('attributes a SUBSTITUTED user-added occurrence to the performed exercise only', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-sub',
+        startedAt: '2025-05-04T10:00:00Z',
+        completedAt: '2025-05-04T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          // The user added dead-bug, swapped it for one-arm-dumbbell-row and
+          // performed THAT: the added id stays authored, never performed.
+          {
+            exerciseId: 'ex-015',
+            performedExerciseId: 'ex-010',
+            type: 'reps',
+            sets: [{ reps: 10, weightKg: 18 }],
+            source: 'user_added',
+          },
+        ],
+      }),
+    );
+
+    const performed = await exerciseHistoryUseCase.execute({
+      userId: OWNER_A,
+      slug: 'one-arm-dumbbell-row',
+    });
+    expect(performed.ok).toBe(true);
+    if (!performed.ok) return;
+    expect(performed.data.entries.map((entry) => entry.sessionId)).toEqual(['session-added-sub']);
+
+    // The originally ADDED exercise gets no performance credit.
+    const authored = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    expect(authored.ok).toBe(true);
+    if (!authored.ok) return;
+    expect(authored.data.entries).toEqual([]);
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-010'), exerciseId('ex-015')],
+      5,
+    );
+    expect(performances.map((p) => p.exerciseId)).toEqual(['ex-010']);
+  });
+
+  it('keeps a template and a user-added occurrence of the SAME exercise as distinct occurrences', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-dup',
+        startedAt: '2025-05-05T10:00:00Z',
+        completedAt: '2025-05-05T11:00:00Z',
+        logs: [
+          // Template goblet squat (order 1), then the user added the SAME
+          // exercise again (order 2): two distinct occurrences.
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          {
+            exerciseId: 'ex-002',
+            type: 'reps',
+            sets: [{ reps: 8, weightKg: 22.5 }],
+            source: 'user_added',
+          },
+        ],
+      }),
+    );
+
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'goblet-squat' });
+    expect(history.ok).toBe(true);
+    if (!history.ok) return;
+    // Identity is (sessionId, exerciseOrder): same session, orders 2 and 1.
+    expect(history.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
+      ['session-added-dup', 2],
+      ['session-added-dup', 1],
+    ]);
+
+    const performances = await trainingHistoryRepository.listRecentCompletedExercisePerformances(
+      userId(OWNER_A),
+      [exerciseId('ex-002')],
+      5,
+    );
+    expect(performances.map((p) => p.exerciseOrder).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(new Set(performances.map((p) => String(p.sessionId))).size).toBe(1);
+  });
+
+  it('carries the persisted source into the completed-session detail', async () => {
+    await saveAll(
+      historySession({
+        id: 'session-added-detail',
+        startedAt: '2025-05-06T10:00:00Z',
+        completedAt: '2025-05-06T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          {
+            exerciseId: 'ex-015',
+            type: 'reps',
+            sets: [{ reps: 12, weightKg: 15 }],
+            source: 'user_added',
+          },
+        ],
+      }),
+    );
+
+    const detail = await detailUseCase.execute({
+      userId: OWNER_A,
+      sessionId: 'session-added-detail',
+    });
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.data.entries.map((entry) => [entry.exerciseOrder, entry.source])).toEqual([
+      [1, 'template'],
+      [2, 'user_added'],
+    ]);
+  });
+
+  it('never changes scheduled-workout program progress', async () => {
+    const { workoutSessionRepository } = await import('./setup');
+
+    // A completed session whose user-added occurrence is the only logged work
+    // still marks its scheduled workout completed exactly once — progress is
+    // session-completion identity, never the exercise mix.
+    await saveAll(
+      historySession({
+        id: 'session-added-progress',
+        startedAt: '2025-05-07T10:00:00Z',
+        completedAt: '2025-05-07T11:00:00Z',
+        logs: [
+          { exerciseId: 'ex-002', type: 'reps', sets: [] },
+          {
+            exerciseId: 'ex-015',
+            type: 'reps',
+            sets: [{ reps: 12, weightKg: 15 }],
+            source: 'user_added',
+          },
+        ],
+      }),
+    );
+
+    const scheduledIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentId('enrollment-hist-a'),
+    );
+    expect(scheduledIds.map(String)).toEqual(['fit40-beginner-strength-w1-1']);
   });
 });
 

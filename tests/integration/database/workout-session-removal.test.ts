@@ -212,6 +212,10 @@ describe('user-added occurrence removal persistence (M11 Slice 4)', () => {
     const rows = await loadLogRows('session-removal-key');
     expect(rows.map((row) => row.occurrenceKey)).toEqual([1, 2, 4]);
     expect(rows.map((row) => row.exerciseOrder)).toEqual([1, 2, 3]);
+    // The re-added exercise Y is a fresh user-added occurrence: it did NOT
+    // inherit the removed key, and it kept the user-added provenance.
+    expect(rows[2]?.exerciseId).toBe('ex-015');
+    expect(rows.map((row) => row.source)).toEqual(['template', 'user_added', 'user_added']);
     expect((await loadSessionRow('session-removal-key'))?.nextOccurrenceKey).toBe(5);
   });
 

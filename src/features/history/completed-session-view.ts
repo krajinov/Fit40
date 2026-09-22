@@ -32,6 +32,7 @@
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
 import { err, ok, type Result } from '@/domain/types/result';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
+import { resolveOccurrenceProvenanceLabel } from '@/features/sessions/session-provenance-views';
 import {
   formatHistoryCount,
   formatHistoryDate,
@@ -58,6 +59,15 @@ export interface CompletedSessionEntryView {
    * identity, and history stays read-only (no substitution controls).
    */
   readonly originallyName: string | null;
+  /**
+   * Provenance label for a session-added occurrence ("Added during workout"),
+   * or null for a template-authored one (M11). Derived ONLY from the persisted
+   * `source` through the shared `session-provenance-views` helper — never from
+   * order, identity, substitution state or history position. A user-added
+   * occurrence keeps the label after completion, including when it is
+   * substituted and/or skipped.
+   */
+  readonly provenanceLabel: string | null;
   /** `/history/exercises/<slug>` when a valid slug resolved, else null. */
   readonly historyHref: string | null;
   /**
@@ -105,6 +115,10 @@ function toEntryView(
       entry.isSubstituted && entry.authoredExerciseName !== null
         ? entry.authoredExerciseName
         : null,
+    // Provenance (M11) rides the SAME pure helper Active Workout uses, so the
+    // label has exactly one source-to-label mapping. `source` is the only
+    // input; template occurrences render nothing.
+    provenanceLabel: resolveOccurrenceProvenanceLabel(entry.source),
     // A skipped occurrence (M10) never links into per-exercise performance
     // history: it carries zero set logs and is intentionally excluded there.
     historyHref:

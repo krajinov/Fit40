@@ -11,6 +11,10 @@ import { cn } from '@/lib/utils';
 
 import { addExerciseAction } from '@/features/sessions/actions/add-exercise';
 import {
+  EMPTY_ADD_EXERCISE_DRAFT,
+  type AddExerciseDraft,
+} from '@/features/sessions/add-exercise-draft';
+import {
   ADD_EXERCISE_EMPTY_LABEL,
   ADD_EXERCISE_LABEL,
   ADD_EXERCISE_NO_CATALOG_LABEL,
@@ -46,16 +50,23 @@ interface AddSessionExercisePanelProps {
  * touches an occurrence's logger draft or disclosure, so appending an
  * occurrence cannot disturb the existing keyed occurrence list.
  *
- * The search field filters the ALREADY-LOADED catalog for display only and
- * sits outside the `<form>`, so typing (including Enter) never submits;
- * selection and submission are native radios + native submit through
- * `useActionState`. The prescription inputs live in their own client island
- * (`AddExercisePrescriptionFields`) and start empty — there is no default
- * prescription, no auto-selected exercise and no AI suggestion.
+ * The user-visible Add draft — the selected `exerciseId` AND the explicit
+ * prescription (`scheme`, `sets`, `targetReps`, `durationSeconds`) — is owned
+ * HERE, as one controlled state object (`add-exercise-draft.ts`), so the draft
+ * can never be split between DOM state and component state (PR #14 review
+ * finding). React 19 resets a form's DOM after its action resolves — including
+ * error resolutions — which would silently wipe an uncontrolled catalog
+ * selection while the controlled prescription survived; therefore the whole
+ * draft is controlled, PRESERVED on every expected failure and cleared as one
+ * unit only when the Add succeeds, so the next Add must state a fresh explicit
+ * prescription (never a default, never a stale one).
  *
- * Expected errors surface as user-facing copy via `sessionActionErrorLabel`;
- * the reload decision for stale server state stays centralized in
- * `shouldRefreshAfterSessionMutationError` through
+ * The search field filters the ALREADY-LOADED catalog for display only and
+ * sits outside the `<form>`, so typing (including Enter) never submits. It is
+ * deliberately NOT part of the draft: search text is display-only and never
+ * submitted training prescription. Submission is a native form through
+ * `useActionState`, and the reload decision for stale server state stays
+ * centralized in `shouldRefreshAfterSessionMutationError` through
  * `createSessionMutationSubmit` (the same refresh path every other session
  * mutation uses — never a parallel one).
  */
@@ -69,6 +80,8 @@ export function AddSessionExercisePanel({
 }: AddSessionExercisePanelProps) {
   const router = useRouter();
   const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState<AddExerciseDraft>(EMPTY_ADD_EXERCISE_DRAFT);
+  const [draftSyncRevision, setDraftSyncRevision] = useState(0);
   const searchId = useId();
 
   function applyRouteFields(formData: FormData): void {
@@ -84,7 +97,34 @@ export function AddSessionExercisePanel({
     applyRouteFields,
     action: addExerciseAction,
   });
-  const [state, formAction, pending] = useActionState(submit, initialState);
+
+  /**
+   * The shared submit owns route fields, the action call and the centralized
+   * stale-state refresh; Add adds exactly one presentation concern on top of
+   * it: the draft is cleared as ONE unit only when the action returned success
+   * (an expected failure keeps the complete draft for correction).
+   *
+   * `draftSyncRevision` exists because React 19 resets a form's DOM once a form
+   * action resolves and does NOT restore `checked` on controlled checkable
+   * inputs (facebook/react#31695): the native `form.reset()` returns every
+   * radio to its mount-time `defaultChecked`, so a failed Add would leave the
+   * visible draft empty while this panel's state still held it (a success only
+   * looks right because clearing the draft changes the `checked` prop React
+   * then writes). Bumping the revision after every resolved action remounts the
+   * two draft-owned islands from the CURRENT draft, which is how React
+   * re-asserts a controlled value it never saw change. Nothing else reads it.
+   */
+  const [state, formAction, pending] = useActionState(
+    async (previous: SessionActionState, formData: FormData): Promise<SessionActionState> => {
+      const result = await submit(previous, formData);
+      if (result.ok) {
+        setDraft(EMPTY_ADD_EXERCISE_DRAFT);
+      }
+      setDraftSyncRevision((revision) => revision + 1);
+      return result;
+    },
+    initialState,
+  );
 
   const visibleExercises = filterAddableExercises(addableExercises, query);
   const emptyLabel =
@@ -119,8 +159,28 @@ export function AddSessionExercisePanel({
         </div>
 
         <form action={formAction} className="flex flex-col gap-4">
-          <AddExerciseCatalogOptions exercises={visibleExercises} emptyLabel={emptyLabel} />
-          <AddExercisePrescriptionFields />
+          <AddExerciseCatalogOptions
+            key={`catalog-${draftSyncRevision}`}
+            exercises={visibleExercises}
+            emptyLabel={emptyLabel}
+            selectedExerciseId={draft.exerciseId}
+            onSelectExercise={(exerciseId) => setDraft((previous) => ({ ...previous, exerciseId }))}
+          />
+          <AddExercisePrescriptionFields
+            key={`prescription-${draftSyncRevision}`}
+            scheme={draft.scheme}
+            sets={draft.sets}
+            targetReps={draft.targetReps}
+            durationSeconds={draft.durationSeconds}
+            onSchemeChange={(scheme) => setDraft((previous) => ({ ...previous, scheme }))}
+            onSetsChange={(sets) => setDraft((previous) => ({ ...previous, sets }))}
+            onTargetRepsChange={(targetReps) =>
+              setDraft((previous) => ({ ...previous, targetReps }))
+            }
+            onDurationSecondsChange={(durationSeconds) =>
+              setDraft((previous) => ({ ...previous, durationSeconds }))
+            }
+          />
 
           <div>
             <button

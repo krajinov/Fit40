@@ -1,32 +1,54 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId } from 'react';
 
 import { SelectableRadioCard } from '@/components/shared/SelectableRadioCard';
 import { Input } from '@/components/ui/input';
+import type { AddExerciseScheme } from '@/features/sessions/add-exercise-draft';
 
-/** The two explicit prescription schemes a session-added occurrence supports. */
-export type AddExerciseScheme = 'reps' | 'duration';
+interface AddExercisePrescriptionFieldsProps {
+  /** Current scheme from the parent-owned Add draft (`null` = not chosen yet). */
+  readonly scheme: AddExerciseScheme | null;
+  /** Current sets text from the parent-owned Add draft. */
+  readonly sets: string;
+  /** Current target reps text from the parent-owned Add draft. */
+  readonly targetReps: string;
+  /** Current seconds text from the parent-owned Add draft. */
+  readonly durationSeconds: string;
+  readonly onSchemeChange: (scheme: AddExerciseScheme) => void;
+  readonly onSetsChange: (sets: string) => void;
+  readonly onTargetRepsChange: (targetReps: string) => void;
+  readonly onDurationSecondsChange: (durationSeconds: string) => void;
+}
 
 const fieldClass = 'h-12 rounded-[10px] md:h-[52px] md:rounded-control';
 
 /**
  * The EXPLICIT prescription inputs of the Add Exercise form (M11).
  *
+ * Presentational only: every value and change callback comes from the
+ * parent-owned Add draft (`add-exercise-draft.ts`), so prescription state can
+ * never diverge from the exercise selection — the whole draft is preserved on
+ * an expected failure and cleared as one unit on success (PR #14 review
+ * finding). The inputs are controlled rather than DOM-owned for the same
+ * reason `SetLoggerForm` is: React 19 resets a form's DOM after its action
+ * resolves, including error resolutions.
+ *
  * The user must choose the scheme before any numeric field appears, and every
  * field starts EMPTY: there is no default prescription (no "3x10"), no catalog
  * default and no AI recommendation. `minReps = maxReps = targetReps` and the
  * rest snapshot stay server/domain rules — nothing about them is exposed here.
- *
- * The inputs are controlled so React 19's post-action form reset cannot wipe
- * the user's typed values on a failed submit (the same reason `SetLoggerForm`
- * is controlled). State is component-local; nothing is persisted.
  */
-export function AddExercisePrescriptionFields() {
-  const [scheme, setScheme] = useState<AddExerciseScheme | null>(null);
-  const [sets, setSets] = useState('');
-  const [targetReps, setTargetReps] = useState('');
-  const [durationSeconds, setDurationSeconds] = useState('');
+export function AddExercisePrescriptionFields({
+  scheme,
+  sets,
+  targetReps,
+  durationSeconds,
+  onSchemeChange,
+  onSetsChange,
+  onTargetRepsChange,
+  onDurationSecondsChange,
+}: AddExercisePrescriptionFieldsProps) {
   const setsId = useId();
   const targetId = useId();
 
@@ -42,7 +64,7 @@ export function AddExercisePrescriptionFields() {
             value="reps"
             label="Reps"
             checked={scheme === 'reps'}
-            onChange={() => setScheme('reps')}
+            onChange={() => onSchemeChange('reps')}
             className="md:flex-1"
           />
           <SelectableRadioCard
@@ -50,7 +72,7 @@ export function AddExercisePrescriptionFields() {
             value="duration"
             label="Duration"
             checked={scheme === 'duration'}
-            onChange={() => setScheme('duration')}
+            onChange={() => onSchemeChange('duration')}
             className="md:flex-1"
           />
         </div>
@@ -74,7 +96,7 @@ export function AddExercisePrescriptionFields() {
               required
               inputMode="numeric"
               value={sets}
-              onChange={(event) => setSets(event.target.value)}
+              onChange={(event) => onSetsChange(event.target.value)}
               className={fieldClass}
             />
           </div>
@@ -96,7 +118,7 @@ export function AddExercisePrescriptionFields() {
                 required
                 inputMode="numeric"
                 value={targetReps}
-                onChange={(event) => setTargetReps(event.target.value)}
+                onChange={(event) => onTargetRepsChange(event.target.value)}
                 className={fieldClass}
               />
             ) : (
@@ -109,7 +131,7 @@ export function AddExercisePrescriptionFields() {
                 required
                 inputMode="numeric"
                 value={durationSeconds}
-                onChange={(event) => setDurationSeconds(event.target.value)}
+                onChange={(event) => onDurationSecondsChange(event.target.value)}
                 className={fieldClass}
               />
             )}

@@ -4,18 +4,24 @@
  * Presentation tests for the M11 Add Exercise panel: the explicit affordance,
  * display-only catalog search, explicit exercise/scheme selection, the empty
  * explicit prescription fields, the pending guard against duplicate submits,
- * and truthful error surfacing. `AddExercisePrescriptionFields` and the real
- * `SetLoggerForm` are NOT mocked — the local state under test lives in them;
- * only the Server Action and the router are mocked.
+ * truthful error surfacing, and the ONE-OWNER draft semantics (PR #14 review
+ * finding): an expected failure preserves the COMPLETE draft (exercise +
+ * scheme + numbers) and a successful Add clears it as one unit, so a stale
+ * prescription can never ride along with the next Add. The children
+ * (`AddExerciseCatalogOptions`, `AddExercisePrescriptionFields`) and the real
+ * `SetLoggerForm` are NOT mocked — the draft under test is the panel's; only
+ * the Server Action and the router are mocked.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+const routerMocks = vi.hoisted(() => ({ refresh: vi.fn() }));
+
 vi.mock('@/features/sessions/actions/add-exercise', () => ({ addExerciseAction: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: routerMocks.refresh }),
 }));
 
 import type { ExerciseSummaryDto } from '@/application/dto/exercise';
@@ -115,6 +121,25 @@ function optionIds(container: HTMLElement): string[] {
   );
 }
 
+/** The checked values of one radio group (order = document order). */
+function checkedValues(container: HTMLElement, name: string): string[] {
+  return Array.from(
+    container.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`),
+  ).map((input) => input.value);
+}
+
+/** The draft's selected catalog exercise (`null` when nothing is selected). */
+function selectedExerciseId(container: HTMLElement): string | null {
+  return checkedValues(container, 'exerciseId')[0] ?? null;
+}
+
+/** The FormData handed to the Server Action on a given submission. */
+function submittedFormData(index: number): FormData {
+  const call = vi.mocked(addExerciseAction).mock.calls[index];
+  if (call === undefined) throw new Error(`missing addExerciseAction call ${index}`);
+  return call[0];
+}
+
 /** Fills the explicit prescription for a reps add. */
 async function fillRepsFields(container: HTMLElement, sets = '3', targetReps = '8'): Promise<void> {
   await click(required(container, 'input[name="scheme"][value="reps"]'));
@@ -142,6 +167,7 @@ async function submitForm(container: HTMLElement): Promise<void> {
 describe('AddSessionExercisePanel — explicit flow', () => {
   beforeEach(() => {
     vi.mocked(addExerciseAction).mockReset();
+    routerMocks.refresh.mockReset();
   });
 
   it('renders the explicit Add exercise affordance with the catalog', async () => {
@@ -328,5 +354,143 @@ describe('AddSessionExercisePanel — explicit flow', () => {
 
     expect(container.textContent).not.toContain('Remove');
     expect(container.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('preserves the COMPLETE reps draft — exercise, scheme, sets and reps — on an expected failure', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({
+      ok: false,
+      error: { code: 'VALIDATION_ERROR', message: 'bad' },
+    });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await fillRepsFields(container, '5', '12');
+    await submitForm(container);
+
+    // The same exercise and the same scheme stay selected…
+    expect(selectedExerciseId(container)).toBe('ex-bench');
+    expect(checkedValues(container, 'scheme')).toEqual(['reps']);
+    // …and the numeric prescription is unchanged: nothing is partially cleared.
+    expect(required<HTMLInputElement>(container, 'input[name="sets"]').value).toBe('5');
+    expect(required<HTMLInputElement>(container, 'input[name="targetReps"]').value).toBe('12');
+  });
+
+  it('preserves the COMPLETE duration draft on an expected failure', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({
+      ok: false,
+      error: { code: 'EXERCISE_NOT_FOUND', message: 'gone' },
+    });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await click(required(container, 'input[name="scheme"][value="duration"]'));
+    await typeInto(required<HTMLInputElement>(container, 'input[name="sets"]'), '2');
+    await typeInto(required<HTMLInputElement>(container, 'input[name="durationSeconds"]'), '45');
+    await submitForm(container);
+
+    expect(selectedExerciseId(container)).toBe('ex-row');
+    expect(checkedValues(container, 'scheme')).toEqual(['duration']);
+    expect(required<HTMLInputElement>(container, 'input[name="sets"]').value).toBe('2');
+    expect(required<HTMLInputElement>(container, 'input[name="durationSeconds"]').value).toBe('45');
+  });
+
+  it('preserves the complete draft across a stale-state failure that refreshes the route', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({
+      ok: false,
+      error: { code: 'SESSION_MODIFIED', message: 'stale' },
+    });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await fillRepsFields(container, '4', '6');
+    await submitForm(container);
+
+    // The centralized stale-state behavior refreshes the route…
+    expect(routerMocks.refresh).toHaveBeenCalledTimes(1);
+    // …and the panel refreshes nothing on its own: the draft stays complete.
+    expect(selectedExerciseId(container)).toBe('ex-squat');
+    expect(checkedValues(container, 'scheme')).toEqual(['reps']);
+    expect(required<HTMLInputElement>(container, 'input[name="sets"]').value).toBe('4');
+    expect(required<HTMLInputElement>(container, 'input[name="targetReps"]').value).toBe('6');
+  });
+
+  it('resubmits the preserved draft unchanged after an expected failure', async () => {
+    vi.mocked(addExerciseAction)
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'SESSION_ALREADY_COMPLETED', message: 'done' },
+      })
+      .mockResolvedValueOnce({ ok: true });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await fillRepsFields(container, '5', '12');
+    await submitForm(container);
+
+    // No re-entry: the user just submits the preserved draft again.
+    await submitForm(container);
+
+    const retry = submittedFormData(1);
+    expect(retry.getAll('exerciseId')).toEqual(['ex-bench']);
+    expect(retry.get('scheme')).toBe('reps');
+    expect(retry.get('sets')).toBe('5');
+    expect(retry.get('targetReps')).toBe('12');
+  });
+
+  it('clears the COMPLETE reps draft after a successful Add', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await fillRepsFields(container, '3', '8');
+    await submitForm(container);
+
+    expect(selectedExerciseId(container)).toBeNull();
+    expect(checkedValues(container, 'scheme')).toEqual([]);
+    // The scheme reset hides the numeric fields: nothing is left to reuse.
+    expect(container.querySelector('input[name="sets"]')).toBeNull();
+    expect(container.querySelector('input[name="targetReps"]')).toBeNull();
+    expect(container.querySelector('input[name="durationSeconds"]')).toBeNull();
+  });
+
+  it('clears the duration draft after a successful Add and starts the next Add empty', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-bench"]'));
+    await click(required(container, 'input[name="scheme"][value="duration"]'));
+    await typeInto(required<HTMLInputElement>(container, 'input[name="sets"]'), '2');
+    await typeInto(required<HTMLInputElement>(container, 'input[name="durationSeconds"]'), '45');
+    await submitForm(container);
+
+    expect(selectedExerciseId(container)).toBeNull();
+    expect(checkedValues(container, 'scheme')).toEqual([]);
+    expect(container.querySelector('input[name="durationSeconds"]')).toBeNull();
+
+    // Re-choosing the scheme shows EMPTY fields — never the previous 2 x 45s.
+    await click(required(container, 'input[name="scheme"][value="duration"]'));
+
+    expect(required<HTMLInputElement>(container, 'input[name="sets"]').value).toBe('');
+    expect(required<HTMLInputElement>(container, 'input[name="durationSeconds"]').value).toBe('');
+  });
+
+  it('cannot resubmit a stale prescription for the next Add without entering it again', async () => {
+    vi.mocked(addExerciseAction).mockResolvedValue({ ok: true });
+    const container = await renderPanel();
+
+    await click(required(container, 'input[name="exerciseId"][value="ex-row"]'));
+    await fillRepsFields(container, '3', '8');
+    await submitForm(container);
+
+    // Second Add: only an exercise is chosen — no prescription re-entered.
+    await click(required(container, 'input[name="exerciseId"][value="ex-squat"]'));
+    await submitForm(container);
+
+    const second = submittedFormData(1);
+    expect(second.getAll('exerciseId')).toEqual(['ex-squat']);
+    expect(second.get('scheme')).toBeNull();
+    expect(second.get('sets')).toBeNull();
+    expect(second.get('targetReps')).toBeNull();
+    expect(second.get('durationSeconds')).toBeNull();
   });
 });

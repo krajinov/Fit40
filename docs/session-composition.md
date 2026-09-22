@@ -473,10 +473,23 @@ the replacement exercise only.
 
 - **Add** (`AddSessionExercisePanel`, client boundary): a native `<details>`
   disclosure containing a **display-only** search field (outside the `<form>`,
-  so typing never submits), the catalog as native radio cards (no
+  so typing never submits), the catalog as **controlled** native radio cards (no
   pre-selection, duplicates allowed), an explicit Reps/Duration choice, and
   explicitly **empty** sets/target fields. Submission is a native form through
   `useActionState` and the shared `createSessionMutationSubmit`.
+- **One owner for the draft:** the panel owns the whole user-visible Add draft
+  (`add-exercise-draft.ts`: `exerciseId`, `scheme`, `sets`, `targetReps`,
+  `durationSeconds`) as a single controlled state object; the catalog and
+  prescription children are presentational views over it, so the draft can
+  never be split between DOM state and component state. An expected failure
+  (`VALIDATION_ERROR`, `INVALID_INPUT`, `EXERCISE_NOT_FOUND`, `SESSION_MODIFIED`,
+  `SESSION_ALREADY_COMPLETED`, `NOT_ENROLLED`, …) preserves the COMPLETE draft;
+  success clears it as one unit, so the next Add must state a fresh explicit
+  prescription (never a default, never a stale one). Because React 19's
+  post-action `form.reset()` returns controlled radios to their mount-time
+  `defaultChecked` (facebook/react#31695), the panel re-asserts its draft to the
+  DOM after each resolved action instead of letting the reset partially clear
+  the visible selection. Search text is display-only and NOT part of the draft.
 - The catalog comes from the Active Workout's **single** exercise-catalog read
   (`GetActiveWorkoutExerciseDataUseCase.addableExercises`) — no second query,
   no N+1, and exercises already present stay addable.
@@ -535,7 +548,7 @@ M11 deliberately does **not** include:
 | `addableExercises` from ONE catalog read; candidates unchanged | Application (unit) | `tests/unit/application/use-cases/get-active-workout-exercise-data.test.ts` |
 | Add/Remove action schemas (no `occurrenceKey`/`nextOccurrenceKey`/`source`/`userId` authority) | Presentation (unit) | `tests/unit/features/sessions/session-actions-schema.test.ts` |
 | Add/Remove actions: trusted identity, delegation, revalidation, error mapping, rethrow | Presentation (unit) | `tests/unit/features/sessions/add-exercise-actions.test.ts`, `remove-exercise-actions.test.ts` |
-| Add panel flow (search/selection/scheme/fields/pending/errors/empty) | Presentation (unit) | `tests/unit/features/sessions/add-session-exercise-panel.test.ts` |
+| Add panel flow (search/selection/scheme/fields/pending/errors/empty) + one-owner draft (failure preserves the complete draft, success clears it, no stale prescription on the next Add) | Presentation (unit) | `tests/unit/features/sessions/add-session-exercise-panel.test.ts` |
 | Remove control states + refresh semantics; card affordances | Presentation (unit) | `tests/unit/features/sessions/session-removal-control.test.ts`, `session-exercise-card.test.ts` |
 | Provenance mapping + card/upcoming rendering; render identities across append/remove | Presentation (unit) | `tests/unit/features/sessions/session-provenance-views.test.ts`, `session-occurrence-band-crossing.test.ts` |
 | Completed-history provenance rendering (template/substituted/skipped/zero-set) | Presentation (unit) | `tests/unit/features/history/completed-session-view.test.ts`, `completed-session-entry-list.test.ts` |

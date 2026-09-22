@@ -32,6 +32,9 @@ vi.mock('@/features/sessions/actions/unskip-exercise', () => ({
 vi.mock('@/features/sessions/actions/move-exercise', () => ({
   moveExerciseAction: vi.fn(),
 }));
+vi.mock('@/features/sessions/actions/remove-exercise', () => ({
+  removeExerciseAction: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -121,6 +124,7 @@ function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): Session
     kind: 'upcoming',
     name: 'Dumbbell Bench Press',
     originallyName: null,
+    provenanceLabel: null,
     equipmentLabel: 'Dumbbell',
     prescriptionLabel: '3 × 8–10',
     badge: { style: 'neutral', label: 'Upcoming', mobileVisible: false },
@@ -128,6 +132,9 @@ function upcomingCard(overrides: Partial<SessionExerciseCardView> = {}): Session
     logger,
     substitution: mutableSubstitution,
     adjustment: openAdjustment,
+    // Template-authored by default: the Remove control only renders for a
+    // user-added occurrence, which a test overrides explicitly.
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     ...overrides,
   };
 }
@@ -140,7 +147,9 @@ function sessionLog(order: number): WorkoutSessionExerciseDto {
     isSkipped: false,
     // Defaults to the order (the fixture's implicit occurrenceKey).
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: true },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,

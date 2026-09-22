@@ -18,6 +18,7 @@
  */
 
 import type { CompletedSessionContext } from '@/application/ports/training-history-repository';
+import type { OccurrenceSource } from '@/domain/entities/workout-session';
 import type { EquipmentType } from '@/domain/types/exercise';
 import { calculateSessionMetrics } from '@/domain/services/session-metrics';
 import { resolveOccurrenceSubstitutionState } from '@/domain/services/session-exercise-substitution';
@@ -80,6 +81,13 @@ export interface CompletedSessionEntryDto {
    * naturally absent from per-exercise performance history regardless.
    */
   readonly isSkipped: boolean;
+  /**
+   * The persisted occurrence provenance (M11): `'template'` when the workout
+   * template authored this occurrence, `'user_added'` when the user explicitly
+   * added it during the session. A persisted fact — history never infers it
+   * from order, the identities, substitution state or position.
+   */
+  readonly source: OccurrenceSource;
   /** Position within the session — the entry's identity component. */
   readonly exerciseOrder: number;
   /**
@@ -154,6 +162,8 @@ function serializeEntry(
     performedExerciseId: log.performedExerciseId,
     isSubstituted: substitution.isSubstituted,
     isSkipped: log.isSkipped,
+    // Provenance is projected straight from the persisted aggregate.
+    source: log.source,
     exerciseOrder: log.order,
     exerciseName: performed?.name ?? null,
     authoredExerciseName: authored?.name ?? null,

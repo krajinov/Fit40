@@ -202,6 +202,7 @@ Invariants are rules that must always be true. They are enforced **at constructi
 | Program weeks must be sequential | `TrainingProgram` factory |
 | SetLog reps must be positive | `SetLog` factory |
 | Enrollment start date must be ≤ end date (if set) | `ProgramEnrollment` factory |
+| Session occurrence keys are unique, and the occurrence-key high-water mark (`nextOccurrenceKey`) is a positive integer greater than every existing key | `WorkoutSession` factory (see [`docs/session-composition.md`](session-composition.md)) |
 
 ### Enforcement Rules
 

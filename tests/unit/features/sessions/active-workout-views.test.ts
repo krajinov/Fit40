@@ -64,7 +64,11 @@ function log(
     // Defaults to the order (the fixture's implicit occurrenceKey); tests
     // that exercise reorder stability override it explicitly.
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    // Template-authored by default: removal is blocked for these fixtures
+    // unless a test overrides it explicitly.
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,

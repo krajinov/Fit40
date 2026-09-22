@@ -28,6 +28,7 @@ import {
   resolveOccurrenceSubstitutionEligibility,
   resolveOccurrenceSubstitutionState,
 } from '@/domain/services/session-exercise-substitution';
+import { resolveOccurrenceRemovalEligibility } from '@/domain/services/session-exercise-composition';
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -241,15 +242,23 @@ export function toTrainingHistorySessionDto(
       const substitution = resolveOccurrenceSubstitutionState(log);
       const eligibility = resolveOccurrenceSubstitutionEligibility(entry.session, log);
       const adjustment = resolveOccurrenceAdjustmentEligibility(entry.session, log);
+      const removal = resolveOccurrenceRemovalEligibility(entry.session, log);
       return {
         authoredExerciseId: substitution.authoredExerciseId,
         performedExerciseId: substitution.performedExerciseId,
         isSubstituted: substitution.isSubstituted,
         isSkipped: log.isSkipped,
         occurrenceKey: log.occurrenceKey,
+        source: log.source,
         substitutionEligibility: {
           blockedBy: eligibility.blockedBy,
           canRestore: eligibility.canRestore,
+        },
+        // History is completed-only, so the domain always reports the
+        // completed-session block: removal is frozen there.
+        removalEligibility: {
+          canRemove: removal.canRemove,
+          blockedBy: removal.blockedBy,
         },
         adjustmentEligibility: {
           isSkipped: adjustment.isSkipped,

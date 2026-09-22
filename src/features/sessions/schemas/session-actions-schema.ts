@@ -131,3 +131,45 @@ export const moveExerciseSchema = z.object({
   expectedSessionVersion: expectedSessionVersionSchema,
   direction: moveDirectionSchema,
 });
+
+/**
+ * Add Exercise (M11): the explicitly selected catalog exercise plus the
+ * explicitly chosen prescription. The client submits ONLY these fields —
+ * `userId` comes from the trusted authenticated session, and the domain
+ * derives the occurrence order, occurrence key, high-water mark, provenance,
+ * authored/performed identities and rest snapshot. The discriminated union
+ * makes the two schemes non-interchangeable, so an extra `durationSeconds` on
+ * a reps payload (or vice versa) is stripped by the schema and can never
+ * drive the persisted prescription.
+ */
+const addExerciseBaseShape = {
+  sessionId: sessionIdSchema,
+  exerciseId: z.string().min(1),
+  expectedSessionVersion: expectedSessionVersionSchema,
+  sets: z.coerce.number().int().positive(),
+};
+
+export const addExerciseSchema = z.discriminatedUnion('scheme', [
+  z.object({
+    ...addExerciseBaseShape,
+    scheme: z.literal('reps'),
+    targetReps: z.coerce.number().int().positive(),
+  }),
+  z.object({
+    ...addExerciseBaseShape,
+    scheme: z.literal('duration'),
+    durationSeconds: z.coerce.number().int().positive(),
+  }),
+]);
+
+/**
+ * Remove Exercise (M11): the user-added occurrence to remove, addressed by its
+ * business locator and the rendered session version. No userId — identity
+ * comes from the trusted authenticated session — and no occurrenceKey,
+ * provenance or identity field: those are never command authority.
+ */
+export const removeExerciseSchema = z.object({
+  sessionId: sessionIdSchema,
+  exerciseOrder: exerciseOrderSchema,
+  expectedSessionVersion: expectedSessionVersionSchema,
+});

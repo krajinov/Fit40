@@ -11,6 +11,7 @@ vi.mock('@/features/history/services', () => ({
 }));
 
 import { toCompletedSessionView } from '@/features/history/completed-session-view';
+import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -33,6 +34,7 @@ function sessionDto(overrides?: {
       [
         {
           authoredExerciseId: 'ex-001',
+          source: 'template',
           performedExerciseId: 'ex-001',
           isSubstituted: false,
           isSkipped: false,
@@ -101,6 +103,7 @@ describe('toCompletedSessionView', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
         authoredExerciseId: 'ex-404',
+        source: 'template',
         performedExerciseId: 'ex-404',
         isSubstituted: false,
         isSkipped: false,
@@ -125,6 +128,7 @@ describe('toCompletedSessionView', () => {
     const entries: CompletedSessionDto['entries'] = [
       {
         authoredExerciseId: 'ex-015',
+        source: 'template',
         performedExerciseId: 'ex-015',
         isSubstituted: false,
         isSkipped: false,
@@ -153,6 +157,7 @@ describe('toCompletedSessionView', () => {
     const badSlug: CompletedSessionDto['entries'] = [
       {
         authoredExerciseId: 'ex-099',
+        source: 'template',
         performedExerciseId: 'ex-099',
         isSubstituted: false,
         isSkipped: false,
@@ -175,6 +180,7 @@ describe('toCompletedSessionView', () => {
       entries: [
         {
           authoredExerciseId: 'ex-404',
+          source: 'template',
           performedExerciseId: 'ex-404',
           isSubstituted: false,
           isSkipped: false,
@@ -210,6 +216,7 @@ describe('toCompletedSessionView', () => {
   }): CompletedSessionDto['entries'][number] {
     return {
       authoredExerciseId: 'ex-002',
+      source: 'template',
       performedExerciseId: overrides?.performedExerciseId ?? 'ex-008',
       isSubstituted: overrides?.isSubstituted ?? true,
       isSkipped: true,
@@ -296,6 +303,7 @@ describe('toCompletedSessionView', () => {
       { ...skippedEntry({ exerciseName: 'Dumbbell Bench Press' }), exerciseOrder: 1 },
       {
         authoredExerciseId: 'ex-001',
+        source: 'template',
         performedExerciseId: 'ex-001',
         isSubstituted: false,
         isSkipped: false,
@@ -310,6 +318,7 @@ describe('toCompletedSessionView', () => {
       },
       {
         authoredExerciseId: 'ex-015',
+        source: 'template',
         performedExerciseId: 'ex-015',
         isSubstituted: false,
         isSkipped: false,
@@ -348,6 +357,7 @@ describe('toCompletedSessionView', () => {
     }): CompletedSessionDto['entries'][number] {
       return {
         authoredExerciseId: 'ex-002',
+        source: 'template',
         performedExerciseId: overrides?.performedExerciseId ?? 'ex-008',
         isSubstituted: overrides?.isSubstituted ?? true,
         isSkipped: false,
@@ -426,5 +436,150 @@ describe('toCompletedSessionView', () => {
       expect(view.entries[0]?.name).toBe('Push-up');
       expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
     });
+  });
+});
+
+// ─── M11 occurrence provenance in completed history ──────────────────────────
+
+/**
+ * A completed-session entry the user added during the workout. Defaults to a
+ * performed-as-authored, non-skipped, logged occurrence; every field is
+ * overridable so provenance can be exercised against substitution, skip and
+ * zero-set states.
+ */
+function userAddedEntry(
+  overrides: Partial<CompletedSessionDto['entries'][number]> = {},
+): CompletedSessionDto['entries'][number] {
+  return {
+    authoredExerciseId: 'ex-100',
+    performedExerciseId: 'ex-100',
+    isSubstituted: false,
+    isSkipped: false,
+    source: 'user_added',
+    exerciseOrder: 2,
+    exerciseName: 'Face Pull',
+    authoredExerciseName: 'Face Pull',
+    exerciseSlug: 'face-pull',
+    equipment: 'resistance-band',
+    restSeconds: 0,
+    prescription: { type: 'reps', sets: 3, minReps: 12, maxReps: 12 },
+    sets: [{ type: 'reps', setNumber: 1, reps: 12, weightKg: 20, rpe: null }],
+    ...overrides,
+  };
+}
+
+describe('toCompletedSessionView — occurrence provenance (M11)', () => {
+  it('labels only a persisted user-added occurrence', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [
+          // Default fixture entry: template-authored.
+          {
+            authoredExerciseId: 'ex-001',
+            performedExerciseId: 'ex-001',
+            isSubstituted: false,
+            isSkipped: false,
+            source: 'template',
+            exerciseOrder: 1,
+            exerciseName: 'Goblet Squat',
+            authoredExerciseName: 'Goblet Squat',
+            exerciseSlug: 'goblet-squat',
+            equipment: 'kettlebell',
+            restSeconds: 90,
+            prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+            sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 50, rpe: null }],
+          },
+          userAddedEntry(),
+        ],
+      }),
+    );
+
+    expect(view.entries.map((entry) => entry.provenanceLabel)).toEqual([
+      null,
+      ADDED_DURING_WORKOUT_LABEL,
+    ]);
+  });
+
+  it('never infers provenance from order, identity or substitution state', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [
+          // A SUBSTITUTED template occurrence: performed != authored, but the
+          // persisted source still says template.
+          {
+            authoredExerciseId: 'ex-001',
+            performedExerciseId: 'ex-008',
+            isSubstituted: true,
+            isSkipped: false,
+            source: 'template',
+            exerciseOrder: 1,
+            exerciseName: 'Dumbbell Bench Press',
+            authoredExerciseName: 'Goblet Squat',
+            exerciseSlug: 'dumbbell-bench-press',
+            equipment: 'dumbbell',
+            restSeconds: 90,
+            prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+            sets: [],
+          },
+          // A user-added occurrence at order 1 with identical identities.
+          userAddedEntry({ exerciseOrder: 1 }),
+        ],
+      }),
+    );
+
+    expect(view.entries[0]?.provenanceLabel).toBeNull();
+    expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
+    expect(view.entries[1]?.provenanceLabel).toBe(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('keeps the label on a SUBSTITUTED user-added occurrence, with truthful identities', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [
+          userAddedEntry({
+            performedExerciseId: 'ex-008',
+            isSubstituted: true,
+            exerciseName: 'Dumbbell Bench Press',
+            authoredExerciseName: 'Face Pull',
+            exerciseSlug: 'dumbbell-bench-press',
+            equipment: 'dumbbell',
+          }),
+        ],
+      }),
+    );
+
+    const entry = view.entries[0];
+    // The replacement stays the primary identity; the originally added
+    // exercise stays the context line; provenance survives both.
+    expect(entry?.name).toBe('Dumbbell Bench Press');
+    expect(entry?.originallyName).toBe('Face Pull');
+    expect(entry?.provenanceLabel).toBe(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('keeps a SKIPPED user-added occurrence visible with the label and no performance link', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [userAddedEntry({ isSkipped: true, sets: [] })],
+      }),
+    );
+
+    const entry = view.entries[0];
+    expect(entry?.provenanceLabel).toBe(ADDED_DURING_WORKOUT_LABEL);
+    expect(entry?.isSkipped).toBe(true);
+    // Skipped: no performance-history link and no fabricated set output.
+    expect(entry?.historyHref).toBeNull();
+    expect(entry?.sets).toEqual([]);
+  });
+
+  it('keeps a zero-set NON-skipped user-added occurrence distinct from a skipped one', () => {
+    const view = toCompletedSessionView(
+      sessionDto({ entries: [userAddedEntry({ isSkipped: false, sets: [] })] }),
+    );
+
+    const entry = view.entries[0];
+    expect(entry?.provenanceLabel).toBe(ADDED_DURING_WORKOUT_LABEL);
+    // Zero sets never imply skipped: the durable link survives.
+    expect(entry?.isSkipped).toBe(false);
+    expect(entry?.historyHref).toBe('/history/exercises/face-pull');
   });
 });

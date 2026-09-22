@@ -28,6 +28,7 @@ import {
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import { resolveOccurrenceAdjustmentEligibility } from '@/domain/services/occurrence-adjustment-rules';
+import { resolveOccurrenceRemovalEligibility } from '@/domain/services/session-exercise-composition';
 import { skipSessionExercise } from '@/domain/services/session-exercise-skip';
 import { resolveSessionPrescriptionTotals } from '@/domain/services/session-prescription-totals';
 import type { TrainingHistoryEntry } from '@/application/ports/training-history-repository';
@@ -192,6 +193,96 @@ describe('toCompletedSessionDto — detail entries carry the skip fact (M10 Slic
 
     expect(dto.entries.map((entry) => entry.isSkipped)).toEqual([false, true]);
   });
+
+  it('carries the persisted source on every completed-session entry (M11)', () => {
+    const r = createWorkoutSession({
+      id: 'session-completed-provenance',
+      userId: uid('user-1'),
+      enrollmentId: null,
+      scheduledWorkoutId: sid('sw-1'),
+      workoutId: wid('w-1'),
+      startedAt: new Date('2026-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 90 },
+        {
+          authoredExerciseId: eid('ex-002'),
+          order: 2,
+          prescription: rep(),
+          restSeconds: 0,
+          source: 'user_added',
+        },
+      ],
+    });
+    if (!r.ok) throw Error(r.error.message);
+    const withSet = logSessionSet(r.data, {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!withSet.ok) throw Error(withSet.error.message);
+    const completed = completeWorkoutSession(withSet.data, new Date('2026-01-01T11:00:00Z'));
+    if (!completed.ok) throw Error(completed.error.message);
+
+    const dto = toCompletedSessionDto(
+      {
+        session: { ...completed.data, completedAt: new Date('2026-01-01T11:00:00Z') },
+        programName: 'Fit40 Beginner Strength',
+        workoutName: 'Full Body A',
+      },
+      new Map(),
+    );
+
+    // Provenance is projected straight from the persisted aggregate — the
+    // completed-history detail never infers it.
+    expect(dto.entries.map((entry) => entry.source)).toEqual(['template', 'user_added']);
+  });
+});
+
+describe('toWorkoutSessionDto — provenance projection (M11 Slice 1)', () => {
+  it('exposes the persisted source on every occurrence DTO, verbatim', () => {
+    const r = createWorkoutSession({
+      id: 'session-dto-provenance',
+      userId: uid('user-1'),
+      enrollmentId: null,
+      scheduledWorkoutId: sid('sw-1'),
+      workoutId: wid('w-1'),
+      startedAt: new Date('2026-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 90 },
+        {
+          authoredExerciseId: eid('ex-002'),
+          order: 2,
+          prescription: rep(),
+          restSeconds: 0,
+          source: 'user_added',
+        },
+      ],
+    });
+    if (!r.ok) throw Error(r.error.message);
+
+    const dto = toWorkoutSessionDto(r.data);
+
+    // Verbatim domain projection — the DTO never re-infers provenance.
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(r.data.exerciseLogs.map((log) => log.source));
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(['template', 'user_added']);
+  });
+
+  it('defaults every occurrence of an unchanged session to template', () => {
+    const dto = toWorkoutSessionDto(baseSession());
+
+    expect(dto.exerciseLogs.map((log) => log.source)).toEqual(['template', 'template']);
+  });
+
+  it('never exposes the occurrence-key high-water mark on the session DTO', () => {
+    const dto = toWorkoutSessionDto(baseSession());
+
+    expect(dto).not.toHaveProperty('nextOccurrenceKey');
+    expect(Object.keys(dto)).not.toContain('nextOccurrenceKey');
+    // The aggregate still carries it internally.
+    expect(baseSession().nextOccurrenceKey).toBe(3);
+  });
 });
 
 describe('toWorkoutSessionDto — move projection (M10 Slice 5)', () => {
@@ -237,5 +328,117 @@ describe('toWorkoutSessionDto — move projection (M10 Slice 5)', () => {
       canMoveUp: false,
       canMoveDown: true,
     });
+  });
+});
+
+describe('toWorkoutSessionDto — removal eligibility projection (M11 Slice 4)', () => {
+  /** A two-occurrence session: order 1 template, order 2 user-added. */
+  function sessionWithUserAdded(): WorkoutSession {
+    const r = createWorkoutSession({
+      id: 'session-removal-dto',
+      userId: uid('user-1'),
+      enrollmentId: null,
+      scheduledWorkoutId: sid('sw-1'),
+      workoutId: wid('w-1'),
+      startedAt: new Date('2026-01-01T10:00:00Z'),
+      exerciseLogs: [
+        { authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 90 },
+        {
+          authoredExerciseId: eid('ex-002'),
+          order: 2,
+          prescription: rep(),
+          restSeconds: 0,
+          source: 'user_added',
+        },
+      ],
+    });
+    if (!r.ok) throw Error(r.error.message);
+    return r.data;
+  }
+
+  it('projects each occurrence\u2019s removal eligibility verbatim from the domain', () => {
+    const session = sessionWithUserAdded();
+    const dto = toWorkoutSessionDto(session);
+
+    // Lock the contract: each DTO projection equals the domain function's own
+    // answer for the same occurrence — never a re-derivation.
+    for (const log of session.exerciseLogs) {
+      const projected = dto.exerciseLogs.find((entry) => entry.order === log.order);
+      if (projected === undefined) throw Error('missing DTO occurrence');
+      expect(projected.removalEligibility).toEqual(
+        resolveOccurrenceRemovalEligibility(session, log),
+      );
+    }
+
+    expect(dto.exerciseLogs.map((log) => log.removalEligibility)).toEqual([
+      { canRemove: false, blockedBy: 'template-authored' },
+      { canRemove: true, blockedBy: null },
+    ]);
+  });
+
+  it('reports logged-sets as the block for a user-added occurrence with logged work', () => {
+    const withSet = logSessionSet(sessionWithUserAdded(), {
+      exerciseOrder: 2,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!withSet.ok) throw Error(withSet.error.message);
+
+    const dto = toWorkoutSessionDto(withSet.data);
+
+    expect(dto.exerciseLogs[1]?.removalEligibility).toEqual({
+      canRemove: false,
+      blockedBy: 'logged-sets',
+    });
+  });
+
+  it('freezes removal once the session completes, for every occurrence', () => {
+    const logged = logSessionSet(sessionWithUserAdded(), {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!logged.ok) throw Error(logged.error.message);
+    const completed = completeWorkoutSession(logged.data, new Date('2026-01-01T11:00:00Z'));
+    if (!completed.ok) throw Error(completed.error.message);
+
+    const dto = toWorkoutSessionDto(completed.data);
+
+    expect(dto.exerciseLogs.map((log) => log.removalEligibility)).toEqual([
+      { canRemove: false, blockedBy: 'session-completed' },
+      { canRemove: false, blockedBy: 'session-completed' },
+    ]);
+  });
+
+  it('carries the frozen removal eligibility through the history read model', () => {
+    const logged = logSessionSet(sessionWithUserAdded(), {
+      exerciseOrder: 1,
+      type: 'reps',
+      reps: 10,
+      weightKg: 50,
+      rpe: null,
+    });
+    if (!logged.ok) throw Error(logged.error.message);
+    const completed = completeWorkoutSession(logged.data, new Date('2026-01-01T11:00:00Z'));
+    if (!completed.ok) throw Error(completed.error.message);
+
+    const entry: TrainingHistoryEntry = {
+      session: { ...completed.data, completedAt: new Date('2026-01-01T11:00:00Z') },
+      programName: 'Fit40 Beginner Strength',
+      workoutName: 'Full Body A',
+    };
+    const dto = toTrainingHistorySessionDto(entry);
+
+    // History is completed-only: removal is frozen for the user-added
+    // occurrence too, and provenance stays independently available.
+    expect(dto.exerciseLogs[1]?.removalEligibility).toEqual({
+      canRemove: false,
+      blockedBy: 'session-completed',
+    });
+    expect(dto.exerciseLogs[1]?.source).toBe('user_added');
   });
 });

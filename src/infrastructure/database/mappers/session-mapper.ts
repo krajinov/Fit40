@@ -1,5 +1,6 @@
 import {
   createWorkoutSession,
+  OccurrenceSource,
   type ExerciseLog,
   type SetLog,
   type WorkoutSession,
@@ -36,6 +37,20 @@ export function parseExerciseId(value: string, context: string): ExerciseId {
     throw new Error(`Corrupt data in ${context}: ${result.error.message}`);
   }
   return result.data;
+}
+
+/**
+ * Parses a persisted occurrence source. The column is NOT NULL DEFAULT
+ * 'template' with a CHECK constraint, so an unknown value is corrupt data
+ * (unreachable through normal writes). Rows written before the column existed
+ * were backfilled to 'template' by the migration's default, so existing and
+ * legacy occurrences hydrate as template-authored.
+ */
+export function parseOccurrenceSource(value: string, context: string): OccurrenceSource {
+  if (value === OccurrenceSource.Template || value === OccurrenceSource.UserAdded) {
+    return value;
+  }
+  throw new Error(`Corrupt data in ${context}: unknown occurrence source "${value}"`);
 }
 
 function parseScheduledWorkoutId(value: string, context: string): ScheduledWorkoutId {
@@ -163,6 +178,9 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
       // self-heal to persisted tokens on their next whole-aggregate save.
       // The same legacy-coalesce pattern as authoredExerciseId above.
       occurrenceKey: row.occurrenceKey ?? row.exerciseOrder,
+      // Provenance (M11). The column is NOT NULL DEFAULT 'template', so rows
+      // written before it existed hydrate as template-authored.
+      source: parseOccurrenceSource(row.source, context),
     };
   });
 
@@ -175,6 +193,10 @@ export function mapSessionRows(rows: SessionRows): WorkoutSession {
     workoutId: parseWorkoutId(rows.session.workoutId, sessionContext),
     startedAt: rows.session.startedAt,
     exerciseLogs: logInputs,
+    // The persisted high-water mark (M11). Legacy rows are NULL, which the
+    // factory coalesces to max(occurrenceKey) + 1 — safe because a session
+    // that has ever removed an occurrence always carries a persisted mark.
+    nextOccurrenceKey: rows.session.nextOccurrenceKey ?? undefined,
   });
 
   if (!base.ok) {
@@ -214,6 +236,9 @@ export function mapSessionToRow(session: WorkoutSession): typeof workoutSessions
     startedAt: session.startedAt,
     completedAt: session.completedAt,
     version: session.version,
+    // The occurrence-key high-water mark rides the session row, like the
+    // version token (M11).
+    nextOccurrenceKey: session.nextOccurrenceKey,
   };
 }
 
@@ -236,6 +261,8 @@ export function mapExerciseLogToRow(
     // way (PR #13 Finding 1): the whole-aggregate rewrite persists it
     // verbatim, so a reordered occurrence keeps its token at its new order.
     occurrenceKey: log.occurrenceKey,
+    // Provenance (M11) is persisted verbatim on every whole-aggregate save.
+    source: log.source,
   };
 }
 

@@ -81,8 +81,8 @@ provenance, or alter completion/program-progress semantics (see
   is **never** an input to any use case, Server Action or Zod schema, never
   a repository query predicate, and never part of history/progression
   identity. Uniqueness within a session is domain-enforced at construction
-  (deliberately no DB constraint — see
-  [§7](#7-persistence-model)). The view mapper derives
+  AND backed by the partial unique index documented in
+  [§7](#7-persistence-model). The view mapper derives
   `renderKey: 'occ:${occurrenceKey}'` from it alone, including the inner
   `SetLoggerForm` remount keys. The Active Workout screen renders every
   occurrence under ONE keyed `SessionOccurrence` boundary in a single
@@ -489,21 +489,27 @@ stale-rendered-intent guard (PR #13):
 
 ---
 
-## 14. Deferred to M11
+## 14. Session composition (shipped in M11)
 
-M10 does **NOT** support:
+M10 stopped at skip/unskip and adjacent reorder. **M11 shipped on top of it**:
+explicitly **adding** a catalog exercise to the session and **removing** an
+occurrence the user added. Nothing in M10 was redesigned — composition reuses
+the same aggregate, the same whole-aggregate save, the same
+`(sessionId, exerciseOrder)` locator and the same `expectedSessionVersion`
+guard.
 
-- **Add optional exercise** (session-added occurrences) — deferred to M11.
-- **Remove user-added exercise** — arrives, if at all, with session-added
-  occurrences.
+Canonical reference: [`docs/session-composition.md`](session-composition.md).
+
+Still NOT supported:
+
 - **Arbitrary reorder** (jump to any position) — only adjacent moves exist.
 - **Drag/drop** reorder UI.
-- **Persisted occurrence source/provenance** — M10 occurrences are all
-  template-authored; there is no `source` column or provenance semantics.
+- Removing template-authored occurrences — Skip/Unskip remains their
+  session-level exclusion mechanism.
 
-M11 may introduce session-added occurrences and the required
-provenance/prescription semantics for them. Nothing in M10 pre-implements
-M11.
+M10 occurrences carry no provenance of their own: every occurrence created by
+M10 flows is template-authored (`source = 'template'`), and M11's stored
+`source` distinguishes the occurrences the user added.
 
 
 ---

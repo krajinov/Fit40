@@ -42,6 +42,11 @@ export function sessionActionErrorLabel(code: SessionActionErrorCode, fallback: 
       return 'That exercise can no longer be moved in that direction. Reloading the latest workout…';
     case 'EXERCISE_NOT_FOUND':
       return 'That exercise is no longer available in the exercise catalog.';
+    case 'EXERCISE_NOT_REMOVABLE':
+      // Removal applies only to exercises the user added; a template-authored
+      // occurrence uses Skip/Unskip instead. Never silently convert one into
+      // the other.
+      return 'Only exercises you added during this workout can be removed. Use Skip for template exercises.';
     case 'INVALID_INPUT':
       return 'Invalid selection — choose an exercise and try again.';
     case 'VALIDATION_ERROR':

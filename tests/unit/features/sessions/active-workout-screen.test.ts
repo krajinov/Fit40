@@ -56,6 +56,23 @@ vi.mock('@/features/sessions/components/SessionFinishBar', () => ({
   SessionFinishBar: () => createElement('div', null, 'finish bar'),
 }));
 
+vi.mock('@/features/sessions/components/AddSessionExercisePanel', () => ({
+  AddSessionExercisePanel: () => createElement('div', null, 'add exercise panel'),
+}));
+
+vi.mock('@/features/sessions/components/SessionRemovalControl', () => ({
+  SessionRemovalControl: (props: {
+    readonly exerciseOrder: number;
+    readonly removalEligibility: { readonly canRemove: boolean; readonly blockedBy: string | null };
+  }) =>
+    createElement(
+      'div',
+      null,
+      `remove ${props.exerciseOrder} can:${props.removalEligibility.canRemove ? 'yes' : 'no'} ` +
+        `blocked:${props.removalEligibility.blockedBy ?? 'none'}`,
+    ),
+}));
+
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type {
   WorkoutSessionDto,
@@ -117,7 +134,9 @@ function log(
     // Defaults to the order (the fixture's implicit occurrenceKey); tests
     // that exercise reorder stability override it explicitly.
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: eligibility(false, order > 1, order < 3),
     order,
     prescription: threeByEightToTen,
@@ -163,6 +182,7 @@ async function renderScreen(session: WorkoutSessionDto): Promise<HTMLElement> {
     session,
     cards,
     progress: buildSessionProgress(session),
+    addableExercises: [],
     screenState: 'in-progress',
   };
 

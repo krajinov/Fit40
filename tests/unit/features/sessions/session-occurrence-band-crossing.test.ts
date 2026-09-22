@@ -38,6 +38,10 @@ vi.mock('@/features/sessions/components/SessionExerciseAdjustPanel', () => ({
     createElement('div', null, `adjust ${props.exerciseOrder}`),
 }));
 
+vi.mock('@/features/sessions/components/AddSessionExercisePanel', () => ({
+  AddSessionExercisePanel: () => createElement('div', null, 'add exercise panel'),
+}));
+
 vi.mock('@/features/sessions/actions/log-set', () => ({ logSetAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/update-set', () => ({ updateSetAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/delete-set', () => ({ deleteSetAction: vi.fn() }));
@@ -50,6 +54,7 @@ vi.mock('@/features/sessions/actions/restore-exercise', () => ({
 vi.mock('@/features/sessions/actions/skip-exercise', () => ({ skipExerciseAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/unskip-exercise', () => ({ unskipExerciseAction: vi.fn() }));
 vi.mock('@/features/sessions/actions/move-exercise', () => ({ moveExerciseAction: vi.fn() }));
+vi.mock('@/features/sessions/actions/remove-exercise', () => ({ removeExerciseAction: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -66,6 +71,7 @@ import {
   type SessionExerciseCatalogMeta,
 } from '@/features/sessions/active-workout-views';
 import type { ActiveWorkoutView } from '@/features/sessions/active-workout-view';
+import { ADDED_DURING_WORKOUT_LABEL } from '@/features/sessions/session-provenance-views';
 import { ActiveWorkoutScreen } from '@/features/sessions/components/ActiveWorkoutScreen';
 
 declare global {
@@ -100,7 +106,9 @@ function log(
     isSubstituted: false,
     isSkipped: false,
     occurrenceKey: order,
+    source: 'template',
     substitutionEligibility: { blockedBy: null, canRestore: false },
+    removalEligibility: { canRemove: false, blockedBy: 'template-authored' },
     adjustmentEligibility: {
       isSkipped: false,
       blockedBy: null,
@@ -119,6 +127,7 @@ function log(
 const catalog = new Map<string, SessionExerciseCatalogMeta>([
   ['ex-a', { name: 'Squat', equipment: 'barbell' }],
   ['ex-b', { name: 'Bench', equipment: 'barbell' }],
+  ['ex-c', { name: 'Row', equipment: 'barbell' }],
 ]);
 
 const WORKOUT: ScheduledWorkoutDetailDto = {
@@ -159,6 +168,7 @@ async function renderScreenRerenderable(session: WorkoutSessionDto): Promise<{
       session: next,
       cards,
       progress: buildSessionProgress(next),
+      addableExercises: [],
       screenState: 'in-progress',
     };
     await act(async () => {
@@ -475,5 +485,186 @@ describe('ActiveWorkoutScreen / a completed occurrence retracts its logger discl
     await rerender({ ...doneSession, exerciseLogs: [...doneSession.exerciseLogs] });
     expect(loggerDetails(container, 'Squat')?.open).toBe(false);
     expect(bandOf(container, 'Bench')).toBe('card');
+  });
+});
+
+// ─── M11: appending a user-added occurrence must not disturb identity ────────
+
+describe('ActiveWorkoutScreen / appending an occurrence preserves existing identity and state (M11)', () => {
+  it('keeps every existing occurrence key, draft and disclosure when a user-added occurrence is appended', async () => {
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]),
+    );
+
+    // The user is mid-way through logging Squat.
+    await typeInto(occurrenceRepsInput(container, 'Squat'), '12');
+    expect(occurrenceRepsValue(container, 'Squat')).toBe('12');
+
+    // The server appends one user-added occurrence (Row) at the end of the
+    // canonical order and the route refreshes with the new DTO.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b'),
+        log(3, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    // Existing occurrences keep their identity and their local state: the
+    // append neither remounted them nor handed their state to the new row.
+    expect(occurrenceRepsValue(container, 'Squat')).toBe('12');
+    expect(occurrenceRepsValue(container, 'Bench')).toBe('');
+
+    // The appended occurrence lands at the END of the canonical order.
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain('Squat');
+    expect(rows[1]?.textContent).toContain('Bench');
+    expect(rows[2]?.textContent).toContain('Row');
+  });
+
+  it('labels only the user-added occurrence with the persisted provenance', async () => {
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([log(1, 'ex-a'), log(2, 'ex-b')]),
+    );
+
+    expect(container.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b'),
+        log(3, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    // Template occurrences get no provenance treatment.
+    expect(rows[0]?.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(rows[1]?.textContent).not.toContain(ADDED_DURING_WORKOUT_LABEL);
+    // The user-added occurrence is labelled.
+    expect(rows[2]?.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+  });
+
+  it('keeps the provenance label on a substituted user-added occurrence', async () => {
+    const { container } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-c', {
+          occurrenceKey: 2,
+          source: 'user_added',
+          isSubstituted: true,
+          authoredExerciseId: 'ex-b',
+          performedExerciseId: 'ex-c',
+        }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    // Substitution and provenance are independent facts: both render.
+    expect(rows[1]?.textContent).toContain(ADDED_DURING_WORKOUT_LABEL);
+    expect(rows[1]?.textContent).toContain('Originally: Bench');
+  });
+});
+
+// ─── M11 Slice 4: removing an occurrence must not disturb the survivors ──────
+
+/** One occurrence's reps input by DOM position in the canonical list. */
+function repsInputAt(container: HTMLElement, index: number): HTMLInputElement {
+  const rows = Array.from(container.querySelectorAll('ol > li'));
+  const row = rows[index];
+  if (row === undefined) throw new Error(`missing occurrence row ${index}`);
+  const input = Array.from(row.querySelectorAll('input')).find(
+    (element) => (element as HTMLInputElement).name === 'reps',
+  );
+  if (input === undefined) throw new Error(`missing reps input in row ${index}`);
+  return input as HTMLInputElement;
+}
+
+/** The reps draft of the occurrence at DOM position `index` ('' when absent). */
+function repsValueAt(container: HTMLElement, index: number): string {
+  const rows = Array.from(container.querySelectorAll('ol > li'));
+  return rows[index]?.querySelector<HTMLInputElement>('input[name="reps"]')?.value ?? '';
+}
+
+describe('ActiveWorkoutScreen / removing an occurrence preserves the survivors (M11 Slice 4)', () => {
+  it('moves a surviving occurrence up a slot without transferring its state', async () => {
+    // A (template, key 1, order 1), B (user-added, key 2, order 2),
+    // C (user-added, key 3, order 3).
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b', { occurrenceKey: 2, source: 'user_added' }),
+        log(3, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    // The user is mid-way through logging C (order 3, the last row).
+    await typeInto(repsInputAt(container, 2), '14');
+    expect(repsValueAt(container, 2)).toBe('14');
+
+    // B is removed server-side: C renumbers 3 → 2 but KEEPS occurrenceKey 3,
+    // so the refreshed screen must hand C its own state back.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-c', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain('Squat');
+    expect(rows[1]?.textContent).toContain('Row');
+    // C kept its draft across the renumber; the neighbour gained nothing.
+    expect(repsValueAt(container, 1)).toBe('14');
+    expect(repsValueAt(container, 0)).toBe('');
+  });
+
+  it('never misassociates state when the removed occurrence shares an ExerciseId with a survivor', async () => {
+    // Three IDENTICAL occurrences: only the occurrenceKey distinguishes them.
+    const { container, rerender } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-a', { occurrenceKey: 2, source: 'user_added' }),
+        log(3, 'ex-a', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    // Draft typed into the THIRD occurrence (order 3, key 3).
+    await typeInto(repsInputAt(container, 2), '9');
+    expect(repsValueAt(container, 2)).toBe('9');
+
+    // The middle duplicate (key 2) is removed; the survivor keeps key 3.
+    await rerender(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-a', { occurrenceKey: 3, source: 'user_added' }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows).toHaveLength(2);
+    // The surviving duplicate carries the draft; the first occurrence is fresh.
+    expect(repsValueAt(container, 1)).toBe('9');
+    expect(repsValueAt(container, 0)).toBe('');
+  });
+
+  it('keeps the removal affordance reachable from the compact row of a just-added occurrence', async () => {
+    const { container } = await renderScreenRerenderable(
+      sessionWith([
+        log(1, 'ex-a'),
+        log(2, 'ex-b', {
+          occurrenceKey: 2,
+          source: 'user_added',
+          removalEligibility: { canRemove: true, blockedBy: null },
+        }),
+      ]),
+    );
+
+    const rows = Array.from(container.querySelectorAll('ol > li'));
+    expect(rows[1]?.textContent).toContain('Remove exercise');
+    // A template occurrence exposes no removal affordance.
+    expect(rows[0]?.textContent).not.toContain('Remove exercise');
   });
 });

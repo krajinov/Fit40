@@ -17,6 +17,7 @@
 import type { ExerciseTargetDto } from '@/application/dto/exercise';
 import type { ExerciseSubstitutionCandidatesDto } from '@/application/dto/substitution-candidates';
 import type {
+  OccurrenceRemovalEligibilityDto,
   WorkoutSessionDto,
   WorkoutSessionExerciseDto,
   WorkoutSessionSetDto,
@@ -38,6 +39,7 @@ import {
   type SessionAdjustmentView,
   SKIPPED_BADGE_LABEL,
 } from '@/features/sessions/session-adjustment-views';
+import { resolveOccurrenceProvenanceLabel } from '@/features/sessions/session-provenance-views';
 
 /** How one exercise log is presented on the session screen. */
 export type SessionExerciseKind = 'done' | 'active' | 'partial' | 'upcoming' | 'skipped';
@@ -85,6 +87,13 @@ export interface SessionExerciseCardView {
    * catalog, or the authored id equals the performed one.
    */
   readonly originallyName: string | null;
+  /**
+   * Provenance label for a session-added occurrence ("Added during workout"),
+   * or null for a template-authored one. Derived ONLY from the persisted
+   * `source` (M11) — never from order, occurrenceKey, the identities or
+   * substitution state. A substituted user-added occurrence keeps its label.
+   */
+  readonly provenanceLabel: string | null;
   readonly equipmentLabel: string | null;
   readonly prescriptionLabel: string;
   readonly badge: SessionExerciseBadgeView;
@@ -95,6 +104,13 @@ export interface SessionExerciseCardView {
   readonly substitution: SessionSubstitutionView;
   /** The M10 skip affordance of this occurrence. */
   readonly adjustment: SessionAdjustmentView;
+  /**
+   * The M11 removal eligibility of this occurrence, copied verbatim from the
+   * domain-derived DTO projection (`WorkoutSessionExerciseDto
+   * .removalEligibility`). Presentation renders the Remove affordance (or its
+   * truthful blocked copy) from THIS — never from `source` or raw set counts.
+   */
+  readonly removalEligibility: OccurrenceRemovalEligibilityDto;
 }
 
 export interface SessionProgressView {
@@ -292,6 +308,10 @@ export function buildSessionExerciseCardViews(
       // authoredExerciseId is never rewritten.
       originallyName:
         log.isSubstituted && authoredMeta !== undefined ? authoredMeta.name : null,
+      // Provenance (M11) is the persisted `source` projected straight through
+      // the pure mapper — never inferred from order, occurrenceKey, the
+      // identities or substitution state.
+      provenanceLabel: resolveOccurrenceProvenanceLabel(log.source),
       equipmentLabel: meta === undefined ? null : EQUIPMENT_LABELS[meta.equipment],
       prescriptionLabel: formatPrescription(log.prescription),
       badge: buildBadge(kind, log.sets.length, prescribed),
@@ -309,6 +329,9 @@ export function buildSessionExerciseCardViews(
           input.candidatesByPerformedExerciseId.get(log.performedExerciseId) ?? null,
       }),
       adjustment: buildSessionAdjustmentView(log.adjustmentEligibility),
+      // Removal eligibility is a domain-derived DTO projection: copied
+      // verbatim so presentation never re-derives removability.
+      removalEligibility: log.removalEligibility,
     };
   });
 }

@@ -16,6 +16,11 @@ export function UpcomingExerciseTitle({
       <span className="block truncate text-sm font-semibold text-ink-2 md:text-base">
         {exercise.name}
       </span>
+      {exercise.provenanceLabel !== null && (
+        <span className="block truncate text-[11px] text-ink-3 md:text-xs">
+          {exercise.provenanceLabel}
+        </span>
+      )}
       {exercise.originallyName !== null && (
         <span className="block truncate text-[11px] text-ink-3 md:text-xs">
           Originally: {exercise.originallyName}

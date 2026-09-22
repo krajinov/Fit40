@@ -3,6 +3,7 @@ import type { SessionExerciseCardView } from '@/features/sessions/active-workout
 import { SetLoggerForm } from '@/features/sessions/components/SetLoggerForm';
 import { SessionExerciseSwapPanel } from '@/features/sessions/components/SessionExerciseSwapPanel';
 import { SessionExerciseAdjustPanel } from '@/features/sessions/components/SessionExerciseAdjustPanel';
+import { SessionRemovalControl } from '@/features/sessions/components/SessionRemovalControl';
 import type { SetLoggerDraft } from '@/features/sessions/set-logger-draft';
 
 interface UpcomingExerciseExpandedPanelsProps {
@@ -99,6 +100,18 @@ export function UpcomingExerciseExpandedPanels({
           adjustment={exercise.adjustment}
         />
       )}
+      {/* …and the M11 removal affordance, consume-verbatim like the rest: a
+          just-added occurrence lives here until it is touched, so its Remove
+          control must be reachable from the compact representation too. */}
+      <SessionRemovalControl
+        sessionId={sessionId}
+        exerciseOrder={log.order}
+        expectedSessionVersion={expectedSessionVersion}
+        programSlug={programSlug}
+        weekNumber={weekNumber}
+        workoutOrder={workoutOrder}
+        removalEligibility={exercise.removalEligibility}
+      />
     </div>
   );
 }

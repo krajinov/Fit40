@@ -407,6 +407,43 @@ above (`occurrence_key`) is the only column added alongside it, and it is
 not a surrogate identity. Full skip/reorder semantics:
 [`docs/session-adjustments.md`](session-adjustments.md).
 
+### Occurrence provenance on `exercise_logs` (M11)
+
+`source` (`text NOT NULL DEFAULT 'template'`, migration `0012`) records how the
+occurrence entered the session: `'template'` when the workout template authored
+it, `'user_added'` when the user explicitly added it during the session. The
+CHECK `exercise_logs_source_check` (`source IN ('template', 'user_added')`) is
+the database backstop for the domain's `OccurrenceSource` union.
+
+- **Never inferred.** Provenance is a stored fact; nothing derives it from
+  `exercise_order`, `occurrence_key`, the authored/performed ids or
+  substitution state.
+- **No backfill needed.** `DEFAULT 'template'` makes every pre-M11 row
+  template-authored by construction, which is the truthful historical fact.
+- Persisted verbatim by the whole-aggregate rewrite, so it survives reorder,
+  skip/unskip, substitution/restore, removal and completion.
+- It is not part of the composite PK or the `set_logs` FK.
+
+Full semantics: [`docs/session-composition.md`](session-composition.md).
+
+### Occurrence-key high-water mark on `workout_sessions` (M11)
+
+`next_occurrence_key` (nullable `integer`, migration `0012`) is the session's
+monotonic **high-water mark** for occurrence keys: the next `occurrence_key` a
+newly added occurrence must take.
+
+- Nullable with **no default and no backfill**: a legacy row hydrates through
+  the domain fallback `max(occurrence_key) + 1`, which is safe because only a
+  session that has performed a removal carries a persisted mark.
+- Add consumes it and advances it by one; **removal never decrements it** — so
+  a removed occurrence key is **never reused** (React must not resurrect a
+  discarded occurrence's subtree). `max(occurrence_key) + 1` is therefore not
+  an acceptable substitute once removal exists.
+- It rides the session row like `version`: persisted by `mapSessionToRow` and
+  updated by the upsert's `set` clause on every whole-aggregate save.
+- It is a counter, **not** an identity: it is never exposed on a DTO, an action
+  or a form, and never a query predicate.
+
 ---
 
 ## Database Errors

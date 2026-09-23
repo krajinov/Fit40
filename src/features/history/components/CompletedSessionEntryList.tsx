@@ -26,6 +26,12 @@ interface CompletedSessionEntryListProps {
  * performance-history link renders (the view model resolves none), and the
  * persisted skip decision is authoritative — zero logged sets never implies
  * skipped. Completed history exposes no mutation controls.
+ *
+ * Historical personal records (M12 Slice 4) render as a restrained "PR" badge
+ * on the exact set row that established the record — the view model has
+ * already decided which rows those are, so this component only displays the
+ * state it is handed. A skipped occurrence renders no set rows and therefore
+ * can never show one.
  */
 export function CompletedSessionEntryList({ entries }: CompletedSessionEntryListProps) {
   if (entries.length === 0) {
@@ -76,6 +82,16 @@ export function CompletedSessionEntryList({ entries }: CompletedSessionEntryList
                 <li key={set.setNumber} className="flex items-baseline gap-3 py-2 text-sm">
                   <span className="w-6 shrink-0 text-ink-3 tabular-nums">{set.setNumber}</span>
                   <span className="font-medium text-foreground">{set.valueLabel}</span>
+                  {set.isPersonalRecord && (
+                    // Historical record metadata (M12 Slice 4): the state is
+                    // resolved upstream for exactly this set. The abbreviation
+                    // stays compact visually while screen readers get the full
+                    // phrase — no hover-only meaning.
+                    <Badge variant="accent">
+                      <span aria-hidden="true">PR</span>
+                      <span className="sr-only">Personal record</span>
+                    </Badge>
+                  )}
                 </li>
               ))}
             </ol>

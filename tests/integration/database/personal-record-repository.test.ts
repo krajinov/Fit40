@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TrainingHistoryCursor } from '@/application/ports/training-history-repository';
+import { GetCompletedSessionRecordEventsUseCase } from '@/application/use-cases/get-completed-session-record-events';
 import { GetExerciseHistoryUseCase } from '@/application/use-cases/get-exercise-history';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import { comparePerformancePositions, RecordMetric } from '@/domain/services/personal-record-metrics';
@@ -1263,5 +1264,114 @@ describe('exercise history use case — personal bests wiring', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('EXERCISE_NOT_FOUND');
+  });
+});
+
+// ─── Completed-session record events wiring (M12 Slice 4) ────────────────────
+
+/**
+ * One compact end-to-end check of the record-events read flow:
+ * completed session -> Domain candidate extraction -> exact best-before read ->
+ * Domain event resolution -> application DTO. The record semantics themselves
+ * are proven above against the Domain fold and in the Slice 1 suite; this only
+ * proves the composed path.
+ */
+describe('completed session record events — read-flow wiring', () => {
+  const recordEvents = new GetCompletedSessionRecordEventsUseCase(
+    trainingHistoryRepository,
+    personalRecordRepository,
+  );
+
+  it('resolves the session’s historical records through the real repositories', async () => {
+    await savePrSessions(
+      // Earlier history for the substituted exercise: 40 kg.
+      prSession({
+        id: 'wired-record-history',
+        userId: OWNER,
+        startedAt: '2025-01-01T09:00:00Z',
+        completedAt: '2025-01-01T10:00:00Z',
+        logs: [{ exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+      }),
+      // The session under test.
+      prSession({
+        id: 'wired-record-session',
+        userId: OWNER,
+        occurrence: 2,
+        startedAt: '2025-02-01T09:00:00Z',
+        completedAt: '2025-02-01T10:00:00Z',
+        logs: [
+          {
+            // Substituted: authored ex-001, performed ex-002 — records follow
+            // the PERFORMED exercise.
+            exerciseId: 'ex-001',
+            performedExerciseId: 'ex-002',
+            type: 'reps',
+            sets: [{ reps: 8, weightKg: 40 }, { reps: 8, weightKg: 50 }, { reps: 8, weightKg: 50 }],
+          },
+          {
+            // First timed exposure for this exercise.
+            exerciseId: EX_CARRY,
+            type: 'duration',
+            sets: [{ durationSeconds: 45 }],
+          },
+          {
+            // User-added occurrence with a logged 0 kg: a real, first load.
+            exerciseId: 'ex-005',
+            source: 'user_added',
+            type: 'reps',
+            sets: [{ reps: 12, weightKg: 0 }],
+          },
+        ],
+      }),
+    );
+
+    const result = await recordEvents.execute({ userId: OWNER, sessionId: 'wired-record-session' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Set 1 equals the existing 40 kg maximum (no event), set 2 strictly
+    // exceeds it, set 3 repeats it (no event); the duration and the user-added
+    // 0 kg are first exposures.
+    expect(result.data).toEqual([
+      { exerciseOrder: 1, setNumber: 2, metric: 'max-load', value: 50, previousBest: 40 },
+      { exerciseOrder: 2, setNumber: 1, metric: 'max-duration', value: 45, previousBest: null },
+      { exerciseOrder: 3, setNumber: 1, metric: 'max-load', value: 0, previousBest: null },
+    ]);
+  });
+
+  it('returns an empty list for a completed session with no records', async () => {
+    // First session: 80 kg. Second session repeats 60 kg — below the existing
+    // maximum, so no event, and the first session is not addressed here.
+    await savePrSessions(
+      prSession({
+        id: 'wired-flat-history',
+        userId: OWNER,
+        startedAt: '2025-01-01T09:00:00Z',
+        completedAt: '2025-01-01T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 80 }] }],
+      }),
+      prSession({
+        id: 'wired-flat-session',
+        userId: OWNER,
+        occurrence: 2,
+        startedAt: '2025-02-01T09:00:00Z',
+        completedAt: '2025-02-01T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+    );
+
+    const result = await recordEvents.execute({ userId: OWNER, sessionId: 'wired-flat-session' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual([]);
+  });
+
+  it('keeps the single-outcome not-found behaviour', async () => {
+    const foreign = await recordEvents.execute({ userId: OTHER, sessionId: 'wired-record-session' });
+
+    expect(foreign.ok).toBe(false);
+    if (foreign.ok) return;
+    expect(foreign.error.code).toBe('SESSION_NOT_FOUND');
   });
 });

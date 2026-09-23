@@ -14,7 +14,7 @@
  * and value → text belongs to presentation.
  */
 
-import type { PersonalBest } from '@/domain/services/personal-records';
+import type { PersonalBest, RecordEvent } from '@/domain/services/personal-records';
 
 /**
  * The closed M12 record taxonomy as it crosses the boundary. Structurally the
@@ -56,5 +56,45 @@ export function toPersonalBestDto(best: PersonalBest): PersonalBestDto {
     exerciseOrder: best.position.exerciseOrder,
     setNumber: best.position.setNumber,
     completedAt: best.position.completedAt.toISOString(),
+  };
+}
+
+/**
+ * One historical record event of a completed session (M12 Slice 4): the logged
+ * set that STRICTLY exceeded every eligible performance chronologically before
+ * it. A first eligible exposure is historically a record too.
+ *
+ * This is history, not today: an event says what was true at that point in the
+ * session's past, so it is independent of the user's current personal bests
+ * and of everything performed afterwards.
+ *
+ * Identity is the set's own position — `(exerciseOrder, setNumber)` — which is
+ * unique within a session (the set-log primary key), so presentation attaches
+ * the indicator to exactly that set without re-deriving anything. The
+ * occurrence's exercised identity (performed id, provenance, "Originally: …")
+ * already rides the completed-session DTO, so no exercise id is duplicated
+ * here.
+ *
+ * `previousBest` is the best eligible value strictly before the set, or null
+ * for a first exposure: context the screen may show, never a comparison the
+ * screen must make.
+ */
+export interface SessionRecordEventDto {
+  readonly exerciseOrder: number;
+  readonly setNumber: number;
+  readonly metric: PersonalRecordMetricDto;
+  /** The record value in the metric's own unit: kilograms, reps or seconds. */
+  readonly value: number;
+  readonly previousBest: number | null;
+}
+
+/** Maps one resolved domain event to its serializable DTO. */
+export function toSessionRecordEventDto(event: RecordEvent): SessionRecordEventDto {
+  return {
+    exerciseOrder: event.position.exerciseOrder,
+    setNumber: event.position.setNumber,
+    metric: event.metric,
+    value: event.value,
+    previousBest: event.previousBest,
   };
 }

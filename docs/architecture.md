@@ -292,10 +292,14 @@ Personal Records are read-only advisory history. Domain owns metric
 eligibility, `PerformancePosition` ordering, strict PR comparison, candidate
 extraction and the authoritative chronological fold
 (`src/domain/services/personal-record-metrics.ts`,
-`src/domain/services/personal-records.ts`). The application layer exposes the
+`src/domain/services/personal-records.ts`). The application layer owns the
 read-only port `PersonalRecordRepository` (`findCurrentPersonalBests`,
-`findBestValuesBefore`); the exercise-history use case renders current PB
-cards, and `GetCompletedSessionRecordEventsUseCase` resolves historical PR
-badges for one completed session. Infrastructure answers both questions with
-exact batched SQL projections — no PR table, no derived writes, no top-K
-approximation. Canonical reference: [Personal Records](personal-records.md).
+`findBestValuesBefore`) and use-case orchestration, mapping Domain results
+to application DTOs: `GetCompletedSessionRecordEventsUseCase` resolves
+historical PR badges for one completed session, and the exercise-history
+use case delivers current PBs as DTOs for the UI. Infrastructure executes
+the exact Drizzle/SQL projections and maps query rows to the Domain records
+the port expects — no PR table, no derived writes, no top-K approximation.
+Presentation formats values, dates and labels, renders the Personal Best
+cards and historical PR badges, and never infers record semantics.
+Canonical reference: [Personal Records](personal-records.md).

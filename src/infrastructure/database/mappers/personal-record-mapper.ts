@@ -107,7 +107,7 @@ export function mapCurrentPersonalBests(
  * Correspondence travels by the candidate's ordinal, so candidates that share
  * exercise, metric, value and timestamps still receive their own result, and
  * the returned array is positionally aligned with the input. A missing ordinal
- * (the grouped aggregate always emits one row per candidate) is corrupt data.
+ * (the projection emits exactly one row per candidate) is corrupt data.
  */
 export function mapBestValuesBefore(
   rows: ReadonlyArray<PriorBestRow>,

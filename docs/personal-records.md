@@ -75,20 +75,23 @@ before its position`:
 Layer responsibilities are unchanged by M12:
 
 - **Domain** (`src/domain/services/personal-record-metrics.ts`,
-  `personal-records.ts`) — metric eligibility, position ordering, strict
+  `personal-records.ts`) — Personal Record semantics and the Domain's own
+  record/event types: metric eligibility, position ordering, strict
   comparison, candidate extraction (`extractRecordCandidates`), event
   resolution (`resolveRecordEvents`), authoritative fold
   (`foldPersonalRecords`).
 - **Application** (`src/application/ports/personal-record-repository.ts`,
   `use-cases/get-completed-session-record-events.ts`,
-  `dto/personal-records.ts`) — the read-only port, DTO mapping and
-  orchestration. The exercise-history use case renders current PB cards.
+  `dto/personal-records.ts`) — owns the read-only repository port and
+  use-case orchestration, and maps Domain results to application DTOs
+  (`PersonalBestDto`, `SessionRecordEventDto`).
 - **Infrastructure** (`drizzle-personal-record-repository.ts`,
-  `personal-record-mapper.ts`) — exact batched SQL projections and
-  row-to-DTO mapping only.
-- **Presentation** (`src/features/history/`) — labels, value/date
-  formatting, the Personal Bests summary, and the per-set PR badge.
-  Presentation never compares values.
+  `mappers/personal-record-mapper.ts`) — executes the exact Drizzle/SQL
+  projections and maps database/query rows to the Domain records the
+  application port expects (`PersonalBest`, `CandidatePriorBest`).
+- **Presentation** (`src/features/history/`) — formats values, dates and
+  labels, renders the Personal Bests cards and the historical PR badges,
+  and never infers record semantics (it never compares values).
 
 ### Exercise History current PB flow
 

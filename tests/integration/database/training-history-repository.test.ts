@@ -32,6 +32,7 @@ import {
   closeDatabase,
   db,
   exerciseRepository,
+  personalRecordRepository,
   programEnrollmentRepository,
   resetAndSeed,
   trainingHistoryRepository,
@@ -216,6 +217,7 @@ const detailUseCase = new GetCompletedSessionUseCase(
 const exerciseHistoryUseCase = new GetExerciseHistoryUseCase(
   trainingHistoryRepository,
   exerciseRepository,
+  personalRecordRepository,
 );
 
 beforeEach(async () => {

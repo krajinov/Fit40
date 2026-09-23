@@ -89,7 +89,7 @@ async function renderList(entries: CompletedSessionDto['entries']): Promise<void
     completedAt: '2026-01-01T10:45:00.000Z',
     entries,
     metrics: { totalSets: 1, totalReps: 10, totalDurationSeconds: 0, volume: 50 },
-  });
+  }, []);
   await act(async () => {
     root?.render(createElement(CompletedSessionEntryList, { entries: view.entries }));
   });

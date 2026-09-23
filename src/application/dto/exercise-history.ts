@@ -17,8 +17,13 @@
  *   real load and is preserved; null weight means no external load.
  * - Entries are newest first (the port's recency ladder); `trend` is the
  *   chronological (oldest first) externally loaded subsequence.
+ * - `personalBests` (M12) is independent of both: the exercise's exact
+ *   all-time records over ALL completed history, not just the bounded
+ *   occurrence window rendered below them. They never feed the trend,
+ *   pagination, or any progression input.
  */
 
+import type { PersonalBestDto } from '@/application/dto/personal-records';
 import type { CompletedExerciseOccurrence } from '@/application/ports/training-history-repository';
 import type { Exercise } from '@/domain/entities/exercise';
 import type { SetLog } from '@/domain/entities/workout-session';
@@ -106,6 +111,13 @@ export interface ExerciseHistoryDto {
   readonly entries: ReadonlyArray<ExerciseHistoryEntryDto>;
   readonly trend: ReadonlyArray<ExerciseHistoryTrendPointDto>;
   /**
+   * The exercise's exact current all-time personal bests (M12), one entry per
+   * applicable metric, in the repository's deterministic order (metric
+   * ascending). Only metrics with eligible completed history appear; an empty
+   * list is a valid result, never an error.
+   */
+  readonly personalBests: ReadonlyArray<PersonalBestDto>;
+  /**
    * True when the bounded read returned exactly its limit — the screen then
    * labels the list as the latest N occurrences instead of implying an
    * all-time total. No COUNT query backs this: reaching the bound is the
@@ -162,10 +174,16 @@ function hasExternalLoad(
  * load is resolved here via the domain mirror service — never in SQL — and
  * the trend is the chronological (oldest first) externally loaded
  * subsequence of the entries.
+ *
+ * `personalBests` arrive already serialized (the M12 records read) and are
+ * embedded in the order the repository delivered them: this module renders
+ * them next to the occurrence window without touching, sorting or deriving
+ * anything about them.
  */
 export function toExerciseHistoryDto(
   exercise: Exercise,
   occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
+  personalBests: ReadonlyArray<PersonalBestDto>,
 ): ExerciseHistoryDto {
   const entries: ExerciseHistoryEntryDto[] = occurrences.map((occurrence) => {
     const load = resolveOccurrenceWorkingLoad(occurrence.prescription, occurrence.sets);
@@ -200,6 +218,7 @@ export function toExerciseHistoryDto(
     },
     entries,
     trend,
+    personalBests,
     isLimited: occurrences.length >= EXERCISE_HISTORY_OCCURRENCE_LIMIT,
   };
 }

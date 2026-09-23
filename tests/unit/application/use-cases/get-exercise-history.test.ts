@@ -9,8 +9,11 @@ import type {
   TrainingHistoryRepository,
 } from '@/application/ports/training-history-repository';
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
+import type { PersonalRecordRepository } from '@/application/ports/personal-record-repository';
 import type { Exercise } from '@/domain/entities/exercise';
 import type { SetLog } from '@/domain/entities/workout-session';
+import type { PersonalBest } from '@/domain/services/personal-records';
+import { RecordMetric } from '@/domain/services/personal-record-metrics';
 import {
   createExerciseId,
   createUserId,
@@ -131,6 +134,13 @@ function makeExerciseRepo(exercise: Exercise | null) {
   } satisfies ExerciseRepository;
 }
 
+function makePersonalRecordRepo(bests: ReadonlyArray<PersonalBest>) {
+  return {
+    findCurrentPersonalBests: vi.fn().mockResolvedValue(bests),
+    findBestValuesBefore: vi.fn(),
+  } satisfies PersonalRecordRepository;
+}
+
 describe('GetExerciseHistoryUseCase', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,6 +151,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       historyRepo,
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -153,7 +164,7 @@ describe('GetExerciseHistoryUseCase', () => {
 
   it('returns EXERCISE_NOT_FOUND for an unknown slug without querying history', async () => {
     const historyRepo = makeHistoryRepo([]);
-    const uc = new GetExerciseHistoryUseCase(historyRepo, makeExerciseRepo(null));
+    const uc = new GetExerciseHistoryUseCase(historyRepo, makeExerciseRepo(null), makePersonalRecordRepo([]));
 
     const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise' });
     expect(result.ok).toBe(false);
@@ -165,7 +176,7 @@ describe('GetExerciseHistoryUseCase', () => {
   it('rejects an invalid userId with INVALID_INPUT before touching repositories', async () => {
     const historyRepo = makeHistoryRepo([]);
     const exerciseRepo = makeExerciseRepo(makeExercise('ex-001', 'goblet-squat'));
-    const uc = new GetExerciseHistoryUseCase(historyRepo, exerciseRepo);
+    const uc = new GetExerciseHistoryUseCase(historyRepo, exerciseRepo, makePersonalRecordRepo([]));
 
     const result = await uc.execute({ userId: ' ', slug: 'goblet-squat' });
     expect(result.ok).toBe(false);
@@ -180,6 +191,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       historyRepo,
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -203,6 +215,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       makeHistoryRepo(occurrences),
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -229,6 +242,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       makeHistoryRepo(occurrences),
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -249,6 +263,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       makeHistoryRepo(occurrences),
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -267,6 +282,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       makeHistoryRepo(occurrences),
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -296,6 +312,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const uc = new GetExerciseHistoryUseCase(
       makeHistoryRepo(occurrences),
       makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
     );
 
     const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
@@ -315,6 +332,157 @@ describe('GetExerciseHistoryUseCase', () => {
         workingLoadKg: 55,
       },
     ]);
+  });
+});
+
+// ─── M12 records read ────────────────────────────────────────────────────────
+
+function personalBest(overrides?: Partial<PersonalBest>): PersonalBest {
+  return {
+    exerciseId: eid('ex-001'),
+    metric: RecordMetric.MaxLoad,
+    value: 82.5,
+    position: {
+      completedAt: new Date('2026-02-15T11:00:00Z'),
+      startedAt: new Date('2026-02-15T10:00:00Z'),
+      sessionId: sid('session-owner'),
+      exerciseOrder: 2,
+      setNumber: 1,
+    },
+    ...overrides,
+  };
+}
+
+describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries the records for the RESOLVED ExerciseId of the requested slug', async () => {
+    const recordsRepo = makePersonalRecordRepo([]);
+    const uc = new GetExerciseHistoryUseCase(
+      makeHistoryRepo([]),
+      makeExerciseRepo(makeExercise('ex-007', 'goblet-squat')),
+      recordsRepo,
+    );
+
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+
+    expect(recordsRepo.findCurrentPersonalBests).toHaveBeenCalledWith(uid('user-a'), [
+      eid('ex-007'),
+    ]);
+  });
+
+  it('maps the repository’s records into the DTO, preserving the delivered order and owner', async () => {
+    const recordsRepo = makePersonalRecordRepo([
+      personalBest({ metric: RecordMetric.MaxBodyweightReps, value: 18 }),
+      personalBest({ metric: RecordMetric.MaxLoad, value: 82.5 }),
+    ]);
+    const uc = new GetExerciseHistoryUseCase(
+      makeHistoryRepo([]),
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      recordsRepo,
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Repository order is the DTO order — never re-sorted here.
+    expect(result.data.personalBests).toEqual([
+      {
+        exerciseId: 'ex-001',
+        metric: 'max-bodyweight-reps',
+        value: 18,
+        sessionId: 'session-owner',
+        exerciseOrder: 2,
+        setNumber: 1,
+        completedAt: '2026-02-15T11:00:00.000Z',
+      },
+      {
+        exerciseId: 'ex-001',
+        metric: 'max-load',
+        value: 82.5,
+        sessionId: 'session-owner',
+        exerciseOrder: 2,
+        setNumber: 1,
+        completedAt: '2026-02-15T11:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('treats an empty repository result as success with no personal bests', async () => {
+    const uc = new GetExerciseHistoryUseCase(
+      makeHistoryRepo([]),
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.personalBests).toEqual([]);
+    expect(result.data.entries).toEqual([]);
+  });
+
+  it('does not query records for an unknown slug', async () => {
+    const recordsRepo = makePersonalRecordRepo([]);
+    const uc = new GetExerciseHistoryUseCase(
+      makeHistoryRepo([]),
+      makeExerciseRepo(null),
+      recordsRepo,
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise' });
+
+    expect(result.ok).toBe(false);
+    expect(recordsRepo.findCurrentPersonalBests).not.toHaveBeenCalled();
+  });
+
+  it('does not query records for a malformed userId', async () => {
+    const recordsRepo = makePersonalRecordRepo([]);
+    const uc = new GetExerciseHistoryUseCase(
+      makeHistoryRepo([]),
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      recordsRepo,
+    );
+
+    const result = await uc.execute({ userId: ' ', slug: 'goblet-squat' });
+
+    expect(result.ok).toBe(false);
+    expect(recordsRepo.findCurrentPersonalBests).not.toHaveBeenCalled();
+  });
+
+  it('leaves the occurrence read and trend unchanged when records exist', async () => {
+    const occurrences = [
+      occurrence('session-new', 1, '2026-03-01T10:00:00Z', [{ reps: 10, weightKg: 55 }]),
+      occurrence('session-old', 1, '2026-01-01T10:00:00Z', [{ reps: 10, weightKg: 50 }]),
+    ];
+    const historyRepo = makeHistoryRepo(occurrences);
+    const uc = new GetExerciseHistoryUseCase(
+      historyRepo,
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([personalBest({ value: 60 })]),
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The bounded occurrence window, its ordering, and the trend still come
+    // from the history port alone.
+    expect(historyRepo.listCompletedExerciseOccurrences).toHaveBeenCalledWith(
+      uid('user-a'),
+      eid('ex-001'),
+      EXERCISE_HISTORY_OCCURRENCE_LIMIT,
+    );
+    expect(result.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-new',
+      'session-old',
+    ]);
+    expect(result.data.trend.map((point) => point.workingLoadKg)).toEqual([50, 55]);
+    expect(result.data.personalBests.map((record) => record.value)).toEqual([60]);
   });
 });
 

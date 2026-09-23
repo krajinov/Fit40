@@ -58,7 +58,7 @@ function sessionDto(overrides?: {
 
 describe('toCompletedSessionView', () => {
   it('formats set lines truthfully and preserves entry/set order', () => {
-    const view = toCompletedSessionView(sessionDto());
+    const view = toCompletedSessionView(sessionDto(), []);
     expect(view.entries).toHaveLength(1);
     expect(view.entries[0]?.sets[0]?.valueLabel).toBe('50 kg × 10 @ RPE 7');
     expect(view.entries[0]?.sets[1]?.valueLabel).toBe('10 reps');
@@ -66,7 +66,7 @@ describe('toCompletedSessionView', () => {
   });
 
   it('renders header labels and the joined metrics line', () => {
-    const view = toCompletedSessionView(sessionDto());
+    const view = toCompletedSessionView(sessionDto(), []);
     expect(view.heading).toBe('Full Body A');
     expect(view.contextLabel).toBe('Fit40 Beginner Strength');
     expect(view.completedAtLabel).toBe('Jan 1, 2026');
@@ -77,6 +77,7 @@ describe('toCompletedSessionView', () => {
   it('omits elapsed time when the completedAt gap is not positive', () => {
     const view = toCompletedSessionView(
       sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:45:00.000Z' }),
+      [],
     );
     expect(view.elapsedLabel).toBeNull();
   });
@@ -84,9 +85,11 @@ describe('toCompletedSessionView', () => {
   it('renders sub-minute elapsed time truthfully instead of flooring to 0 min', () => {
     const oneSecond = toCompletedSessionView(
       sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:45:01.000Z' }),
+      [],
     );
     const fiftyNineSeconds = toCompletedSessionView(
       sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:45:59.000Z' }),
+      [],
     );
     expect(oneSecond.elapsedLabel).toBe('<1 min');
     expect(fiftyNineSeconds.elapsedLabel).toBe('<1 min');
@@ -95,6 +98,7 @@ describe('toCompletedSessionView', () => {
   it('formats a 60-second session as one minute', () => {
     const view = toCompletedSessionView(
       sessionDto({ startedAt: '2026-01-01T10:45:00.000Z', completedAt: '2026-01-01T10:46:00.000Z' }),
+      [],
     );
     expect(view.elapsedLabel).toBe('1 min');
   });
@@ -117,7 +121,7 @@ describe('toCompletedSessionView', () => {
         sets: [],
       },
     ];
-    const view = toCompletedSessionView(sessionDto({ entries }));
+    const view = toCompletedSessionView(sessionDto({ entries }), []);
     expect(view.entries[0]?.name).toBe('Exercise 3');
     expect(view.entries[0]?.equipmentLabel).toBeNull();
     expect(view.entries[0]?.restLabel).toBeNull();
@@ -144,12 +148,13 @@ describe('toCompletedSessionView', () => {
     ];
     const view = toCompletedSessionView(
       sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0 } }),
+      [],
     );
     expect(view.metricsLineLabel).toBe('1 set');
   });
 
   it('links a resolved catalog slug to the exercise history page', () => {
-    const view = toCompletedSessionView(sessionDto());
+    const view = toCompletedSessionView(sessionDto(), []);
     expect(view.entries[0]?.historyHref).toBe('/history/exercises/goblet-squat');
   });
 
@@ -173,6 +178,7 @@ describe('toCompletedSessionView', () => {
     ];
     const noSlugView = toCompletedSessionView(
       sessionDto({ entries: badSlug }),
+      [],
     );
     expect(noSlugView.entries[0]?.historyHref).toBeNull();
 
@@ -195,7 +201,7 @@ describe('toCompletedSessionView', () => {
         },
       ],
     });
-    const unresolvedView = toCompletedSessionView(unresolved);
+    const unresolvedView = toCompletedSessionView(unresolved, []);
     expect(unresolvedView.entries[0]?.historyHref).toBeNull();
   });
 
@@ -237,7 +243,7 @@ describe('toCompletedSessionView', () => {
   }
 
   it('keeps a substituted+skipped occurrence truthful: original context, no performance, no link', () => {
-    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }));
+    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }), []);
     const entry = view.entries[0];
     expect(entry?.isSkipped).toBe(true);
     // Occurrence identity: the currently selected exercise stays primary.
@@ -262,6 +268,7 @@ describe('toCompletedSessionView', () => {
           }),
         ],
       }),
+      [],
     );
     const entry = view.entries[0];
     expect(entry?.isSkipped).toBe(true);
@@ -280,7 +287,7 @@ describe('toCompletedSessionView', () => {
       isSubstituted: false,
     });
     const notSkipped: CompletedSessionDto['entries'][number] = { ...zeroSet, isSkipped: false };
-    const view = toCompletedSessionView(sessionDto({ entries: [notSkipped] }));
+    const view = toCompletedSessionView(sessionDto({ entries: [notSkipped] }), []);
     const entry = view.entries[0];
     // Explicit skip state stays distinct from absence of logged work.
     expect(entry?.isSkipped).toBe(false);
@@ -291,7 +298,7 @@ describe('toCompletedSessionView', () => {
   });
 
   it('suppresses the history link for a skipped occurrence even with a valid slug', () => {
-    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }));
+    const view = toCompletedSessionView(sessionDto({ entries: [skippedEntry()] }), []);
     // Slug is valid — the skip gate, not slug resolution, removed the link.
     expect(view.entries[0]?.historyHref).toBeNull();
   });
@@ -332,7 +339,7 @@ describe('toCompletedSessionView', () => {
         sets: [{ type: 'duration', setNumber: 1, durationSeconds: 45, weightKg: null, rpe: null }],
       },
     ];
-    const view = toCompletedSessionView(sessionDto({ entries }));
+    const view = toCompletedSessionView(sessionDto({ entries }), []);
     expect(view.entries.map((entry) => entry.name)).toEqual([
       'Dumbbell Bench Press',
       'Goblet Squat',
@@ -376,7 +383,7 @@ describe('toCompletedSessionView', () => {
     }
 
     it('shows the performed name as the primary identity with the authored name as context', () => {
-      const view = toCompletedSessionView(sessionDto({ entries: [substitutedEntry()] }));
+      const view = toCompletedSessionView(sessionDto({ entries: [substitutedEntry()] }), []);
       expect(view.entries[0]?.name).toBe('Dumbbell Bench Press');
       expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
     });
@@ -395,6 +402,7 @@ describe('toCompletedSessionView', () => {
             }),
           ],
         }),
+        [],
       );
       expect(view.entries[0]?.originallyName).toBeNull();
     });
@@ -404,6 +412,7 @@ describe('toCompletedSessionView', () => {
       // omitted — no fallback name is ever fabricated.
       const view = toCompletedSessionView(
         sessionDto({ entries: [substitutedEntry({ authoredExerciseName: null })] }),
+        [],
       );
       expect(view.entries[0]?.originallyName).toBeNull();
       // The performed identity still renders (with its positional fallback
@@ -414,6 +423,7 @@ describe('toCompletedSessionView', () => {
             substitutedEntry({ exerciseName: null, authoredExerciseName: null, exerciseOrder: 3 }),
           ],
         }),
+        [],
       );
       expect(orphan.entries[0]?.name).toBe('Exercise 3');
       expect(orphan.entries[0]?.originallyName).toBeNull();
@@ -432,6 +442,7 @@ describe('toCompletedSessionView', () => {
             }),
           ],
         }),
+        [],
       );
       expect(view.entries[0]?.name).toBe('Push-up');
       expect(view.entries[0]?.originallyName).toBe('Goblet Squat');
@@ -492,6 +503,7 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
           userAddedEntry(),
         ],
       }),
+      [],
     );
 
     expect(view.entries.map((entry) => entry.provenanceLabel)).toEqual([
@@ -525,6 +537,7 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
           userAddedEntry({ exerciseOrder: 1 }),
         ],
       }),
+      [],
     );
 
     expect(view.entries[0]?.provenanceLabel).toBeNull();
@@ -546,6 +559,7 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
           }),
         ],
       }),
+      [],
     );
 
     const entry = view.entries[0];
@@ -561,6 +575,7 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
       sessionDto({
         entries: [userAddedEntry({ isSkipped: true, sets: [] })],
       }),
+      [],
     );
 
     const entry = view.entries[0];
@@ -574,6 +589,7 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
   it('keeps a zero-set NON-skipped user-added occurrence distinct from a skipped one', () => {
     const view = toCompletedSessionView(
       sessionDto({ entries: [userAddedEntry({ isSkipped: false, sets: [] })] }),
+      [],
     );
 
     const entry = view.entries[0];

@@ -27,9 +27,15 @@
  *   back to a positional label instead of hiding the work.
  * - Logged timed work (`totalDurationSeconds`) is never labeled as the
  *   workout's duration.
+ * - Historical personal records (M12 Slice 4) are the resolved record events
+ *   of THIS session attached to the exact `(exerciseOrder, setNumber)` that
+ *   produced them — the exact set gets the indicator, its equal sibling does
+ *   not, and duplicate occurrences stay distinct. The state is consumed, never
+ *   derived: no value comparisons and no current-PB consultation happen here.
  */
 
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
+import type { SessionRecordEventDto } from '@/application/dto/personal-records';
 import { err, ok, type Result } from '@/domain/types/result';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
 import { resolveOccurrenceProvenanceLabel } from '@/features/sessions/session-provenance-views';
@@ -40,12 +46,23 @@ import {
   formatHistoryVolume,
   formatSessionSetLine,
 } from '@/features/history/history-labels';
-import { getCompletedSessionUseCase } from '@/features/history/services';
+import {
+  getCompletedSessionRecordEventsUseCase,
+  getCompletedSessionUseCase,
+} from '@/features/history/services';
 import { formatPrescription } from '@/features/programs/program-labels';
 
 export interface CompletedSessionSetView {
   readonly setNumber: number;
   readonly valueLabel: string;
+  /**
+   * True when this exact logged set established a historical personal record
+   * (M12 Slice 4): the set's value strictly exceeded the best eligible value
+   * before it, or it was the first eligible exposure. The state arrives fully
+   * resolved from the application layer — the view never compares values,
+   * inspects earlier sessions, or consults today's personal bests.
+   */
+  readonly isPersonalRecord: boolean;
 }
 
 export interface CompletedSessionEntryView {
@@ -97,11 +114,33 @@ export interface CompletedSessionViewError {
   readonly message: string;
 }
 
-/** Route pattern a catalog slug must satisfy before it becomes a link. */
+/**
+ * Route pattern a catalog slug must satisfy before it becomes a link.
+ */
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * The lookup key of one logged set: `(exerciseOrder, setNumber)`. It is the
+ * set-log primary key, so it stays unique within a session even when the same
+ * exercise occurs twice (different exercise orders) or when one occurrence
+ * logs several sets.
+ */
+function setKey(exerciseOrder: number, setNumber: number): string {
+  return `${exerciseOrder}#${setNumber}`;
+}
+
+/** Indexes the resolved events by their exact (exerciseOrder, setNumber) set. */
+function recordEventKeys(
+  recordEvents: ReadonlyArray<SessionRecordEventDto>,
+): ReadonlySet<string> {
+  return new Set(
+    recordEvents.map((event) => setKey(event.exerciseOrder, event.setNumber)),
+  );
+}
 
 function toEntryView(
   entry: CompletedSessionDto['entries'][number],
+  recordKeys: ReadonlySet<string>,
 ): CompletedSessionEntryView {
   return {
     exerciseOrder: entry.exerciseOrder,
@@ -135,12 +174,28 @@ function toEntryView(
     sets: entry.sets.map((set) => ({
       setNumber: set.setNumber,
       valueLabel: formatSessionSetLine(set),
+      // The exact set's own event — never the occurrence's, and never a value
+      // comparison: the resolved event list is the only authority here.
+      isPersonalRecord: recordKeys.has(setKey(entry.exerciseOrder, set.setNumber)),
     })),
   };
 }
 
-/** Pure DTO → view-model mapping; entry and set order preserved as persisted. */
-export function toCompletedSessionView(session: CompletedSessionDto): CompletedSessionView {
+/**
+ * Pure DTO → view-model mapping; entry and set order preserved as persisted.
+ *
+ * `recordEvents` are the session's already-resolved historical record events
+ * (M12 Slice 4): each is attached to the exact `(exerciseOrder, setNumber)` set
+ * that produced it, so one PR inside an occurrence badges one row — never the
+ * whole occurrence — and an empty list is simply "no records in this session".
+ * A skipped occurrence carries no set rows, so it can never receive an
+ * indicator.
+ */
+export function toCompletedSessionView(
+  session: CompletedSessionDto,
+  recordEvents: ReadonlyArray<SessionRecordEventDto>,
+): CompletedSessionView {
+  const recordKeys = recordEventKeys(recordEvents);
   const elapsedSeconds = Math.floor(
     (Date.parse(session.completedAt) - Date.parse(session.startedAt)) / 1000,
   );
@@ -157,22 +212,39 @@ export function toCompletedSessionView(session: CompletedSessionDto): CompletedS
     completedAtLabel: formatHistoryDate(session.completedAt),
     elapsedLabel: elapsedSeconds > 0 ? formatHistoryElapsed(elapsedSeconds) : null,
     metricsLineLabel: metricSegments.join(' · '),
-    entries: session.entries.map(toEntryView),
+    entries: session.entries.map((entry) => toEntryView(entry, recordKeys)),
   };
 }
 
 /**
  * Builds the detail view for one authenticated user's completed session.
- * SESSION_NOT_FOUND covers a missing, foreign, or in-progress session —
- * the route renders 404 without revealing which.
+ * SESSION_NOT_FOUND covers a missing, foreign, or in-progress session — the
+ * route renders 404 without revealing which.
+ *
+ * The session's core read and its historical record events are independent
+ * reads of the same completed session, so they run concurrently and only then
+ * merge into one view; both share the single-outcome SESSION_NOT_FOUND
+ * contract, so a session that disappears between them is still just a 404.
+ * Record semantics never enter the core completed-session read path.
  */
 export async function buildCompletedSessionView(
   userId: string,
   sessionId: string,
 ): Promise<Result<CompletedSessionView, CompletedSessionViewError>> {
-  const result = await getCompletedSessionUseCase.execute({ userId, sessionId });
-  if (!result.ok) {
-    return err({ code: result.error.code, message: result.error.message });
+  const [sessionResult, recordEventsResult] = await Promise.all([
+    getCompletedSessionUseCase.execute({ userId, sessionId }),
+    getCompletedSessionRecordEventsUseCase.execute({ userId, sessionId }),
+  ]);
+
+  if (!sessionResult.ok) {
+    return err({ code: sessionResult.error.code, message: sessionResult.error.message });
   }
-  return ok(toCompletedSessionView(result.data));
+  if (!recordEventsResult.ok) {
+    return err({
+      code: recordEventsResult.error.code,
+      message: recordEventsResult.error.message,
+    });
+  }
+
+  return ok(toCompletedSessionView(sessionResult.data, recordEventsResult.data));
 }

@@ -513,3 +513,14 @@ export const db = drizzle(pool, { schema });
 - **Connection pooling service** (PgBouncer) for serverless deployments.
 - **Database-level functions** only for performance-critical operations, with domain logic still in TypeScript.
 - **Partitioning** for large tables (e.g., `set_logs`) if volume grows significantly.
+
+## Personal Records
+
+Personal Records are a derived read model. Both repository methods project
+already-stored eligible set rows with exact batched SQL — `ROW_NUMBER()`
+ranking per (performed exercise, metric) for current PBs, and one
+parameterized candidate relation for best-before — joined to the session and
+log tables for user scoping and completed-only filtering. There is no PR
+table, no persisted PR state, and no M12 migration; existing session/log/set
+indexes are reused. See [Personal Records](personal-records.md).
+

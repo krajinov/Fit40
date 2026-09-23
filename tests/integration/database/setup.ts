@@ -6,6 +6,7 @@ import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
+import { DrizzlePersonalRecordRepository } from '@/infrastructure/database/repositories/drizzle-personal-record-repository';
 import { DrizzleRegistrationRepository } from '@/infrastructure/database/repositories/drizzle-registration-repository';
 import { DrizzleSessionRepository } from '@/infrastructure/database/repositories/drizzle-session-repository';
 import { DrizzleUserRepository } from '@/infrastructure/database/repositories/drizzle-user-repository';
@@ -29,6 +30,7 @@ export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
 export const userProfileRepository = new DrizzleUserProfileRepository(db);
 export const trainingHistoryRepository = new DrizzleTrainingHistoryRepository(db);
+export const personalRecordRepository = new DrizzlePersonalRecordRepository(db);
 
 /**
  * Truncates every table, providing deterministic per-test isolation.

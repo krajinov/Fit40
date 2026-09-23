@@ -92,6 +92,7 @@ function dtoWithTrend(
     },
     entries,
     trend: trendPoints,
+    personalBests: [],
     isLimited: false,
   };
 }
@@ -212,6 +213,7 @@ describe('ExerciseHistoryTrend — occurrence-unique keys', () => {
             workingLoadKg: 44,
           },
         ],
+        personalBests: [],
         isLimited: false,
       };
       const view = toExerciseHistoryView(dto);

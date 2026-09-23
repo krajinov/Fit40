@@ -382,3 +382,11 @@ Domain events represent something meaningful happening.
 3. **Events carry minimal data** (IDs and timestamps). Consumers load full data if needed.
 4. **Events are emitted by use cases**, not by entities directly.
 5. **Event handling is async** and does not block the main operation.
+
+## Personal Records (M12)
+
+`PersonalRecordAchieved` remains the domain-event name. M12 derives record
+history at read time from completed sessions — performed ExerciseId
+attribution and exactly three locked metrics (`max-load`,
+`max-bodyweight-reps`, `max-duration`) — instead of persisting record state.
+Canonical semantics: [Personal Records](personal-records.md).

@@ -401,3 +401,15 @@ M10 integration tests in `tests/integration/database/training-history-repository
 Full feature reference:
 [`docs/session-adjustments.md`](session-adjustments.md).
 
+
+## Personal Records (M12)
+
+- Exercise History renders a Personal Bests summary from `PersonalBestDto`:
+  only returned metrics render, the earliest equal owner keeps the session
+  link, and 0 kg displays as a real value.
+- Completed-session detail badges individual set rows from
+  `SessionRecordEventDto`, matched strictly by `(exerciseOrder, setNumber)`;
+  presentation never compares values and never infers occurrence-level PRs.
+- Deferred in UI: completion-moment PR banner/toast, exercise-history PR
+  timeline markers, dashboard widgets, and session-list indicators.
+  Canonical reference: [Personal Records](personal-records.md).

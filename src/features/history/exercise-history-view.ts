@@ -20,7 +20,12 @@
  * - Trend points key on occurrence identity (sessionId, exerciseOrder) —
  *   never completedAt — because one exercise can occur multiple times in
  *   one completed session.
- * - No PRs, e1RM, or recommendations are invented here.
+ * - Personal Bests (M12) render the repository's exact records for the
+ *   metrics that exist, each linking to the session that OWNS the record.
+ *   Records are all-time and independent of the bounded occurrence window:
+ *   they are never recomputed, re-ranked or re-selected here.
+ * - No PRs beyond those records, no e1RM, and no recommendations are
+ *   invented here.
  */
 
 import type {
@@ -32,6 +37,7 @@ import { EXERCISE_HISTORY_OCCURRENCE_LIMIT } from '@/application/dto/exercise-hi
 import { err, ok, type Result } from '@/domain/types/result';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
 import { formatHistoryDate, formatSessionSetLine } from '@/features/history/history-labels';
+import { toPersonalBestsView, type PersonalBestView } from '@/features/history/personal-best-view';
 import { getExerciseHistoryUseCase } from '@/features/history/services';
 import { formatPrescription } from '@/features/programs/program-labels';
 import { formatKg } from '@/features/sessions/progression-labels';
@@ -87,6 +93,12 @@ export interface ExerciseHistoryView {
   readonly occurrenceCountLabel: string;
   readonly entries: ReadonlyArray<ExerciseHistoryEntryView>;
   readonly trend: ExerciseHistoryTrendView | null;
+  /**
+   * Current all-time personal bests, one entry per applicable metric (M12).
+   * Empty when the exercise has no eligible completed record history — a valid
+   * state the screen renders neutrally, never as an error.
+   */
+  readonly personalBests: ReadonlyArray<PersonalBestView>;
 }
 
 export interface ExerciseHistoryViewError {
@@ -170,6 +182,7 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
       : `${dto.entries.length} ${dto.entries.length === 1 ? 'occurrence' : 'occurrences'}`,
     entries,
     trend,
+    personalBests: toPersonalBestsView(dto.personalBests),
   };
 }
 

@@ -224,6 +224,6 @@ Program generation via AI, progress dashboards with charts, OAuth, and email
 verification are listed as planned work in the docs. No deployment or Docker
 setup is included yet.
 
-See [`docs/`](docs/) for architecture, conventions, database, testing, and UI
-documentation, and [`AGENTS.md`](AGENTS.md) for the engineering rules AI agents
-follow in this repository.
+See [`docs/`](docs/) for architecture, conventions, database, testing, UI,
+and Personal Records documentation, and [`AGENTS.md`](AGENTS.md) for the
+engineering rules AI agents follow in this repository.

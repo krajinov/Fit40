@@ -17,6 +17,7 @@ import { RecordMetric } from '@/domain/services/personal-record-metrics';
 import { extractRecordCandidates } from '@/domain/services/personal-records';
 import { addSessionExercise } from '@/domain/services/session-exercise-composition';
 import { substituteSessionExercise } from '@/domain/services/session-exercise-substitution';
+import { moveSessionExercise } from '@/domain/services/session-exercise-reorder';
 import {
   candidateLines,
   completedSession,
@@ -445,5 +446,55 @@ describe('personal records — completed-only boundary', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected the in-progress session to be rejected');
     expect(result.error.code).toBe('SESSION_NOT_COMPLETED');
+  });
+});
+
+// ─── In-progress reorder × record positions (M10 × M12) ─────────────────────
+
+describe('extractRecordCandidates — post-reorder positions', () => {
+  it('follows the persisted exercise order after an in-progress reorder', () => {
+    const base = inProgressSession({
+      id: 's-reorder',
+      startedAt: '2025-01-01T09:00:00Z',
+      logs: [
+        { authored: 'ex-a', sets: [{ type: 'reps', reps: 5, weightKg: 100 }] },
+        { authored: 'ex-b', sets: [{ type: 'reps', reps: 5, weightKg: 80 }] },
+      ],
+    });
+
+    const moved = moveSessionExercise(base, { exerciseOrder: 2, direction: 'up' });
+    if (!moved.ok) throw new Error(moved.error.message);
+
+    const completed = completeWorkoutSession(moved.data, new Date('2025-01-01T10:00:00Z'));
+    if (!completed.ok) throw new Error(completed.error.message);
+
+    // The whole occurrence moved with its logged sets, so ex-b's set now
+    // lives at order 1 and ex-a's set at order 2 — each still attributed to
+    // its own performed exercise, at its new (exerciseOrder, setNumber).
+    expect(candidateLines(completed.data)).toEqual([
+      'ex-b/max-load/80@1.1',
+      'ex-a/max-load/100@2.1',
+    ]);
+  });
+});
+
+// ─── Substituted occurrence that ends up skipped ────────────────────────────
+
+describe('extractRecordCandidates — substituted then skipped', () => {
+  it('extracts nothing from a substituted occurrence the user then skipped', () => {
+    const session = completedSession({
+      id: 's-skip-sub',
+      startedAt: '2025-01-01T09:00:00Z',
+      completedAt: '2025-01-01T10:00:00Z',
+      logs: [
+        { authored: 'ex-a', performed: 'ex-b', isSkipped: true },
+        { authored: 'ex-c', sets: [{ type: 'reps', reps: 5, weightKg: 70 }] },
+      ],
+    });
+
+    // Neither the authored (ex-a) nor the performed (ex-b) exercise receives
+    // a candidate from the skipped occurrence, while the untouched
+    // occurrence at order 2 still extracts normally.
+    expect(candidateLines(session)).toEqual(['ex-c/max-load/70@2.1']);
   });
 });

@@ -185,3 +185,26 @@ describe('toCompletedSessionView — historical record events (M12 Slice 4)', ()
     expect(viewEntry?.sets[0]?.isPersonalRecord).toBe(true);
   });
 });
+
+describe('completed-session view — stable (exerciseOrder, setNumber) location', () => {
+  it('badges only the matching set when one exercise appears twice in the session', () => {
+    const view = toCompletedSessionView(
+      sessionDto([
+        entry({
+          exerciseOrder: 1,
+          sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 50, rpe: null }],
+        }),
+        entry({
+          exerciseOrder: 2,
+          sets: [{ type: 'reps', setNumber: 1, reps: 8, weightKg: 55, rpe: null }],
+        }),
+      ]),
+      [recordEvent({ exerciseOrder: 2, setNumber: 1, value: 55, previousBest: 50 })],
+    );
+
+    // The event targets the second occurrence's exact location — the first
+    // occurrence (same exercise, order 1) must stay unbadged.
+    expect(view.entries[0]?.sets[0]?.isPersonalRecord ?? false).toBe(false);
+    expect(view.entries[1]?.sets[0]?.isPersonalRecord).toBe(true);
+  });
+});

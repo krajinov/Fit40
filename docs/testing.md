@@ -441,3 +441,18 @@ npm run test:coverage
 - ❌ Ignoring failing tests (`it.skip`, `xit`) without a tracked issue.
 - ❌ Testing third-party library behavior.
 - ❌ Over-testing React rendering (shallow render, check class names, etc.).
+
+## Personal Records (M12)
+
+- Domain: `tests/unit/domain/services/personal-records-{extraction,events,fold}.test.ts`
+  (plus `personal-records.fixtures.ts`) — eligibility, chronology ladder,
+  strictness, first exposure, fold determinism.
+- Application/presentation: record-events use case tests and the
+  history view/indicator tests under `tests/unit/features/history/`.
+- Infrastructure:
+  `tests/integration/database/personal-record-repository.test.ts` runs against
+  real PostgreSQL and cross-checks the optimized SQL against the Domain
+  `foldPersonalRecords` oracle — there is deliberately no second semantic
+  implementation.
+- Canonical reference: [Personal Records](personal-records.md).
+

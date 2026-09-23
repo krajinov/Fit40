@@ -285,3 +285,17 @@ Client Component (form submission)
 - ❌ Global state management for server data.
 - ❌ Premature abstractions and over-engineering.
 - ❌ Circular dependencies between layers.
+
+## Personal Records (M12)
+
+Personal Records are read-only advisory history. Domain owns metric
+eligibility, `PerformancePosition` ordering, strict PR comparison, candidate
+extraction and the authoritative chronological fold
+(`src/domain/services/personal-record-metrics.ts`,
+`src/domain/services/personal-records.ts`). The application layer exposes the
+read-only port `PersonalRecordRepository` (`findCurrentPersonalBests`,
+`findBestValuesBefore`); the exercise-history use case renders current PB
+cards, and `GetCompletedSessionRecordEventsUseCase` resolves historical PR
+badges for one completed session. Infrastructure answers both questions with
+exact batched SQL projections — no PR table, no derived writes, no top-K
+approximation. Canonical reference: [Personal Records](personal-records.md).

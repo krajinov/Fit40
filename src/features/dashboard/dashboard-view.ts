@@ -12,15 +12,35 @@
  * (ListTrainingHistoryUseCase) — the same source of truth as /history — so
  * the card reflects completed sessions from every enrollment, including
  * detached ones, instead of the current enrollment's progress ids.
+ *
+ * Weekly insights (M13) follow the same pattern: one read through the
+ * composed application use case, mapped to presentation labels here, and
+ * degrading to `unavailable` — never to zeros — when the read fails.
  */
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
 import type { TrainingHistoryPageDto } from '@/application/dto/training-history';
+import type { TrainingWeeklyInsightsDto } from '@/application/dto/training-insights';
 import type { UserProfileDto } from '@/application/dto/user-profile';
-import { getCurrentProgramDashboardUseCase } from '@/features/dashboard/services';
-import { formatHistoryCount, formatHistoryDate } from '@/features/history/history-labels';
+import {
+  getCurrentProgramDashboardUseCase,
+  getTrainingWeeklyInsightsUseCase,
+} from '@/features/dashboard/services';
+import {
+  toRecentTraining,
+  type RecentTrainingState,
+} from '@/features/dashboard/recent-training-view';
+import {
+  toWeeklyInsightsView,
+  type WeeklyInsightsView,
+} from '@/features/dashboard/weekly-insights-view';
 import { listTrainingHistoryUseCase } from '@/features/history/services';
+
+export type {
+  RecentTrainingSession,
+  RecentTrainingState,
+} from '@/features/dashboard/recent-training-view';
 import {
   nextWorkoutPreviewState,
   toNextWorkoutView,
@@ -48,33 +68,25 @@ export interface DashboardProgramView {
   readonly nextWorkoutPreview: NextWorkoutPreviewState;
 }
 
-/** One recent-completed-session row of the Recent Training card. */
-export interface RecentTrainingSession {
-  readonly sessionId: string;
-  readonly workoutName: string;
-  readonly programName: string;
-  /** Concise UTC date label, e.g. "Feb 15, 2026". */
-  readonly completedAtLabel: string;
-  /** "12 sets" — the session's logged-set count. */
-  readonly setsLabel: string;
-}
-
 /**
- * Recent Training card state, built from the user-global history read model
- * (bounded to RECENT_TRAINING_LIMIT sessions, newest first). A discriminated
- * union so a failed history read cannot be represented as — or conflated
- * with — the genuine empty history: `loaded` with an empty array is "no
- * completed training yet", `unavailable` is "the read failed" (rendered as
- * its own truthful card state, never as empty).
+ * Weekly insights card state (M13): `loaded` carries the mapped view of a
+ * successful read — genuine zero-training weeks included — and
+ * `unavailable` is the logged read failure, which must never be rendered
+ * as zeros, an empty week, or an authoritative "no training".
  */
-export type RecentTrainingState =
-  | { readonly status: 'loaded'; readonly sessions: ReadonlyArray<RecentTrainingSession> }
+export type WeeklyInsightsState =
+  | { readonly status: 'loaded'; readonly data: WeeklyInsightsView }
   | { readonly status: 'unavailable' };
 
 export interface DashboardView {
   readonly profile: UserProfileDto;
   readonly currentProgram: DashboardProgramView | null;
   readonly recentTraining: RecentTrainingState;
+  /**
+   * Calendar-week insights (user-global): see WeeklyInsightsState —
+   * empty-but-successful is data, a failed read is `unavailable`.
+   */
+  readonly weeklyInsights: WeeklyInsightsState;
   /**
    * Per-week completion of the current program, aligned with
    * `currentProgram.program.weeks` order.
@@ -149,27 +161,30 @@ async function readRecentTrainingPage(userId: string): Promise<TrainingHistoryPa
 }
 
 /**
- * Maps the history page DTO into the card's view rows. The repository's
- * order (the recency ladder, newest first) is preserved exactly — nothing
- * is re-sorted, trimmed, or fabricated.
+ * Reads the user-global weekly insights through the composed use case.
+ * Returns null for a typed rejection and for an unexpected infrastructure
+ * failure — logged per docs/error-handling.md §Logging, because the
+ * dashboard degrades gracefully and would otherwise swallow it — so the
+ * caller renders `unavailable`, never an authoritative zero week.
  */
-function toRecentTraining(page: TrainingHistoryPageDto | null): RecentTrainingState {
-  if (page === null) {
-    return { status: 'unavailable' };
+async function readWeeklyInsights(
+  userId: string,
+  now: Date,
+): Promise<TrainingWeeklyInsightsDto | null> {
+  try {
+    const result = await getTrainingWeeklyInsightsUseCase.execute({ userId, now });
+    return result.ok ? result.data : null;
+  } catch (error: unknown) {
+    console.error(`Unexpected failure reading weekly insights for user ${userId}`, error);
+    return null;
   }
+}
 
-  return {
-    status: 'loaded',
-    sessions: page.sessions.map((session) => ({
-      sessionId: session.sessionId,
-      workoutName: session.workoutName,
-      programName: session.programName,
-      completedAtLabel: formatHistoryDate(session.completedAt),
-      setsLabel: `${formatHistoryCount(session.metrics.totalSets)} ${
-        session.metrics.totalSets === 1 ? 'set' : 'sets'
-      }`,
-    })),
-  };
+/** null → `unavailable`; a successful read maps to its presentation view. */
+function toWeeklyInsightsState(dto: TrainingWeeklyInsightsDto | null): WeeklyInsightsState {
+  return dto === null
+    ? { status: 'unavailable' }
+    : { status: 'loaded', data: toWeeklyInsightsView(dto) };
 }
 
 /**
@@ -185,10 +200,13 @@ function toRecentTraining(page: TrainingHistoryPageDto | null): RecentTrainingSt
 export async function buildDashboardView(
   userId: string,
   profile: UserProfileDto,
+  /** The request clock: the insights' current UTC week contains this instant. */
+  now: Date,
 ): Promise<DashboardView> {
-  const [result, recentTraining] = await Promise.all([
+  const [result, recentTraining, weeklyInsights] = await Promise.all([
     getCurrentProgramDashboardUseCase.execute(userId),
     readRecentTrainingPage(userId).then(toRecentTraining),
+    readWeeklyInsights(userId, now).then(toWeeklyInsightsState),
   ]);
   const current = result.ok && result.data !== null ? result.data : null;
 
@@ -222,6 +240,7 @@ export async function buildDashboardView(
             nextWorkoutPreview,
           },
     recentTraining,
+    weeklyInsights,
     weekSummaries,
   };
 }

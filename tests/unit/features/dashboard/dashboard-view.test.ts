@@ -5,10 +5,16 @@
  * mocked feature composition roots: the use case is a pure orchestrator, so
  * stubbing its ports' use cases covers the available / unavailable /
  * complete mapping end to end without re-testing the orchestrator itself.
+ * The M13 insights read is stubbed at the feature composition root for the
+ * same reason: unit tests exercise the mapping, never the database.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
+import type {
+  TrainingWeeklyInsightsDto,
+  WeeklyInsightWeekDto,
+} from '@/application/dto/training-insights';
 import type { UserProfileDto } from '@/application/dto/user-profile';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
@@ -19,12 +25,14 @@ const {
   getEnrollmentExecute,
   resolveNextExecute,
   listHistoryExecute,
+  weeklyInsightsExecute,
 } = vi.hoisted(() => ({
   listEnrollmentsExecute: vi.fn(),
   findBySlugExecute: vi.fn(),
   getEnrollmentExecute: vi.fn(),
   resolveNextExecute: vi.fn(),
   listHistoryExecute: vi.fn(),
+  weeklyInsightsExecute: vi.fn(),
 }));
 
 vi.mock('@/features/enrollment/services', () => ({
@@ -44,6 +52,24 @@ vi.mock('@/features/history/services', () => ({
   listTrainingHistoryUseCase: { execute: listHistoryExecute },
 }));
 
+// The dashboard feature root also composes the insights use case over the
+// shared Drizzle repository singletons. Unit tests replace that use case (no
+// database) and neutralise the repository module so its postgres client
+// never initialises in the node test environment.
+vi.mock('@/infrastructure/database/repositories', () => ({
+  exerciseRepository: {},
+  personalRecordRepository: {},
+  trainingHistoryRepository: {},
+}));
+
+vi.mock('@/features/dashboard/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/dashboard/services')>();
+  return {
+    ...actual,
+    getTrainingWeeklyInsightsUseCase: { execute: weeklyInsightsExecute },
+  };
+});
+
 import { buildDashboardView } from '@/features/dashboard/dashboard-view';
 import type { TrainingHistorySessionDto } from '@/application/dto/training-history';
 
@@ -61,6 +87,75 @@ const PROFILE: UserProfileDto = {
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
+
+// Fixed request clock: Wednesday of the 2026-02-16 UTC training week. The
+// presentation layer never calls Date.now(); the caller supplies the instant.
+const NOW = new Date('2026-02-18T09:30:00.000Z');
+
+/** Eight Monday week windows, oldest → newest (current week last). */
+const WEEK_STARTS = [
+  '2025-12-29T00:00:00.000Z',
+  '2026-01-05T00:00:00.000Z',
+  '2026-01-12T00:00:00.000Z',
+  '2026-01-19T00:00:00.000Z',
+  '2026-01-26T00:00:00.000Z',
+  '2026-02-02T00:00:00.000Z',
+  '2026-02-09T00:00:00.000Z',
+  '2026-02-16T00:00:00.000Z',
+] as const;
+
+function insightWeek(
+  weekStart: string,
+  completedWorkouts: number,
+  loggedSets: number,
+): WeeklyInsightWeekDto {
+  return { weekStart, completedWorkouts, loggedSets };
+}
+
+/** Successful insights read: 3 workouts / 14 sets this week vs 2 / 0 last. */
+function insightsDtoFixture(): TrainingWeeklyInsightsDto {
+  const currentWeek = insightWeek('2026-02-16T00:00:00.000Z', 3, 14);
+  const previousWeek = insightWeek('2026-02-09T00:00:00.000Z', 2, 0);
+  return {
+    weekStart: currentWeek.weekStart,
+    weeks: [
+      insightWeek('2025-12-29T00:00:00.000Z', 0, 0),
+      insightWeek('2026-01-05T00:00:00.000Z', 1, 8),
+      insightWeek('2026-01-12T00:00:00.000Z', 0, 0),
+      insightWeek('2026-01-19T00:00:00.000Z', 2, 12),
+      insightWeek('2026-01-26T00:00:00.000Z', 0, 0),
+      insightWeek('2026-02-02T00:00:00.000Z', 1, 10),
+      previousWeek,
+      currentWeek,
+    ],
+    summary: {
+      currentWeek,
+      previousWeek,
+      workoutDelta: 1,
+      setDelta: 14,
+      currentPersonalBestsSetThisWeek: 1,
+    },
+    recentPersonalBests: [],
+  };
+}
+
+/** Same shape, both weeks trained zero times — authoritative zeros. */
+function emptyInsightsDtoFixture(): TrainingWeeklyInsightsDto {
+  const currentWeek = insightWeek('2026-02-16T00:00:00.000Z', 0, 0);
+  const previousWeek = insightWeek('2026-02-09T00:00:00.000Z', 0, 0);
+  return {
+    weekStart: currentWeek.weekStart,
+    weeks: WEEK_STARTS.map((weekStart) => insightWeek(weekStart, 0, 0)),
+    summary: {
+      currentWeek,
+      previousWeek,
+      workoutDelta: 0,
+      setDelta: 0,
+      currentPersonalBestsSetThisWeek: 0,
+    },
+    recentPersonalBests: [],
+  };
+}
 
 // Real value object — the label formatter reads its structure.
 function rep(): RepPrescription {
@@ -143,6 +238,8 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
+    weeklyInsightsExecute.mockReset();
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: insightsDtoFixture() });
   });
 
   it('maps a resolvable next workout to the available state', async () => {
@@ -150,7 +247,7 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
     stubProgramAndEnrollment();
     resolveNextExecute.mockResolvedValue(NEXT_DTO);
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     if (view.currentProgram === null) throw new Error('expected a current program');
     const preview = view.currentProgram.nextWorkoutPreview;
@@ -165,7 +262,7 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
     stubProgramAndEnrollment();
     resolveNextExecute.mockResolvedValue(null);
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     if (view.currentProgram === null) throw new Error('expected a current program');
     expect(view.currentProgram.nextWorkoutPreview).toEqual({ status: 'unavailable' });
@@ -180,7 +277,7 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
       data: { ...ENROLLED, nextWorkout: null, completedScheduledWorkoutIds: ['sw-1', 'sw-2'] },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     if (view.currentProgram === null) throw new Error('expected a current program');
     expect(view.currentProgram.nextWorkoutPreview).toEqual({ status: 'complete' });
@@ -193,7 +290,7 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
     stubProgramAndEnrollment();
     resolveNextExecute.mockResolvedValue(null);
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     // The enrollment still has a week-2 next workout: week 1 completed,
     // week 2 in progress — even though the preview is unavailable.
@@ -228,6 +325,8 @@ describe('buildDashboardView / recentTraining', () => {
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
+    weeklyInsightsExecute.mockReset();
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: insightsDtoFixture() });
   });
 
   function stubCurrentProgram(): void {
@@ -246,7 +345,7 @@ describe('buildDashboardView / recentTraining', () => {
       },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     expect(listHistoryExecute).toHaveBeenCalledTimes(1);
     expect(listHistoryExecute).toHaveBeenCalledWith({ userId: 'user-a', limit: 3 });
@@ -285,7 +384,7 @@ describe('buildDashboardView / recentTraining', () => {
       },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     if (view.recentTraining.status !== 'loaded') throw new Error('expected loaded');
     expect(view.recentTraining.sessions.map((session) => session.sessionId)).toEqual([
@@ -315,7 +414,7 @@ describe('buildDashboardView / recentTraining', () => {
       },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     // History is user-global: sessions from enrollments the user has since
     // left (or other programs entirely) are shown as-is, not filtered to the
@@ -334,7 +433,7 @@ describe('buildDashboardView / recentTraining', () => {
       data: { sessions: [historySessionDto({ sessionId: 'orphan' })], nextCursor: null },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     expect(view.currentProgram).toBeNull();
     expect(view.recentTraining).toEqual({
@@ -350,11 +449,11 @@ describe('buildDashboardView / recentTraining', () => {
       data: { sessions: [], nextCursor: null },
     });
 
-    const emptyView = await buildDashboardView('user-a', PROFILE);
+    const emptyView = await buildDashboardView('user-a', PROFILE, NOW);
     expect(emptyView.recentTraining).toEqual({ status: 'loaded', sessions: [] });
 
     listHistoryExecute.mockRejectedValue(new Error('db unreachable'));
-    const failedView = await buildDashboardView('user-a', PROFILE);
+    const failedView = await buildDashboardView('user-a', PROFILE, NOW);
     expect(failedView.recentTraining).toEqual({ status: 'unavailable' });
   });
 
@@ -364,7 +463,7 @@ describe('buildDashboardView / recentTraining', () => {
     try {
       listHistoryExecute.mockRejectedValue(new Error('db unreachable'));
 
-      const view = await buildDashboardView('user-a', PROFILE);
+      const view = await buildDashboardView('user-a', PROFILE, NOW);
 
       expect(view.recentTraining).toEqual({ status: 'unavailable' });
       expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -382,19 +481,19 @@ describe('buildDashboardView / recentTraining', () => {
         ok: true,
         data: { sessions: [], nextCursor: null },
       });
-      await buildDashboardView('user-a', PROFILE);
+      await buildDashboardView('user-a', PROFILE, NOW);
 
       listHistoryExecute.mockResolvedValue({
         ok: true,
         data: { sessions: [historySessionDto()], nextCursor: null },
       });
-      await buildDashboardView('user-a', PROFILE);
+      await buildDashboardView('user-a', PROFILE, NOW);
 
       listHistoryExecute.mockResolvedValue({
         ok: false,
         error: { code: 'INVALID_INPUT', message: 'bad cursor' },
       });
-      await buildDashboardView('user-a', PROFILE);
+      await buildDashboardView('user-a', PROFILE, NOW);
 
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
@@ -409,9 +508,100 @@ describe('buildDashboardView / recentTraining', () => {
       error: { code: 'INVALID_INPUT', message: 'bad cursor' },
     });
 
-    const view = await buildDashboardView('user-a', PROFILE);
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
 
     expect(view.recentTraining).toEqual({ status: 'unavailable' });
+  });
+});
+
+describe('buildDashboardView / weeklyInsights (M13)', () => {
+  beforeEach(() => {
+    listEnrollmentsExecute.mockReset();
+    listEnrollmentsExecute.mockResolvedValue([]);
+    findBySlugExecute.mockReset();
+    getEnrollmentExecute.mockReset();
+    resolveNextExecute.mockReset();
+    listHistoryExecute.mockReset();
+    listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
+    weeklyInsightsExecute.mockReset();
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: insightsDtoFixture() });
+  });
+
+  it('hands the request clock and user to the insights use case', async () => {
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(weeklyInsightsExecute).toHaveBeenCalledTimes(1);
+    expect(weeklyInsightsExecute).toHaveBeenCalledWith({ userId: 'user-a', now: NOW });
+    expect(view.weeklyInsights.status).toBe('loaded');
+  });
+
+  it('maps a successful zero-training read to loaded — empty is data, not an error', async () => {
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: emptyInsightsDtoFixture() });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(view.weeklyInsights.status).toBe('loaded');
+    if (view.weeklyInsights.status !== 'loaded') return;
+    expect(view.weeklyInsights.data.comparisonLabel).toBe(
+      'No training in the last two weeks.',
+    );
+    expect(view.weeklyInsights.data.stats[0]).toEqual({ label: 'Workouts', value: '0' });
+    expect(view.weeklyInsights.data.activityWeeks).toHaveLength(8);
+  });
+
+  it('keeps insights available without a current program (user-global read)', async () => {
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(view.currentProgram).toBeNull();
+    expect(view.weeklyInsights.status).toBe('loaded');
+  });
+
+  it('maps a typed insights rejection to unavailable without logging', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      weeklyInsightsExecute.mockResolvedValue({
+        ok: false,
+        error: { code: 'INVALID_INPUT', message: 'bad user' },
+      });
+
+      const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+      expect(view.weeklyInsights).toEqual({ status: 'unavailable' });
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('records an unexpected insights failure before degrading to unavailable', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      weeklyInsightsExecute.mockRejectedValue(new Error('db unreachable'));
+
+      const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+      expect(view.weeklyInsights).toEqual({ status: 'unavailable' });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('user user-a');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('leaves the rest of the dashboard usable when the insights read fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      weeklyInsightsExecute.mockRejectedValue(new Error('db unreachable'));
+
+      const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+      expect(view.weeklyInsights).toEqual({ status: 'unavailable' });
+      expect(view.recentTraining).toEqual({ status: 'loaded', sessions: [] });
+      expect(view.weekSummaries).toEqual([]);
+      expect(view.profile).toBe(PROFILE);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

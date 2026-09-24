@@ -9,12 +9,15 @@ interface WeeklyProgressCardProps {
 }
 
 /**
- * "This week" card (locked design minus the calendar day dots).
+ * "Program week" card (locked design minus the calendar day dots).
  *
  * The locked design shows Mon–Sun dots keyed to calendar scheduling, which
  * the domain does not have: programs schedule workouts per program-week,
  * not per weekday, and no completion dates are exposed for a week.
  * Progress is therefore shown truthfully for the current program week.
+ *
+ * The eyebrow says "PROGRAM WEEK" so ordinal program progress cannot be
+ * confused with the calendar "This week" insights card shown above it.
  */
 export function WeeklyProgressCard({
   programName,
@@ -32,7 +35,7 @@ export function WeeklyProgressCard({
 
   return (
     <section
-      aria-label="This week"
+      aria-label="Program week"
       className={cn(
         'flex flex-col gap-4 rounded-card border border-border bg-card p-6 md:gap-6 md:p-8',
         className,
@@ -40,12 +43,14 @@ export function WeeklyProgressCard({
     >
       <div className="flex items-end justify-between gap-3">
         <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold tracking-wide text-accent-foreground md:text-[13px]">
+            PROGRAM WEEK
+          </p>
           <h2 className="font-display text-lg font-semibold text-foreground md:text-xl">
-            This week
+            Week {currentWeek.weekNumber}
           </h2>
           <p className="text-sm text-ink-2">
-            Week {currentWeek.weekNumber} of {programName}: {currentWeek.completedCount} of{' '}
-            {currentWeek.totalWorkouts}{' '}
+            {programName}: {currentWeek.completedCount} of {currentWeek.totalWorkouts}{' '}
             {currentWeek.totalWorkouts === 1 ? 'workout' : 'workouts'} completed
           </p>
         </div>

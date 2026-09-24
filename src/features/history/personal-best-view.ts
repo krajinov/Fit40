@@ -41,8 +41,11 @@ const METRIC_LABELS: Record<PersonalRecordMetricDto, string> = {
  * The record value in its metric's own unit. Loads keep meaningful decimals
  * (0 kg renders as "0 kg"); reps are integers; durations follow the timed-work
  * convention already used for logged sets ("75 sec").
+ *
+ * Takes only the fields it reads (`Pick`) so other presentation modules can
+ * reuse the format without carrying the record's positional fields.
  */
-export function personalBestValueLabel(best: PersonalBestDto): string {
+export function personalBestValueLabel(best: Pick<PersonalBestDto, 'metric' | 'value'>): string {
   switch (best.metric) {
     case 'max-load':
       return formatKg(best.value);

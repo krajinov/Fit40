@@ -81,4 +81,19 @@ describe('HistoryExerciseShortcuts', () => {
     expect(container.querySelectorAll('form')).toHaveLength(0);
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
+
+  it('gives every shortcut pill the 44px touch-target floor', async () => {
+    const container = await renderShortcuts(SHORTCUTS);
+
+    const links = Array.from(container.querySelectorAll('a'));
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      // `h-11` = 2.75rem = 44px (docs/ui.md): the pill grows to the floor
+      // while its radius, border, padding and type stay unchanged.
+      expect(link.className).toContain('h-11');
+      expect(link.className).not.toContain('h-9');
+      expect(link.className).toContain('rounded-pill');
+      expect(link.className).toContain('text-sm');
+    }
+  });
 });

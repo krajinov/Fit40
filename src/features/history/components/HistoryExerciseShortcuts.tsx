@@ -14,6 +14,9 @@ interface HistoryExerciseShortcutsProps {
  * upstream by the view model (one batched catalog lookup); this component only
  * displays what it is handed. Nothing is rendered when the list is empty: an
  * empty shelf is never shown, and the section simply does not exist.
+ *
+ * Each pill is a 44px-tall touch target (`h-11`) — the docs/ui.md floor — with
+ * the compact pill styling (radius, border, padding, type) otherwise intact.
  */
 export function HistoryExerciseShortcuts({ shortcuts }: HistoryExerciseShortcutsProps) {
   if (shortcuts.length === 0) {
@@ -33,7 +36,7 @@ export function HistoryExerciseShortcuts({ shortcuts }: HistoryExerciseShortcuts
           <li key={shortcut.exerciseId}>
             <Link
               href={shortcut.href}
-              className="inline-flex h-9 items-center rounded-pill border border-border bg-card px-3.5 text-sm font-medium text-ink-2 outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="inline-flex h-11 items-center rounded-pill border border-border bg-card px-3.5 text-sm font-medium text-ink-2 outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               {shortcut.name}
             </Link>

@@ -138,7 +138,7 @@ context. Raw reason codes never reach users. Locked semantics:
 - Desktop content column is `max-w-[1120px]` centered (equals the 1440px
   design with 160px gutters); mobile gutters are 20px (`px-5`).
 - Touch targets are ≥ 44px everywhere (buttons 52/44, inputs 52, radio cards
-  56, chips 48, tab bar 76).
+  56, chips 48, tab bar 76, history shortcut pills 44).
 - Tab bar includes `env(safe-area-inset-bottom)` padding for iOS.
 
 ## Auth ownership

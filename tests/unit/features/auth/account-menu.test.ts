@@ -109,6 +109,24 @@ describe('AccountMenu', () => {
     // Exactly one sign-out affordance in the panel — nothing else submits.
     expect(document.querySelectorAll('form')).toHaveLength(1);
   });
+
+  it('lifts both menu items to the 44px touch-target floor', async () => {
+    await renderMenu({
+      userEmail: 'marta@example.com',
+      variant: 'desktop',
+      defaultOpen: true,
+    });
+
+    // `min-h-11` is 2.75rem = 44px in Tailwind's spacing scale — the floor
+    // docs/ui.md records for touch targets. Typography and padding are
+    // unchanged; the floor only guarantees the minimum height.
+    const profile = document.querySelector('a[href="/profile"]');
+    const signOut = document.querySelector('form button');
+    expect(profile?.className).toContain('min-h-11');
+    expect(signOut?.className).toContain('min-h-11');
+    expect(profile?.className).toContain('text-sm');
+    expect(signOut?.className).toContain('text-sm');
+  });
 });
 
 describe('AccountMenu before the client takes over', () => {
@@ -125,6 +143,37 @@ describe('AccountMenu before the client takes over', () => {
 
     expect(container.querySelector('a[href="/profile"]')?.textContent).toContain('Profile');
     expect(container.querySelector('form button[type="submit"]')?.textContent).toBe('Sign out');
+  });
+
+  it('keeps the pre-hydration control in the hydrated trigger footprint', async () => {
+    // Desktop pill: the visible fallback control is exactly the box the
+    // interactive trigger occupies, so the right-aligned slot cannot shift
+    // when hydration swaps the two.
+    const serverDesktop = renderServerMarkup('desktop');
+    const mountedDesktop = await renderMenu({
+      userEmail: 'marta@example.com',
+      variant: 'desktop',
+    });
+    expect(serverDesktop.querySelector('a[href="/profile"]')?.className).toBe(
+      mountedDesktop.querySelector('button')?.className,
+    );
+
+    // Mobile avatar: the same contract at the other breakpoint.
+    const serverMobile = renderServerMarkup('mobile');
+    const mountedMobile = await renderMenu({ userEmail: 'marta@example.com', variant: 'mobile' });
+    expect(serverMobile.querySelector('a[href="/profile"]')?.className).toBe(
+      mountedMobile.querySelector('button')?.className,
+    );
+  });
+
+  it('keeps the secondary native action out of the slot width', () => {
+    const container = renderServerMarkup('desktop');
+
+    // The sign-out form is out of flow, so it cannot widen the slot or push
+    // the pill: the footprint asserted above is the pill alone.
+    const form = container.querySelector('form');
+    expect(form?.className).toContain('absolute');
+    expect(form?.className).toContain('right-full');
   });
 
   it('never renders the interactive menu before hydration', () => {

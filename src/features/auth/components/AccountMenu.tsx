@@ -7,6 +7,8 @@ import { useSyncExternalStore } from 'react';
 import { cn } from '@/lib/utils';
 import { logoutAction } from '@/features/auth/actions/logout';
 import {
+  ACCOUNT_AVATAR_CLASS,
+  ACCOUNT_PILL_CLASS,
   AccountMenuFallback,
   type AccountVariant,
 } from '@/features/auth/components/AccountMenuFallback';
@@ -35,7 +37,11 @@ import {
  *
  * The trigger keeps the locked-design pill: the desktop header shows the
  * initial + "Profile", the mobile header the avatar alone (labelled for
- * assistive tech).
+ * assistive tech). Its classes are `ACCOUNT_PILL_CLASS` / `ACCOUNT_AVATAR_CLASS`,
+ * shared with the fallback above, so the control occupies the same box before
+ * and after hydration and the right-aligned slot never shifts (PR #16 review,
+ * P2 #1). The panel items keep their typography and padding and carry
+ * `min-h-11` (44px) as the touch-target floor (P2 #2).
  */
 
 export interface AccountMenuProps {
@@ -73,8 +79,9 @@ function useHasHydrated(): boolean {
   return useSyncExternalStore(subscribeToNothing, getHydratedSnapshot, getServerSnapshot);
 }
 
+/** `min-h-11` = 44px, the touch-target floor (docs/ui.md). */
 const ITEM_CLASS =
-  'flex w-full cursor-pointer items-center rounded-control px-3 py-2.5 text-sm font-medium text-ink-2 outline-none transition-colors select-none data-[highlighted]:bg-surface-2 data-[highlighted]:text-foreground';
+  'flex min-h-11 w-full cursor-pointer items-center rounded-control px-3 py-2.5 text-sm font-medium text-ink-2 outline-none transition-colors select-none data-[highlighted]:bg-surface-2 data-[highlighted]:text-foreground';
 
 export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProps) {
   // The explicit hydration signal, owned here: the server snapshot (and the
@@ -94,7 +101,7 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
   return (
     <Menu.Root defaultOpen={defaultOpen ?? false}>
       {variant === 'desktop' ? (
-        <Menu.Trigger className="flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50">
+        <Menu.Trigger className={ACCOUNT_PILL_CLASS}>
           <span
             aria-hidden="true"
             className="grid size-7 place-items-center rounded-pill bg-accent-tint text-[13px] font-semibold text-accent-strong"
@@ -104,10 +111,7 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
           <span className="text-sm font-medium">Profile</span>
         </Menu.Trigger>
       ) : (
-        <Menu.Trigger
-          aria-label="Account"
-          className="grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
+        <Menu.Trigger aria-label="Account" className={ACCOUNT_AVATAR_CLASS}>
           <span aria-hidden="true">{initial}</span>
         </Menu.Trigger>
       )}

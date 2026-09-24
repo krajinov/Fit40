@@ -126,12 +126,12 @@ context. Raw reason codes never reach users. Locked semantics:
   session state, and the shared headers still import no feature.
 - **Account control before hydration.** The menu is client-controlled, so
   `AccountMenu` renders `AccountMenuFallback` until its own hydration signal
-  flips: a plain `/profile` link plus a native `logoutAction` form in the
+  flips: a native `/profile` link plus a `logoutAction` form in the
   server-rendered HTML, replaced by the interactive menu once the client has
-  hydrated. No `<noscript>` or "scripts enabled" CSS is involved, the two are
-  never visible at once, and the pill/avatar design is unchanged — so a
-  missing bundle or an un-hydrated page still leaves Profile and Sign out
-  reachable.
+  hydrated. The visible pill/avatar reuses the trigger's own classes and the
+  sign-out form sits out of flow, so the right-aligned slot keeps its footprint
+  and nothing shifts at hydration; the menu items and the native sign-out
+  button all carry the 44px `min-h-11` touch-target floor.
 - Breakpoint: Tailwind `md` (768px) switches mobile ↔ desktop shell.
 - Desktop content column is `max-w-[1120px]` centered (equals the 1440px
   design with 160px gutters); mobile gutters are 20px (`px-5`).

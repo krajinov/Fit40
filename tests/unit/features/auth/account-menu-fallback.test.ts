@@ -64,6 +64,9 @@ describe('AccountMenuFallback', () => {
     expect(form).not.toBeNull();
     expect(form?.getAttribute('action')).toBe('/__logout-action');
     expect(form?.querySelector('button[type="submit"]')?.textContent).toBe('Sign out');
+    // `min-h-11` = 44px: the same touch-target floor the hydrated menu items
+    // carry, so the native action is no harder to hit than the menu's.
+    expect(form?.querySelector('button')?.className).toContain('min-h-11');
     // The real mutation path only — one form, one control.
     expect(container.querySelectorAll('form')).toHaveLength(1);
     expect(container.querySelectorAll('button')).toHaveLength(1);

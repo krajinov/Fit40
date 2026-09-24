@@ -121,6 +121,7 @@ function makeHistoryRepo(occurrences: ReadonlyArray<CompletedExerciseOccurrence>
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn().mockResolvedValue(occurrences),
     listRecentCompletedExercisePerformances: vi.fn(),
+    listCompletedSessionActivity: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn().mockResolvedValue(null),
   } satisfies TrainingHistoryRepository;
@@ -137,6 +138,7 @@ function makeExerciseRepo(exercise: Exercise | null) {
 function makePersonalRecordRepo(bests: ReadonlyArray<PersonalBest>) {
   return {
     findCurrentPersonalBests: vi.fn().mockResolvedValue(bests),
+    findCurrentPersonalBestsSetBetween: vi.fn(),
     findBestValuesBefore: vi.fn(),
   } satisfies PersonalRecordRepository;
 }

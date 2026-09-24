@@ -245,6 +245,37 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     sessionId: WorkoutSessionId,
   ): Promise<CompletedSessionContext | null>;
+
+  /**
+   * Returns the user's completed sessions with `completedAt >= since`, newest
+   * first, as a lightweight activity projection — never hydrated aggregates.
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached (left-program) history is the user's training past
+   *   and counts, and no enrollment filter is applied.
+   * - Completed sessions only; an in-progress session never appears.
+   * - `since` is INCLUSIVE: a session completed exactly at `since` is returned.
+   * - Ordering is the deterministic history recency ladder with no window
+   *   dependence: `completedAt` desc, `startedAt` desc, session id desc.
+   * - Deliberately NOT paginated and NOT capped: the caller's `since` is the
+   *   only bound, so an aggregate over the returned rows can never be
+   *   incomplete because of a page size.
+   * - Exactly one entry per completed session, carrying the display names of
+   *   its workout template and program (resolved by join) and `loggedSets` as a
+   *   plain COUNT of the session's persisted set rows. Because the count is
+   *   plain, a completed session with no persisted set rows reports `0` instead
+   *   of being dropped — a defensive guarantee for rows the domain's completion
+   *   gate never produces (legacy or externally written data), never an
+   *   invitation to infer performance from a session. This read never redefines
+   *   what a completed workout is.
+   * - Implementations must answer in a bounded number of statements (one
+   *   session query plus one batched set-count query), never one per session.
+   */
+  listCompletedSessionActivity(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedSessionActivityEntry>>;
 }
 
 /**
@@ -258,4 +289,25 @@ export interface CompletedSessionContext {
   readonly session: CompletedWorkoutSession;
   readonly programName: string;
   readonly workoutName: string;
+}
+
+/**
+ * One bounded activity row: a completed session WITHOUT its aggregate
+ * hydration. It exists so a date-windowed read (recent-activity aggregates)
+ * can be answered from the session row plus a plain set count, instead of
+ * loading exercise logs and set logs it would only summarise.
+ *
+ * `loggedSets` is the number of persisted set rows of the session — the same
+ * fact the lifetime totals count. The domain's completion gate requires at
+ * least one logged set, so `0` is a defensive answer for a session the write
+ * path never produces; either way the entry is returned, never dropped.
+ */
+export interface CompletedSessionActivityEntry {
+  readonly sessionId: WorkoutSessionId;
+  readonly workoutName: string;
+  readonly programName: string;
+  readonly startedAt: Date;
+  /** Non-null: the read is completed-only by construction. */
+  readonly completedAt: Date;
+  readonly loggedSets: number;
 }

@@ -64,6 +64,49 @@ export interface PersonalRecordRepository {
   ): Promise<ReadonlyArray<PersonalBest>>;
 
   /**
+   * Returns the user's CURRENT, still-standing all-time personal bests whose
+   * WINNING performance was established in `[from, to)` — every exercise, no
+   * exercise list required.
+   *
+   * This is deliberately NOT any of the following, and an implementation must
+   * never drift into them:
+   * - NOT the best performance inside the window (the window never narrows the
+   *   ranking — only the already-chosen winner is filtered by it);
+   * - NOT the historical PR events that occurred inside the window;
+   * - NOT every record achieved during the window: a best set inside the
+   *   window and surpassed later (inside or after it) is no longer a current
+   *   best and does not appear.
+   *
+   * Semantics are exactly `findCurrentPersonalBests`'s, only then filtered:
+   * - The ranking runs over ALL of the user's eligible history first: maximum
+   *   eligible value per (PERFORMED exercise, metric), and on tied maxima the
+   *   EARLIEST position in the chronological ladder owns the best. Only after
+   *   that winner is known may the read keep it — or drop it — according to
+   *   whether its own `completedAt` lies in `[from, to)` (`from` inclusive,
+   *   `to` exclusive). Consequently a window containing an equal-to-maximum
+   *   performance does not surface it while an earlier equal owner sits
+   *   outside the window, and a window containing the all-time winner does.
+   * - A first exposure is a record, so it appears when its session completed
+   *   inside the window and nothing later surpassed it.
+   * - Attribution, eligibility and the metric taxonomy are M12's and are not
+   *   re-decided here: the performed exercise id owns the record (a
+   *   substitution credits the replacement, the authored exercise receives
+   *   nothing), user-added occurrences are fully eligible, detached completed
+   *   history counts, and skipped or zero-set occurrences contribute no
+   *   candidate. `0 kg` is a real external load where M12 says so, and the
+   *   duration/bodyweight/load metrics keep their meanings.
+   * - Deterministic order: exercise id ascending, then metric ascending (the
+   *   same canonical order as `findCurrentPersonalBests`).
+   * - Answered in ONE batched statement: the window is a predicate on the
+   *   ranked result, never a second query and never one query per exercise.
+   */
+  findCurrentPersonalBestsSetBetween(
+    userId: UserId,
+    from: Date,
+    to: Date,
+  ): Promise<ReadonlyArray<PersonalBest>>;
+
+  /**
    * Returns, for every supplied candidate in exactly the order given, the
    * exact maximum eligible value of the same (user, performed exercise,
    * metric) that lies STRICTLY BEFORE the candidate's `PerformancePosition`

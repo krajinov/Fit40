@@ -1,8 +1,9 @@
-import { and, asc, count, desc, eq, exists, inArray, isNotNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, inArray, isNotNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type {
   CompletedExerciseOccurrence,
+  CompletedSessionActivityEntry,
   CompletedSessionContext,
   CompletedWorkoutSession,
   ProgressionHistoryPerformance,
@@ -20,7 +21,7 @@ import type { RecentPerformanceRow } from '../mappers/exercise-performance-mappe
 import { mapRecentCompletedExercisePerformances } from '../mappers/exercise-performance-mapper';
 import type { ExerciseOccurrenceRow } from '../mappers/exercise-occurrence-mapper';
 import { mapCompletedExerciseOccurrences } from '../mappers/exercise-occurrence-mapper';
-import { mapSessionRows } from '../mappers/session-mapper';
+import { mapSessionRows, parseWorkoutSessionId } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, trainingPrograms, workoutSessions, workouts } from '../schema';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
@@ -509,6 +510,82 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       programName: row.programName,
       workoutName: row.workoutName,
     };
+  }
+
+  /**
+   * Bounded activity projection: the user's completed sessions at or after
+   * `since`, newest first, WITHOUT aggregate hydration.
+   *
+   * Two statements, never one per session:
+   * - Q1 selects the window's session rows (ownership and completed-only are
+   *   structural filters) with the workout template's and program's display
+   *   names via the same joins the history page uses. A workout template
+   *   belongs to exactly one program, so the program name is unambiguous.
+   * - Q2 batch-counts set rows for exactly those sessions in one grouped
+   *   query. The count is plain, so a completed session with no set rows — a
+   *   shape the domain's completion gate never produces — has no group and is
+   *   reported with `loggedSets` `0` rather than dropped; it remains a
+   *   completed session, and this read never redefines that.
+   *
+   * `since` is inclusive and is the ONLY bound: no keyset pagination and no
+   * cap, because the caller aggregates a fixed window from these rows and a
+   * truncated read would silently under-count it. Ordering is the same
+   * deterministic recency ladder as the history list.
+   */
+  async listCompletedSessionActivity(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedSessionActivityEntry>> {
+    const rows: HistoryRow[] = await this.db
+      .select({
+        session: workoutSessions,
+        workoutName: workouts.name,
+        programName: trainingPrograms.name,
+      })
+      .from(workoutSessions)
+      .innerJoin(workouts, eq(workoutSessions.workoutId, workouts.id))
+      .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          gte(workoutSessions.completedAt, since),
+        ),
+      )
+      .orderBy(
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+      );
+
+    if (rows.length === 0) {
+      // No sessions, no set-count query: an empty window is answered by Q1.
+      return [];
+    }
+
+    // One grouped count for the whole window (no N+1). Set rows carry their
+    // session id directly and always belong to a valid exercise log of that
+    // session (composite FK), so counting by session id counts exactly the
+    // session's logged sets — the same fact the lifetime totals count.
+    const setCountRows = await this.db
+      .select({ sessionId: setLogs.sessionId, setCount: count(setLogs.setNumber) })
+      .from(setLogs)
+      .where(inArray(setLogs.sessionId, rows.map((row) => row.session.id)))
+      .groupBy(setLogs.sessionId);
+
+    const setsBySession = new Map<string, number>();
+    for (const row of setCountRows) {
+      setsBySession.set(row.sessionId, row.setCount);
+    }
+
+    return rows.map((row) => ({
+      sessionId: parseWorkoutSessionId(row.session.id, 'completed session activity'),
+      workoutName: row.workoutName,
+      programName: row.programName,
+      startedAt: row.session.startedAt,
+      completedAt: this.completedAtOf(row.session),
+      loggedSets: setsBySession.get(row.session.id) ?? 0,
+    }));
   }
 }
 

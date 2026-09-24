@@ -1,13 +1,30 @@
 import type { ReactNode } from 'react';
 
+import type { UserDto } from '@/application/dto/user';
 import { AppHeader } from '@/components/shared/AppHeader';
 import { MobileHeader } from '@/components/shared/MobileHeader';
 import { MobileTabBar } from '@/components/shared/MobileTabBar';
-import { AccountMenu } from '@/features/auth/components/AccountMenu';
+import { AccountMenu, type AccountVariant } from '@/features/auth/components/AccountMenu';
+import { AccountMenuFallback } from '@/features/auth/components/AccountMenuFallback';
 import { getCurrentUser } from '@/features/auth/current-user';
 
 interface AppLayoutProps {
   readonly children: ReactNode;
+}
+
+/**
+ * The account slot both headers receive: the scripted menu plus its
+ * server-rendered no-JavaScript counterpart, so profile navigation and
+ * sign-out stay reachable without scripting while only one of the two is ever
+ * visible (see `AccountMenuFallback`).
+ */
+function accountSlot(user: UserDto, variant: AccountVariant): ReactNode {
+  return (
+    <>
+      <AccountMenu userEmail={user.email} variant={variant} />
+      <AccountMenuFallback userEmail={user.email} variant={variant} />
+    </>
+  );
 }
 
 /**
@@ -26,7 +43,10 @@ interface AppLayoutProps {
  *
  * The account menu (profile + sign-out) is composed HERE and passed down as
  * the headers' `account` slot: the shared header components stay free of
- * feature imports, and signed-out visitors keep the plain sign-in links.
+ * feature imports, and signed-out visitors keep the plain sign-in links. The
+ * slot carries the scripted menu together with its server-rendered
+ * no-JavaScript counterpart, so this layout stays the only place that knows
+ * how the shell composes account controls.
  *
  * The page content area is the route group's single <main> landmark —
  * exactly one per page, since no (app) page renders its own.
@@ -36,12 +56,8 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <>
-      <AppHeader
-        account={user === null ? null : <AccountMenu userEmail={user.email} variant="desktop" />}
-      />
-      <MobileHeader
-        account={user === null ? null : <AccountMenu userEmail={user.email} variant="mobile" />}
-      />
+      <AppHeader account={user === null ? null : accountSlot(user, 'desktop')} />
+      <MobileHeader account={user === null ? null : accountSlot(user, 'mobile')} />
       {/* The route group's single primary-content landmark: exactly one <main>
           per (app) page — no page renders its own. Bottom clearance for the
           fixed mobile tab bar (incl. safe area) is preserved. */}

@@ -167,3 +167,19 @@
     @apply font-sans;
   }
 }
+
+/*
+ * No-JavaScript account controls (progressive enhancement).
+ *
+ * The Base UI account menu is client-controlled, so the shell renders
+ * `AccountMenuFallback` next to it: a server-side profile link and sign-out
+ * form. Every scripted browser sees the menu alone — the fallback is hidden
+ * here — and browsers without scripting reveal it (and hide the inert trigger)
+ * through the <noscript> style rule the fallback itself renders.
+ *
+ * Both rules are deliberately unlayered: the later no-script rule then wins
+ * over Tailwind's layered utilities without needing !important.
+ */
+.account-menu-fallback {
+  display: none;
+}

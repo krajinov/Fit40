@@ -15,17 +15,26 @@ import { logoutAction } from '@/features/auth/actions/logout';
  * `account` slot the headers expose.
  *
  * Sign-out reuses the existing Server Action through a native form POST (the
- * menu item is the submit button): no new mutation path, no client-side
- * session state, and it still works without JavaScript — the same contract the
- * previous sign-out control had.
+ * menu item is the submit button): no new mutation path and no client-side
+ * session state. The menu itself does need scripting — its panel does not
+ * exist until the trigger opens it, and a client-controlled trigger is inert
+ * before hydration — so the shell pairs it with `AccountMenuFallback`, which
+ * keeps the profile link and the sign-out form in the server-rendered HTML.
+ * The marker class on the trigger below is what that fallback hides when
+ * scripting is off, so exactly one account affordance is visible in either
+ * state (PR #16 review, P2 #2).
  *
  * The trigger keeps the locked-design pill: the desktop header shows the
  * initial + "Profile", the mobile header the avatar alone (labelled for
  * assistive tech).
  */
+
+/** Which shell breakpoint renders the control (`md` switches between them). */
+export type AccountVariant = 'desktop' | 'mobile';
+
 export interface AccountMenuProps {
   readonly userEmail: string;
-  readonly variant: 'desktop' | 'mobile';
+  readonly variant: AccountVariant;
   /**
    * Renders the panel open on mount. Presentation tests use it — jsdom never
    * mounts the positioner otherwise — and app code never passes it.
@@ -46,7 +55,7 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
   return (
     <Menu.Root defaultOpen={defaultOpen ?? false}>
       {variant === 'desktop' ? (
-        <Menu.Trigger className="flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50">
+        <Menu.Trigger className="account-menu-trigger flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50">
           <span
             aria-hidden="true"
             className="grid size-7 place-items-center rounded-pill bg-accent-tint text-[13px] font-semibold text-accent-strong"
@@ -58,7 +67,7 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
       ) : (
         <Menu.Trigger
           aria-label="Account"
-          className="grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="account-menu-trigger grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <span aria-hidden="true">{initial}</span>
         </Menu.Trigger>

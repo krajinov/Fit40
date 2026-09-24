@@ -101,4 +101,14 @@ describe('AccountMenu', () => {
     // Exactly one sign-out affordance in the panel — nothing else submits.
     expect(document.querySelectorAll('form')).toHaveLength(1);
   });
+
+  it('carries the marker class the no-JavaScript fallback hides', async () => {
+    const desktop = await renderMenu({ userEmail: 'marta@example.com', variant: 'desktop' });
+    const mobile = await renderMenu({ userEmail: 'marta@example.com', variant: 'mobile' });
+
+    // Without scripting the fallback replaces this trigger, so the rule it
+    // renders has to be able to find it in the pre-hydration markup.
+    expect(desktop.querySelector('button')?.className).toContain('account-menu-trigger');
+    expect(mobile.querySelector('button')?.className).toContain('account-menu-trigger');
+  });
 });

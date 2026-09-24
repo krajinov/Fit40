@@ -468,3 +468,144 @@ propagation) and
 - Deferred in UI: completion-moment PR banner/toast, exercise-history PR
   timeline markers, dashboard widgets, and session-list indicators.
   Canonical reference: [Personal Records](personal-records.md).
+## Training dashboard · weekly insights (M13)
+
+The dashboard gained a user-global **"This week"** section built from
+completed training history, an eight-week activity strip, and a recent
+personal bests card. The insights render with or without an enrolled program
+and never read program schedules.
+
+### Calendar-week insights
+
+- A **training week** is Monday 00:00:00.000 UTC (inclusive) to the next
+  Monday 00:00:00.000 UTC (exclusive). Windows are plain epoch-millisecond
+  arithmetic in `src/domain/services/training-week.ts`, so every completion
+  instant belongs to exactly one week and a window is deterministic for a
+  given instant regardless of server, database, or viewer timezone.
+- **UTC is deliberate and deterministic**: Fit40 currently has no
+  user-timezone preference, so a hidden local-time rule would make week
+  boundaries shift silently between environments. The strip states it
+  plainly: "Weeks run Monday–Sunday (UTC)."
+- The insights are **user-global**: the activity read scopes only to the
+  user's completed sessions (ownership + `completed_at`), with no enrollment
+  filter — detached (left-program) history counts, and no current program is
+  required.
+
+### Weekly metrics
+
+Three stats render under the "This week" heading:
+
+- **Workouts** — completed sessions whose `completedAt` falls in the current
+  UTC week. User-global; each completed session counts once, whatever
+  program it belonged to (detached history included). An in-progress session
+  never counts.
+- **Sets** — the persisted logged sets belonging to those completed sessions
+  in the current UTC week, summed. A plain count of the window's sessions'
+  `set_logs` rows; it never re-derives volume, intensity, or duration.
+- **Current PBs set** — CURRENT, still-standing all-time personal bests whose
+  winning performance was established during the current UTC week. This is
+  NOT the number of historical PR events achieved during the week: a best
+  set this week and surpassed later is no longer current and is not counted.
+  Historical PR events remain the M12 per-session PR badges on completed-session
+  detail; this dashboard never reconstructs them.
+
+### Previous-week comparison
+
+- The previous week is always a concrete UTC calendar window — the week
+  immediately before the current one, same Monday-to-Monday shape.
+- Absence of completed sessions means zero. The data model cannot distinguish
+  "did not train" from "was not tracked", so there is deliberately **no
+  "untracked previous week" state**.
+- Deltas are ordinary numeric `current − previous` comparisons (negative
+  when the current week is behind). Presentation only chooses wording —
+  "No training in the last two weeks." / "No training last week." / "Same as
+  last week." / signed deltas — and never re-derives the numbers.
+
+### Eight-week activity strip
+
+- Completed-workout counts for **eight UTC calendar weeks**, oldest →
+  newest, current week last and highlighted.
+- **Factual activity only**: each bar is a count, with an sr-only label per
+  week ("Week of Feb 16: 2 workouts (this week)") and a visible floor so a
+  zero week reads as "no training" rather than a gap.
+- **No streak or gamification semantics**: consecutive-week chains, XP,
+  badges, and "best streak" claims are out of scope by design.
+
+### Personal bests card
+
+- Renders up to **five** (`RECENT_PERSONAL_BESTS_LIMIT`) recently
+  established current personal bests, newest winners first.
+- Eligibility: only PBs whose **current winning performance** lies in the
+  eight-week lookback (the oldest week's Monday 00:00 UTC up to the request
+  clock). Ranking runs over ALL eligible history first; the window is then a
+  predicate on the already-chosen winner — never a "best value within the
+  window" ranking (`findCurrentPersonalBestsSetBetween`).
+- Each row links to the owning completed session (M12 earliest-equal owner).
+- **Surpassed historical PR events are not reconstructed** for this
+  dashboard: a record that no longer stands does not appear, and the
+  "Current PBs set" stat comes from the record read, not from rendered rows.
+- Catalog identity is resolved through one batched lookup, only for rows
+  that will render; an exercise the catalog can no longer resolve is omitted
+  rather than placeholder-named.
+
+### Calendar week vs program week
+
+Two different "week" concepts share the dashboard and must not blur:
+
+- **"This week"** (weekly insights card) = UTC calendar-week historical
+  activity: what you actually completed since Monday 00:00:00 UTC.
+- **"Program week"** (weekly progress card eyebrow + `aria-label="Program
+  week"`) = ordinal program/enrollment progress ("Week 3", "3 of 8
+  workouts completed").
+
+Program workouts are ordinal positions within the program, not
+calendar-scheduled dates — nothing in M13 implies a workout was "due" on a
+particular calendar day, and the calendar day-dot treatment from the locked
+design stays omitted for that reason.
+
+### Mobile behavior
+
+Final implemented behavior — a product decision that **supersedes the
+earlier M13 plan statement** that would have hidden Recent Training on
+mobile:
+
+- **Recent Training remains visible on mobile.** It is the dashboard's
+  existing mobile entry point to `/history`, and `MobileTabBar` has no
+  History tab (Home / Programs / Exercises / Profile only). Hiding it would
+  strand mobile users; a History tab can revisit this decision later.
+- **Profile Summary remains hidden on mobile** (`hidden md:flex`).
+- **M13 insights remain available without a current program**: "This week",
+  "Personal bests", and "Recent training" render right after the no-program
+  state, so the user-global view never depends on an enrollment.
+
+### Truthfulness · deliberate non-goals
+
+Why the dashboard does **not** show:
+
+- **Total training time** — `completedAt − startedAt` is wall-clock elapsed
+  time and includes idle gaps; presenting it as training duration would
+  fabricate precision the data does not have.
+- **Planned/expected workouts this calendar week** — scheduled workouts are
+  ordinal program positions and there is no enrollment-to-calendar anchor,
+  so "you should have trained 3× this week" would be an invented schedule.
+
+Preserved M13 non-goals: no AI coaching, no readiness/recovery score, no
+e1RM, no calorie estimate, no streaks/XP/gamification, no persisted
+analytics snapshots, no new scheduling semantics, and no historical
+dashboard PR-event reconstruction.
+
+Degradation contract: a failed read renders a typed "unavailable" message
+and is logged — never zeros, which would claim an authoritative zero week;
+an empty but successful read renders authoritative zeros and honest empty
+copy.
+
+Regression coverage:
+`tests/unit/domain/services/training-week.test.ts`,
+`tests/unit/application/use-cases/get-training-weekly-insights.test.ts`,
+`tests/unit/application/dto/training-insights.test.ts`,
+`tests/unit/features/dashboard/weekly-insights-view.test.ts`,
+`tests/unit/features/dashboard/dashboard-view.test.ts`,
+`tests/unit/features/dashboard/dashboard-insights-cards.test.ts`, and the
+M13 integration suites in
+`tests/integration/database/training-history-repository.test.ts` and
+`tests/integration/database/personal-record-repository.test.ts`.

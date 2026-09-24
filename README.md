@@ -26,7 +26,12 @@ history.
   suitable alternatives.
 - **Profile & onboarding** — age, weight, goals, equipment, and limitations
   feed exercise suitability.
-- **Dashboard** — next scheduled workout preview and current program progress.
+- **Dashboard** — next scheduled workout preview, current program progress,
+  and user-global weekly insights on a Monday–Sunday (UTC) calendar week:
+  "This week" workouts, sets, and still-standing current PBs with a
+  previous-week comparison, an eight-week activity strip, and recently
+  established personal bests. Insights work with or without an enrolled
+  program (see [`docs/ui.md`](docs/ui.md) for the full contract).
 - **Training history** — completed sessions across programs with per-exercise
   detail, plus user-global exercise history (`/history/exercises/[slug]`)
   showing every completed occurrence and a working-load trend.
@@ -219,10 +224,11 @@ Feature modules under `src/features/`: `auth`, `dashboard`, `enrollment`,
 ## Project Status
 
 Early development (v0.1): authentication, profiles, program enrollment, guided
-workout sessions, and progressive-overload recommendations are implemented.
-Program generation via AI, progress dashboards with charts, OAuth, and email
-verification are listed as planned work in the docs. No deployment or Docker
-setup is included yet.
+workout sessions, progressive-overload recommendations, training history with
+Personal Records, and the dashboard's weekly training insights are
+implemented. Program generation via AI, richer progress charts, OAuth, and
+email verification are listed as planned work in the docs. No deployment or
+Docker setup is included yet.
 
 See [`docs/`](docs/) for architecture, conventions, database, testing, UI,
 and Personal Records documentation, and [`AGENTS.md`](AGENTS.md) for the

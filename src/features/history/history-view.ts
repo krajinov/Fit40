@@ -14,10 +14,10 @@
  *
  * The "recently trained exercises" shortcuts are the one derived-presentation
  * addition: distinct performed exercises are selected from the page already
- * loaded for this screen (newest occurrence first, explicitly skipped
- * occurrences excluded) and resolved through ONE batched catalog lookup. No
- * extra session read happens, and an exercise the catalog no longer resolves
- * is omitted rather than fabricated.
+ * loaded for this screen (newest occurrence first; occurrences the user
+ * skipped or that logged no sets are excluded) and resolved through ONE
+ * batched catalog lookup. No extra session read happens, and an exercise the
+ * catalog no longer resolves is omitted rather than fabricated.
  */
 
 import type { ExerciseSummaryDto } from '@/application/dto/exercise';
@@ -88,11 +88,17 @@ export interface HistoryViewError {
 }
 
 /**
- * Distinct PERFORMED exercise ids of the page, most recently trained first,
- * excluding occurrences the user explicitly skipped (M10: the persisted flag
- * is authoritative — zero logged sets never means skipped). A skipped
- * occurrence never hides the exercise: an older performed occurrence of the
- * same exercise still supplies its id.
+ * Distinct PERFORMED exercise ids of the page, most recently trained first.
+ *
+ * An occurrence counts as performed only when BOTH hold: the user did not
+ * skip it (M10: the persisted flag is authoritative — zero logged sets never
+ * means skipped) AND it carries at least one logged set. Completion only
+ * requires one logged set somewhere in the session, so a non-skipped
+ * occurrence may legitimately have `sets: []`; that is not training, so it
+ * must neither create a shortcut of its own nor rank the exercise by the
+ * occurrence's position. The zero-set filter runs BEFORE the id is marked as
+ * seen, so such a newer occurrence never suppresses (nor relocates) an older
+ * occurrence that really logged sets.
  *
  * The cap applies BEFORE the catalog lookup, so a page of many sessions never
  * widens the query beyond the shortcuts actually rendered.
@@ -105,7 +111,7 @@ export function selectRecentlyTrainedExerciseIds(
 
   for (const session of sessions) {
     for (const log of session.exerciseLogs) {
-      if (log.isSkipped || seen.has(log.performedExerciseId)) {
+      if (log.isSkipped || log.sets.length === 0 || seen.has(log.performedExerciseId)) {
         continue;
       }
       seen.add(log.performedExerciseId);

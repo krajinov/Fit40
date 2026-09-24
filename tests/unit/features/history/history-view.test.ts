@@ -70,7 +70,10 @@ function pageDto(
 
 const TOTALS: TrainingTotalsDto = { completedSessions: 7, loggedSets: 63 };
 
-/** One persisted occurrence of a page session, minimal but complete. */
+/**
+ * One persisted occurrence of a page session, minimal but complete: a
+ * performed occurrence carries one logged set unless a test overrides it.
+ */
 function exerciseLog(
   performedExerciseId: string,
   overrides: Partial<TrainingHistorySessionDto['exerciseLogs'][number]> = {},
@@ -94,7 +97,10 @@ function exerciseLog(
     },
     order: 1,
     prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
-    sets: [],
+    // Logged work is what makes an occurrence performed: completion only
+    // requires one set somewhere in the session, so zero-set occurrences are
+    // realistic and pass `sets: []` explicitly.
+    sets: [{ setNumber: 1, type: 'reps', reps: 10, weightKg: 20, rpe: null }],
     ...overrides,
   };
 }
@@ -273,6 +279,8 @@ describe('selectRecentlyTrainedExerciseIds', () => {
 
   it('excludes skipped occurrences without hiding the exercise', () => {
     const sessions = [
+      // The skipped occurrence carries a logged set: the persisted skip flag,
+      // not a set count, is what excludes it.
       sessionDto({
         exerciseLogs: [exerciseLog('ex-squat', { isSkipped: true }), exerciseLog('ex-bench')],
       }),
@@ -283,6 +291,31 @@ describe('selectRecentlyTrainedExerciseIds', () => {
       }),
     ];
 
+    expect(selectRecentlyTrainedExerciseIds(sessions)).toEqual(['ex-bench', 'ex-squat']);
+  });
+
+  it('excludes a non-skipped occurrence that logged no sets', () => {
+    const sessions = [
+      sessionDto({
+        exerciseLogs: [exerciseLog('ex-squat'), exerciseLog('ex-untouched', { sets: [] })],
+      }),
+    ];
+
+    expect(selectRecentlyTrainedExerciseIds(sessions)).toEqual(['ex-squat']);
+  });
+
+  it('ranks by real performances only when a newer occurrence logged no sets', () => {
+    const sessions = [
+      // Newest session: the exercise was on the plan but nothing was logged.
+      sessionDto({ exerciseLogs: [exerciseLog('ex-squat', { sets: [] })] }),
+      sessionDto({
+        sessionId: 'session-old',
+        exerciseLogs: [exerciseLog('ex-bench'), exerciseLog('ex-squat')],
+      }),
+    ];
+
+    // The zero-set occurrence neither becomes a shortcut of its own nor
+    // relocates the exercise: order follows the older real performances.
     expect(selectRecentlyTrainedExerciseIds(sessions)).toEqual(['ex-bench', 'ex-squat']);
   });
 

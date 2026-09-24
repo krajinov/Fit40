@@ -72,9 +72,9 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 | ProgressBar | `shared/ProgressBar.tsx` | server | surface-2 track + accent fill, 10/8px, progressbar ARIA |
 | RecommendationCallout | `shared/RecommendationCallout.tsx` | server | M8 states: increase/hold/regress/scheme-change/bodyweight-goal-reached/bodyweight-hold/duration-increase/duration-hold/first-exposure |
 | PageContainer | `shared/PageContainer.tsx` | server | 1120px column, responsive gutters |
-| AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; profile pill or sign-in link |
+| AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; account slot, else sign-in link |
 | AppNavLinks | `shared/AppNavLinks.tsx` | client | `usePathname` active state |
-| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar |
+| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; account slot, else sign-in link |
 | MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding |
 | Wordmark | `shared/Wordmark.tsx` | server | Sora two-tone "Fit40" link |
 
@@ -117,11 +117,28 @@ context. Raw reason codes never reach users. Locked semantics:
   unchanged). It renders AppHeader (hidden below `md`), MobileHeader
   (hidden at `md`+), page content with bottom clearance for the fixed tab
   bar, and MobileTabBar (`md:hidden`).
+- **Account menu (post-M12 polish).** The layout composes `AccountMenu`
+  (`features/auth`) into both headers' `account` slot: desktop renders the
+  initial + "Profile" pill, mobile the avatar alone (`aria-label="Account"`),
+  and signed-out visitors keep the plain sign-in links. The panel holds
+  Profile (`Menu.LinkItem`) and Sign out, which posts to the existing
+  `logoutAction` through a native `<form>` — no new mutation path, no client
+  session state, and the shared headers still import no feature.
+- **Account control before hydration.** The menu is client-controlled, so
+  `AccountMenu` renders `AccountMenuFallback` until its own hydration signal
+  flips: a native `/profile` link plus a `logoutAction` form in the
+  server-rendered HTML, replaced by the interactive menu once the client has
+  hydrated. The visible pill/avatar reuses the trigger's own classes and the
+  sign-out form sits out of flow, so the right-aligned slot keeps its footprint
+  and nothing shifts at hydration; the menu items and the native sign-out
+  button all carry the 44px `min-h-11` touch-target floor, and the mobile
+  control is a 44px (`size-11`) hit area around the unchanged 32px avatar
+  circle, so its target meets the floor without moving the avatar.
 - Breakpoint: Tailwind `md` (768px) switches mobile ↔ desktop shell.
 - Desktop content column is `max-w-[1120px]` centered (equals the 1440px
   design with 160px gutters); mobile gutters are 20px (`px-5`).
 - Touch targets are ≥ 44px everywhere (buttons 52/44, inputs 52, radio cards
-  56, chips 48, tab bar 76).
+  56, chips 48, tab bar 76, history shortcut pills 44).
 - Tab bar includes `env(safe-area-inset-bottom)` padding for iOS.
 
 ## Auth ownership
@@ -131,7 +148,8 @@ routes (program catalog, program detail, workout detail, exercise catalog)
 with private ones; a layout guard would change authorization behavior.
 Private pages keep their `requireUser()` calls — they need the `UserDto` for
 data and pass route-specific `?next=` deep links. The shell calls
-`getCurrentUser()` (request-`cache()`d) only to choose avatar vs. sign-in.
+`getCurrentUser()` (request-`cache()`d) only to choose the account menu vs.
+the sign-in links; the menu performs no authorization itself.
 
 ## Follow-up notes (deferred by design)
 
@@ -176,9 +194,11 @@ data and pass route-specific `?next=` deep links. The shell calls
 
 ### Dashboard structure
 
-- Header: date eyebrow (UTC, deterministic), "Your training" title,
-  Edit profile ghost button, and the sign-out link (quiet text link — not
-  in the locked design, kept as the app's only in-session sign-out).
+- Header: date eyebrow (UTC, deterministic), "Your training" title and the
+  Edit profile ghost button. The dashboard's local sign-out link is gone now
+  that the global account menu owns sign-out everywhere; the open landing
+  page (`src/app/page.tsx`) still renders `LogoutButton` for signed-in
+  visitors.
 - Two-column desktop layout (main 736px / side 360px within the 1120px
   container); mobile stacks Header → Up next → This week → Current program,
   hiding Recent training and the profile card (locked mobile design).
@@ -402,6 +422,34 @@ Full feature reference:
 [`docs/session-adjustments.md`](session-adjustments.md).
 
 
+## Screen notes: History · recently trained exercises (post-M12 polish)
+
+The history screen gained one derived-presentation shelf between the totals
+card and the completed-workout list. It is derived only — no new read of the
+session side:
+
+- **Selection is pure.** `selectRecentlyTrainedExerciseIds` walks the page
+  already loaded for the screen and collects distinct PERFORMED exercises in
+  newest-occurrence-first order, skipping occurrences the user explicitly
+  skipped (the persisted flag stays authoritative). A skipped occurrence never
+  hides the exercise: an older performed occurrence still supplies it.
+- **Capped before the lookup.** At most `MAX_HISTORY_EXERCISE_SHORTCUTS` (10)
+  ids reach the catalog, so a long page never widens the query beyond what is
+  rendered.
+- **One batched lookup.** `buildHistoryView` resolves the selection through
+  `getExercisesByIdsUseCase` (composed in `features/history/services.ts`) — no
+  per-id query, no catalog-list over-fetch.
+- **Honest absence.** An id the catalog no longer resolves is omitted rather
+  than replaced by a placeholder, and a lookup failure is surfaced like the
+  other read failures instead of being hidden behind an empty row.
+- **Nothing when empty.** `HistoryExerciseShortcuts` renders no section at all
+  for an empty selection; the row is navigation only (no controls).
+
+Regression coverage: `tests/unit/features/history/history-view.test.ts`
+(selection, ordering, cap, unresolved ids, batched lookup, failure
+propagation) and
+`tests/unit/features/history/history-exercise-shortcuts.test.ts`.
+
 ## Personal Records (M12)
 
 - Exercise History renders a Personal Bests summary from `PersonalBestDto`:
@@ -410,6 +458,13 @@ Full feature reference:
 - Completed-session detail badges individual set rows from
   `SessionRecordEventDto`, matched strictly by `(exerciseOrder, setNumber)`;
   presentation never compares values and never infers occurrence-level PRs.
+- The same screen renders a one-line legend explaining the badge ("PR marks
+  the set that established a personal record for that exercise at the time.")
+  and only when a badge is actually on screen: `hasPersonalRecords` is counted
+  from the rendered set rows, so a resolved event attached to nothing visible
+  (a skipped occurrence) never triggers it. The badge keeps its `sr-only`
+  "Personal record" text and gained no `title` attribute, so assistive tech is
+  not told the same thing twice.
 - Deferred in UI: completion-moment PR banner/toast, exercise-history PR
   timeline markers, dashboard widgets, and session-list indicators.
   Canonical reference: [Personal Records](personal-records.md).

@@ -32,6 +32,10 @@
  *   produced them — the exact set gets the indicator, its equal sibling does
  *   not, and duplicate occurrences stay distinct. The state is consumed, never
  *   derived: no value comparisons and no current-PB consultation happen here.
+ * - `hasPersonalRecords` reports whether any badge actually renders, so the
+ *   screen's legend appears exactly when a badge is on screen — a resolved
+ *   event attached to nothing visible (a skipped occurrence) never triggers
+ *   it.
  */
 
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
@@ -107,6 +111,15 @@ export interface CompletedSessionView {
   /** Joined non-zero metric segments, e.g. "14 sets · 106 reps · 3,510 kg". */
   readonly metricsLineLabel: string;
   readonly entries: ReadonlyArray<CompletedSessionEntryView>;
+  /**
+   * True when at least one RENDERED set carries the historical record
+   * indicator, i.e. when a PR badge is actually on screen. A resolved event
+   * that never reaches a rendered set row (a skipped occurrence, or a set the
+   * session no longer holds) does not count, so the screen never explains a
+   * badge it does not show. Presentational only: it decides the legend, never
+   * the badges themselves.
+   */
+  readonly hasPersonalRecords: boolean;
 }
 
 export interface CompletedSessionViewError {
@@ -205,6 +218,7 @@ export function toCompletedSessionView(
     metrics.totalReps > 0 ? `${formatHistoryCount(metrics.totalReps)} reps` : null,
     metrics.volume > 0 ? formatHistoryVolume(metrics.volume) : null,
   ].filter((segment): segment is string => segment !== null);
+  const entries = session.entries.map((entry) => toEntryView(entry, recordKeys));
 
   return {
     heading: session.workoutName,
@@ -212,7 +226,12 @@ export function toCompletedSessionView(
     completedAtLabel: formatHistoryDate(session.completedAt),
     elapsedLabel: elapsedSeconds > 0 ? formatHistoryElapsed(elapsedSeconds) : null,
     metricsLineLabel: metricSegments.join(' · '),
-    entries: session.entries.map((entry) => toEntryView(entry, recordKeys)),
+    entries,
+    // Counted from the built entries, so it can only ever describe badges that
+    // really render — never the raw event list.
+    hasPersonalRecords: entries.some((entry) =>
+      entry.sets.some((set) => set.isPersonalRecord),
+    ),
   };
 }
 

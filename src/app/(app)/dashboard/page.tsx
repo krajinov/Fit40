@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation';
 
 import { buttonVariants } from '@/components/ui/button';
 import { PageContainer } from '@/components/shared/PageContainer';
-import { LogoutButton } from '@/features/auth/components/LogoutButton';
 import { requireUser } from '@/features/auth/current-user';
 import { getUserProfileUseCase } from '@/features/profile/services';
 import { formatDashboardDate } from '@/features/dashboard/dashboard-labels';
@@ -59,10 +58,9 @@ export default async function DashboardPage() {
           <Link href="/profile" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
             Edit profile
           </Link>
-          {/* Not in the locked design; kept because this is the app's only
-              in-session sign-out entry — removing it would delete working
-              behavior. Rendered as a quiet text link. */}
-          <LogoutButton className="text-sm font-medium text-ink-3 underline-offset-4 hover:text-foreground hover:underline" />
+          {/* Sign-out moved to the global account menu in the shell header
+              (every screen, both breakpoints) — the dashboard keeps only the
+              profile shortcut it was designed with. */}
         </div>
       </header>
 

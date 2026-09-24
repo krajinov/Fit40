@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { PageContainer } from '@/components/shared/PageContainer';
 import { cn } from '@/lib/utils';
 import { requireUser } from '@/features/auth/current-user';
+import { HistoryExerciseShortcuts } from '@/features/history/components/HistoryExerciseShortcuts';
 import { HistorySessionCard } from '@/features/history/components/HistorySessionCard';
 import { HistoryTotalsCard } from '@/features/history/components/HistoryTotalsCard';
 import { buildHistoryView } from '@/features/history/history-view';
@@ -46,6 +47,11 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
 
       <div className="mt-6 flex flex-col gap-5 md:mt-8 md:gap-6">
         <HistoryTotalsCard totals={view.totals} />
+
+        {/* Derived shortcuts into the exercises performed in this page (no
+            extra session read, one batched catalog lookup). Renders nothing
+            when nothing was trained. */}
+        <HistoryExerciseShortcuts shortcuts={view.exerciseShortcuts} />
 
         {view.sessions.length === 0 ? (
           <div className="flex flex-col items-center gap-6">

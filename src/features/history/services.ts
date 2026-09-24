@@ -8,6 +8,7 @@
 import { GetCompletedSessionRecordEventsUseCase } from '@/application/use-cases/get-completed-session-record-events';
 import { GetCompletedSessionUseCase } from '@/application/use-cases/get-completed-session';
 import { GetExerciseHistoryUseCase } from '@/application/use-cases/get-exercise-history';
+import { GetExercisesByIdsUseCase } from '@/application/use-cases/get-exercises-by-ids';
 import { GetTrainingTotalsUseCase } from '@/application/use-cases/get-training-totals';
 import { ListTrainingHistoryUseCase } from '@/application/use-cases/list-training-history';
 import {
@@ -45,3 +46,11 @@ export const getExerciseHistoryUseCase = new GetExerciseHistoryUseCase(
   exerciseRepository,
   personalRecordRepository,
 );
+
+/**
+ * Batched catalog resolution for the history screen's "recently trained
+ * exercises" shortcuts. The screen already holds the performed exercise ids
+ * of the page it loaded, so one batched lookup renders names and links with
+ * no per-id query (no N+1) and no catalog-list over-fetch.
+ */
+export const getExercisesByIdsUseCase = new GetExercisesByIdsUseCase(exerciseRepository);

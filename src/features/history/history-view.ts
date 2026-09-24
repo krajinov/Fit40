@@ -11,10 +11,19 @@
  * labeling it "duration" would misrepresent the metric. Zero-value reps and
  * volume are suppressed (e.g. bodyweight-only sessions) instead of showing
  * misleading "0" badges.
+ *
+ * The "recently trained exercises" shortcuts are the one derived-presentation
+ * addition: distinct performed exercises are selected from the page already
+ * loaded for this screen (newest occurrence first, explicitly skipped
+ * occurrences excluded) and resolved through ONE batched catalog lookup. No
+ * extra session read happens, and an exercise the catalog no longer resolves
+ * is omitted rather than fabricated.
  */
 
+import type { ExerciseSummaryDto } from '@/application/dto/exercise';
 import type {
   TrainingHistoryPageDto,
+  TrainingHistorySessionDto,
   TrainingTotalsDto,
 } from '@/application/dto/training-history';
 import { err, ok, type Result } from '@/domain/types/result';
@@ -24,9 +33,13 @@ import {
   formatHistoryVolume,
 } from '@/features/history/history-labels';
 import {
+  getExercisesByIdsUseCase,
   getTrainingTotalsUseCase,
   listTrainingHistoryUseCase,
 } from '@/features/history/services';
+
+/** How many "recently trained exercises" shortcuts the screen shows at most. */
+export const MAX_HISTORY_EXERCISE_SHORTCUTS = 10;
 
 export interface HistoryTotalsView {
   readonly completedWorkouts: string;
@@ -45,9 +58,26 @@ export interface HistorySessionView {
   readonly volumeLabel: string | null;
 }
 
+/**
+ * One "recently trained exercise" shortcut: a link into that exercise's
+ * performance history. Only exercises the catalog still resolves appear.
+ */
+export interface HistoryExerciseShortcutView {
+  readonly exerciseId: string;
+  readonly name: string;
+  /** `/history/exercises/<slug>`. */
+  readonly href: string;
+}
+
 export interface HistoryView {
   readonly totals: HistoryTotalsView;
   readonly sessions: ReadonlyArray<HistorySessionView>;
+  /**
+   * Distinct exercises performed within the loaded page, most recently
+   * trained first and capped. Empty means "render no shortcut section" — the
+   * screen never shows an empty shelf.
+   */
+  readonly exerciseShortcuts: ReadonlyArray<HistoryExerciseShortcutView>;
   /** `/history?cursor=…` when an older page exists, else null. */
   readonly olderPageHref: string | null;
 }
@@ -58,13 +88,76 @@ export interface HistoryViewError {
 }
 
 /**
+ * Distinct PERFORMED exercise ids of the page, most recently trained first,
+ * excluding occurrences the user explicitly skipped (M10: the persisted flag
+ * is authoritative — zero logged sets never means skipped). A skipped
+ * occurrence never hides the exercise: an older performed occurrence of the
+ * same exercise still supplies its id.
+ *
+ * The cap applies BEFORE the catalog lookup, so a page of many sessions never
+ * widens the query beyond the shortcuts actually rendered.
+ */
+export function selectRecentlyTrainedExerciseIds(
+  sessions: ReadonlyArray<TrainingHistorySessionDto>,
+): ReadonlyArray<string> {
+  const selected: string[] = [];
+  const seen = new Set<string>();
+
+  for (const session of sessions) {
+    for (const log of session.exerciseLogs) {
+      if (log.isSkipped || seen.has(log.performedExerciseId)) {
+        continue;
+      }
+      seen.add(log.performedExerciseId);
+      selected.push(log.performedExerciseId);
+      if (selected.length === MAX_HISTORY_EXERCISE_SHORTCUTS) {
+        return selected;
+      }
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Resolves the selected ids against the catalog summaries fetched for them,
+ * keeping the newest-trained-first order and omitting ids the catalog no
+ * longer resolves — absence is never replaced by a fabricated entry.
+ */
+function toExerciseShortcuts(
+  sessions: ReadonlyArray<TrainingHistorySessionDto>,
+  exercises: ReadonlyArray<ExerciseSummaryDto>,
+): ReadonlyArray<HistoryExerciseShortcutView> {
+  const byId = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+  const shortcuts: HistoryExerciseShortcutView[] = [];
+
+  for (const exerciseId of selectRecentlyTrainedExerciseIds(sessions)) {
+    const exercise = byId.get(exerciseId);
+    if (exercise === undefined) {
+      continue;
+    }
+    shortcuts.push({
+      exerciseId: exercise.id,
+      name: exercise.name,
+      href: `/history/exercises/${exercise.slug}`,
+    });
+  }
+
+  return shortcuts;
+}
+
+/**
  * Pure DTO → view-model mapping. Session order is preserved exactly as the
  * application layer delivered it (newest first); nothing is sorted, trimmed,
  * or fabricated here.
+ *
+ * `trainedExercises` are the catalog summaries of the ids selected from this
+ * page (one batched lookup) — they only ever supply names and slugs.
  */
 export function toHistoryView(
   page: TrainingHistoryPageDto,
   totals: TrainingTotalsDto,
+  trainedExercises: ReadonlyArray<ExerciseSummaryDto>,
 ): HistoryView {
   const sessions = page.sessions.map((session) => ({
     sessionId: session.sessionId,
@@ -88,6 +181,7 @@ export function toHistoryView(
       loggedSets: formatHistoryCount(totals.loggedSets),
     },
     sessions,
+    exerciseShortcuts: toExerciseShortcuts(page.sessions, trainedExercises),
     olderPageHref:
       page.nextCursor === null
         ? null
@@ -101,6 +195,13 @@ export function toHistoryView(
  * The cursor is an opaque token from a previous page of this screen; a token
  * that fails validation is reported as INVALID_INPUT so the route can handle
  * it like any other unresolvable URL input.
+ *
+ * The shortcut catalog lookup runs last and is scoped to at most
+ * MAX_HISTORY_EXERCISE_SHORTCUTS ids derived from the page already in hand
+ * (an empty selection resolves without querying). Those ids come from
+ * persisted sessions, so a rejection is an invariant break: it is surfaced
+ * like the other read failures rather than silently hidden behind an empty
+ * shortcut row.
  */
 export async function buildHistoryView(
   userId: string,
@@ -116,5 +217,12 @@ export async function buildHistoryView(
     return err({ code: totalsResult.error.code, message: totalsResult.error.message });
   }
 
-  return ok(toHistoryView(pageResult.data, totalsResult.data));
+  const exercisesResult = await getExercisesByIdsUseCase.execute({
+    exerciseIds: selectRecentlyTrainedExerciseIds(pageResult.data.sessions),
+  });
+  if (!exercisesResult.ok) {
+    return err({ code: exercisesResult.error.code, message: exercisesResult.error.message });
+  }
+
+  return ok(toHistoryView(pageResult.data, totalsResult.data, exercisesResult.data));
 }

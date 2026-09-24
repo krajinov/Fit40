@@ -599,3 +599,79 @@ describe('toCompletedSessionView — occurrence provenance (M11)', () => {
     expect(entry?.historyHref).toBe('/history/exercises/face-pull');
   });
 });
+
+// ─── The legend flag (post-M12 polish) ───────────────────────────────────────
+//
+// `hasPersonalRecords` decides whether the session page explains the badge, so
+// it must report badges that actually render — never the raw event list.
+
+/** A template occurrence at the given order with the given logged sets. */
+function recordEntry(
+  exerciseOrder: number,
+  sets: CompletedSessionDto['entries'][number]['sets'],
+): CompletedSessionDto['entries'][number] {
+  return {
+    authoredExerciseId: 'ex-001',
+    performedExerciseId: 'ex-001',
+    isSubstituted: false,
+    isSkipped: false,
+    source: 'template',
+    exerciseOrder,
+    exerciseName: 'Goblet Squat',
+    authoredExerciseName: 'Goblet Squat',
+    exerciseSlug: 'goblet-squat',
+    equipment: 'kettlebell',
+    restSeconds: 90,
+    prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 },
+    sets,
+  };
+}
+
+describe('hasPersonalRecords', () => {
+  it('is false when the session resolved no record events', () => {
+    expect(toCompletedSessionView(sessionDto(), []).hasPersonalRecords).toBe(false);
+  });
+
+  it('is true when a resolved record event lands on a rendered set', () => {
+    const view = toCompletedSessionView(sessionDto(), [
+      { exerciseOrder: 1, setNumber: 1, metric: 'max-load', value: 50, previousBest: null },
+    ]);
+
+    expect(view.hasPersonalRecords).toBe(true);
+  });
+
+  it('is false when the only event targets a set the session does not render', () => {
+    const view = toCompletedSessionView(sessionDto(), [
+      { exerciseOrder: 1, setNumber: 9, metric: 'max-load', value: 50, previousBest: null },
+    ]);
+
+    expect(view.hasPersonalRecords).toBe(false);
+  });
+
+  it('is false when the only event targets a skipped occurrence with no set rows', () => {
+    const view = toCompletedSessionView(
+      sessionDto({ entries: [recordEntry(1, [])].map((entry) => ({ ...entry, isSkipped: true })) }),
+      [{ exerciseOrder: 1, setNumber: 1, metric: 'max-load', value: 50, previousBest: null }],
+    );
+
+    expect(view.entries[0]?.sets).toEqual([]);
+    expect(view.hasPersonalRecords).toBe(false);
+  });
+
+  it('is true when one of several entries carries the badge', () => {
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries: [
+          recordEntry(1, [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 50, rpe: null }]),
+          recordEntry(2, [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 85, rpe: null }]),
+        ],
+      }),
+      [{ exerciseOrder: 2, setNumber: 1, metric: 'max-load', value: 85, previousBest: 80 }],
+    );
+
+    expect(
+      view.entries.map((entry) => entry.sets.some((set) => set.isPersonalRecord)),
+    ).toEqual([false, true]);
+    expect(view.hasPersonalRecords).toBe(true);
+  });
+});

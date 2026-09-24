@@ -6,6 +6,7 @@ import { cache } from 'react';
 
 import { PageContainer } from '@/components/shared/PageContainer';
 import { CompletedSessionEntryList } from '@/features/history/components/CompletedSessionEntryList';
+import { CompletedSessionRecordLegend } from '@/features/history/components/CompletedSessionRecordLegend';
 import { buildCompletedSessionView } from '@/features/history/completed-session-view';
 import { completedSessionParamsSchema } from '@/features/history/schemas/completed-session-page-schema';
 import { getCurrentUser, requireUser } from '@/features/auth/current-user';
@@ -94,6 +95,11 @@ export default async function CompletedSessionPage({ params }: CompletedSessionP
           {view.contextLabel} · {view.metricsLineLabel}
         </p>
       </header>
+
+      {/* Visible legend for the PR badge, rendered only when a badge is
+          actually on screen (the view model counts rendered badges, not raw
+          record events). */}
+      {view.hasPersonalRecords && <CompletedSessionRecordLegend />}
 
       <CompletedSessionEntryList entries={view.entries} />
     </PageContainer>

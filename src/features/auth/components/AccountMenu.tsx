@@ -2,9 +2,14 @@
 
 import { Menu } from '@base-ui/react/menu';
 import Link from 'next/link';
+import { useSyncExternalStore } from 'react';
 
 import { cn } from '@/lib/utils';
 import { logoutAction } from '@/features/auth/actions/logout';
+import {
+  AccountMenuFallback,
+  type AccountVariant,
+} from '@/features/auth/components/AccountMenuFallback';
 
 /**
  * Global account menu (application shell): profile navigation plus the
@@ -14,23 +19,24 @@ import { logoutAction } from '@/features/auth/actions/logout';
  * keeps zero feature imports: `(app)/layout.tsx` composes this into the
  * `account` slot the headers expose.
  *
+ * Progressive enhancement (PR #16 review): the Base UI menu needs a hydrated
+ * client — its trigger is inert until then — so this component renders the
+ * native `AccountMenuFallback` instead for the server HTML and the first client
+ * render, and swaps in the interactive menu only once hydration has actually
+ * completed. A bundle that never loads, or a hydration that never finishes,
+ * therefore leaves a reachable `/profile` link and sign-out form in place
+ * rather than an inert button, while a hydrated page shows the interactive
+ * menu and nothing else — the two are never visible at the same time, with no
+ * `<noscript>` or "scripts are enabled" CSS assumption involved.
+ *
  * Sign-out reuses the existing Server Action through a native form POST (the
  * menu item is the submit button): no new mutation path and no client-side
- * session state. The menu itself does need scripting — its panel does not
- * exist until the trigger opens it, and a client-controlled trigger is inert
- * before hydration — so the shell pairs it with `AccountMenuFallback`, which
- * keeps the profile link and the sign-out form in the server-rendered HTML.
- * The marker class on the trigger below is what that fallback hides when
- * scripting is off, so exactly one account affordance is visible in either
- * state (PR #16 review, P2 #2).
+ * session state.
  *
  * The trigger keeps the locked-design pill: the desktop header shows the
  * initial + "Profile", the mobile header the avatar alone (labelled for
  * assistive tech).
  */
-
-/** Which shell breakpoint renders the control (`md` switches between them). */
-export type AccountVariant = 'desktop' | 'mobile';
 
 export interface AccountMenuProps {
   readonly userEmail: string;
@@ -46,16 +52,49 @@ function initialOf(email: string): string {
   return (email[0] ?? '').toUpperCase();
 }
 
+/**
+ * Hydration detection for the account control: `false` on the server and for
+ * the hydration pass, `true` once the client owns the page. The store never
+ * changes after that, so it needs no subscription.
+ */
+function subscribeToNothing(): () => void {
+  return () => undefined;
+}
+
+function getHydratedSnapshot(): boolean {
+  return true;
+}
+
+function getServerSnapshot(): boolean {
+  return false;
+}
+
+function useHasHydrated(): boolean {
+  return useSyncExternalStore(subscribeToNothing, getHydratedSnapshot, getServerSnapshot);
+}
+
 const ITEM_CLASS =
   'flex w-full cursor-pointer items-center rounded-control px-3 py-2.5 text-sm font-medium text-ink-2 outline-none transition-colors select-none data-[highlighted]:bg-surface-2 data-[highlighted]:text-foreground';
 
 export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProps) {
+  // The explicit hydration signal, owned here: the server snapshot (and the
+  // hydration pass) is false, so the native fallback is what the HTML carries,
+  // and the client snapshot is true, so React swaps in the interactive menu
+  // once it has really taken over. Nothing to subscribe to — the value only
+  // ever moves one way — which is why this is a snapshot store rather than
+  // state set from an effect.
+  const hydrated = useHasHydrated();
+
+  if (!hydrated) {
+    return <AccountMenuFallback userEmail={userEmail} variant={variant} />;
+  }
+
   const initial = initialOf(userEmail);
 
   return (
     <Menu.Root defaultOpen={defaultOpen ?? false}>
       {variant === 'desktop' ? (
-        <Menu.Trigger className="account-menu-trigger flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50">
+        <Menu.Trigger className="flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50">
           <span
             aria-hidden="true"
             className="grid size-7 place-items-center rounded-pill bg-accent-tint text-[13px] font-semibold text-accent-strong"
@@ -67,7 +106,7 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
       ) : (
         <Menu.Trigger
           aria-label="Account"
-          className="account-menu-trigger grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <span aria-hidden="true">{initial}</span>
         </Menu.Trigger>

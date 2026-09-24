@@ -124,14 +124,14 @@ context. Raw reason codes never reach users. Locked semantics:
   Profile (`Menu.LinkItem`) and Sign out, which posts to the existing
   `logoutAction` through a native `<form>` — no new mutation path, no client
   session state, and the shared headers still import no feature.
-- **No-JavaScript account fallback.** The menu needs scripting (its panel does
-  not exist until the trigger opens it), so the same slot also renders
-  `AccountMenuFallback` (`features/auth`, a Server Component): a plain
-  `/profile` link plus a native `logoutAction` form. `globals.css` hides it
-  (`.account-menu-fallback`) in every scripted browser; the `<noscript>` rule
-  the fallback carries then reveals it and hides the inert trigger
-  (`.account-menu-trigger`) when scripting is unavailable — exactly one
-  account affordance is visible in either state.
+- **Account control before hydration.** The menu is client-controlled, so
+  `AccountMenu` renders `AccountMenuFallback` until its own hydration signal
+  flips: a plain `/profile` link plus a native `logoutAction` form in the
+  server-rendered HTML, replaced by the interactive menu once the client has
+  hydrated. No `<noscript>` or "scripts enabled" CSS is involved, the two are
+  never visible at once, and the pill/avatar design is unchanged — so a
+  missing bundle or an un-hydrated page still leaves Profile and Sign out
+  reachable.
 - Breakpoint: Tailwind `md` (768px) switches mobile ↔ desktop shell.
 - Desktop content column is `max-w-[1120px]` centered (equals the 1440px
   design with 160px gutters); mobile gutters are 20px (`px-5`).

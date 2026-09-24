@@ -1,29 +1,27 @@
 import Link from 'next/link';
 
 import { logoutAction } from '@/features/auth/actions/logout';
-import type { AccountVariant } from '@/features/auth/components/AccountMenu';
 
 /**
- * No-JavaScript counterpart of the account menu (PR #16 review, P2 #2).
+ * The native account controls shown until the interactive menu can take over
+ * (PR #16 review).
  *
- * `AccountMenu` is client-controlled, so without scripting its trigger is
- * inert and neither account action can be reached. The shell therefore renders
- * this server-side pair alongside it — a plain profile link and a native
- * `<form>` POST to the existing `logoutAction` — restoring the reachability
- * the previous header link and dashboard sign-out form provided.
+ * `AccountMenu` renders this for the server HTML and the first client render,
+ * then replaces it once hydration has completed. That keeps profile navigation
+ * and sign-out reachable in every state where the Base UI menu is not yet
+ * interactive — scripting unavailable, the bundle still loading, or a bundle
+ * or hydration that never completes — because both controls are ordinary HTML:
+ * a `/profile` link and a form posting to the existing `logoutAction`. They
+ * need no JavaScript, add no mutation path, and mirror the visuals of the
+ * menu control they stand in for.
  *
- * Progressive enhancement, not duplication: the wrapper is hidden by
- * `globals.css` (`.account-menu-fallback`) in every scripted browser, and is
- * revealed — while the inert menu trigger is hidden (`.account-menu-trigger`)
- * — by the `<noscript>` rule below, which browsers apply only when scripting
- * is unavailable. `dangerouslySetInnerHTML` is required for it: with scripting
- * enabled browsers parse `<noscript>` content as text, so React has to emit
- * the rule verbatim (string children would be escaped).
- *
- * A Server Component on purpose: no `'use client'`, no session state, no new
- * mutation path, and the markup exists before — and independently of —
- * hydration.
+ * No state, no effects and no client-only APIs: it is plain markup, rendered
+ * only while the menu is unavailable.
  */
+
+/** Which shell breakpoint renders the control (`md` switches between them). */
+export type AccountVariant = 'desktop' | 'mobile';
+
 export interface AccountMenuFallbackProps {
   readonly userEmail: string;
   readonly variant: AccountVariant;
@@ -32,14 +30,6 @@ export interface AccountMenuFallbackProps {
 function initialOf(email: string): string {
   return (email[0] ?? '').toUpperCase();
 }
-
-/**
- * Applied only where `<noscript>` content is parsed as markup, i.e. without
- * scripting: the fallback appears and the inert trigger disappears. Both rules
- * stay unlayered so they win over Tailwind's layered utilities.
- */
-const NO_SCRIPT_STYLE =
-  '<style>.account-menu-fallback{display:flex}.account-menu-trigger{display:none}</style>';
 
 const PROFILE_PILL_CLASS =
   'flex items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50';
@@ -54,7 +44,7 @@ export function AccountMenuFallback({ userEmail, variant }: AccountMenuFallbackP
   const initial = initialOf(userEmail);
 
   return (
-    <div className="account-menu-fallback items-center gap-2">
+    <div className="flex items-center gap-2">
       {variant === 'desktop' ? (
         <Link href="/profile" className={PROFILE_PILL_CLASS}>
           <span
@@ -76,8 +66,6 @@ export function AccountMenuFallback({ userEmail, variant }: AccountMenuFallbackP
           Sign out
         </button>
       </form>
-
-      <noscript dangerouslySetInnerHTML={{ __html: NO_SCRIPT_STYLE }} />
     </div>
   );
 }

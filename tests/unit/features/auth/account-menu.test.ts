@@ -9,17 +9,25 @@
  *
  * The panel is rendered with `defaultOpen` because jsdom never mounts the
  * positioner on interaction; the closed state is asserted separately.
- * Rendered with react-dom (React 19 act), same pattern as the other
- * presentation tests.
+ *
+ * The closing blocks cover the states around the client takeover:
+ * `renderToStaticMarkup` runs no effects and no bundle (the pre-hydration /
+ * bundle-never-loaded markup), and hydrating that exact markup with
+ * `hydrateRoot` asserts the swap from the native fallback to the interactive
+ * menu. Mounted tests use react-dom (React 19 act), the same pattern as the
+ * other presentation tests.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 
 // The action module pulls in the auth composition root (DB wiring); this test
-// only proves the wiring shape, so the action itself is stubbed.
-vi.mock('@/features/auth/actions/logout', () => ({ logoutAction: vi.fn() }));
+// only proves the wiring shape, so the action itself is stubbed — as the marker
+// string a no-JS browser would post to, matching the markup React emits for a
+// real `'use server'` action reference.
+vi.mock('@/features/auth/actions/logout', () => ({ logoutAction: '/__logout-action' }));
 
 import { AccountMenu } from '@/features/auth/components/AccountMenu';
 
@@ -101,14 +109,67 @@ describe('AccountMenu', () => {
     // Exactly one sign-out affordance in the panel — nothing else submits.
     expect(document.querySelectorAll('form')).toHaveLength(1);
   });
+});
 
-  it('carries the marker class the no-JavaScript fallback hides', async () => {
-    const desktop = await renderMenu({ userEmail: 'marta@example.com', variant: 'desktop' });
-    const mobile = await renderMenu({ userEmail: 'marta@example.com', variant: 'mobile' });
+describe('AccountMenu before the client takes over', () => {
+  function renderServerMarkup(variant: 'desktop' | 'mobile'): HTMLElement {
+    const container = document.createElement('div');
+    container.innerHTML = renderToStaticMarkup(
+      createElement(AccountMenu, { userEmail: 'marta@example.com', variant }),
+    );
+    return container;
+  }
 
-    // Without scripting the fallback replaces this trigger, so the rule it
-    // renders has to be able to find it in the pre-hydration markup.
-    expect(desktop.querySelector('button')?.className).toContain('account-menu-trigger');
-    expect(mobile.querySelector('button')?.className).toContain('account-menu-trigger');
+  it('shows the reachable profile link and sign-out form in the server markup', () => {
+    const container = renderServerMarkup('desktop');
+
+    expect(container.querySelector('a[href="/profile"]')?.textContent).toContain('Profile');
+    expect(container.querySelector('form button[type="submit"]')?.textContent).toBe('Sign out');
+  });
+
+  it('never renders the interactive menu before hydration', () => {
+    const container = renderServerMarkup('desktop');
+
+    // No inert trigger and no second control: an unloaded bundle, a failed
+    // hydration or disabled scripting leaves exactly the native controls above
+    // — which is what keeps Profile and Sign out reachable.
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+  });
+
+  it('keeps the native avatar for assistive tech on mobile', () => {
+    const container = renderServerMarkup('mobile');
+
+    expect(container.querySelector('a[href="/profile"]')?.getAttribute('aria-label')).toBe(
+      'Profile',
+    );
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
+  });
+});
+
+describe('AccountMenu hydration', () => {
+  it('swaps the native fallback for the interactive menu when the client takes over', async () => {
+    const props = { userEmail: 'marta@example.com', variant: 'desktop' } as const;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    // Hydration-compatible server markup, exactly what the server sends.
+    container.innerHTML = renderToString(createElement(AccountMenu, props));
+
+    // Before the client takes over — an unloaded bundle, a hydration that never
+    // completes, or scripting unavailable: the native controls are reachable
+    // and no inert menu is rendered.
+    expect(container.querySelector('a[href="/profile"]')).not.toBeNull();
+    expect(container.querySelector('form button[type="submit"]')?.textContent).toBe('Sign out');
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
+
+    const root = hydrateRoot(container, createElement(AccountMenu, props));
+    mounted.push({ container, root });
+    await act(async () => {});
+
+    // After hydration: the interactive menu is in place and the native controls
+    // are gone, so exactly one account affordance is ever visible.
+    expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('a[href="/profile"]')).toBeNull();
+    expect(container.querySelector('form')).toBeNull();
   });
 });

@@ -77,6 +77,21 @@ describe('AccountMenu', () => {
     expect(trigger?.textContent).toBe('M');
   });
 
+  it('gives the mobile control a 44px hit area around the 32px avatar', async () => {
+    // `size-11` = 44px and `size-8` = 32px on Tailwind's spacing scale: the
+    // interactive box meets the docs/ui.md floor while the drawn avatar keeps
+    // its own size, so the visible control is unchanged.
+    const trigger = (await renderMenu({ userEmail: 'marta@example.com', variant: 'mobile' }))
+      .querySelector('button');
+    expect(trigger?.className).toContain('size-11');
+    // The visuals live on the inner circle, never on the hit area.
+    expect(trigger?.className).not.toContain('bg-accent-tint');
+    expect(trigger?.querySelector('span[aria-hidden="true"]')?.className).toContain('size-8');
+    expect(trigger?.querySelector('span[aria-hidden="true"]')?.className).toContain(
+      'bg-accent-tint',
+    );
+  });
+
   it('keeps the panel closed by default', async () => {
     const container = await renderMenu({ userEmail: 'marta@example.com', variant: 'desktop' });
 
@@ -189,9 +204,12 @@ describe('AccountMenu before the client takes over', () => {
   it('keeps the native avatar for assistive tech on mobile', () => {
     const container = renderServerMarkup('mobile');
 
-    expect(container.querySelector('a[href="/profile"]')?.getAttribute('aria-label')).toBe(
-      'Profile',
-    );
+    const control = container.querySelector('a[href="/profile"]');
+    expect(control?.getAttribute('aria-label')).toBe('Profile');
+    // Same 44px hit area / 32px circle split as the hydrated trigger, so the
+    // two states share one footprint contract.
+    expect(control?.className).toContain('size-11');
+    expect(control?.querySelector('span[aria-hidden="true"]')?.className).toContain('size-8');
     expect(container.querySelector('[aria-expanded]')).toBeNull();
   });
 });

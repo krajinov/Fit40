@@ -43,9 +43,22 @@ function initialOf(email: string): string {
 export const ACCOUNT_PILL_CLASS =
   'flex cursor-pointer items-center gap-2.5 rounded-pill border border-border py-1.5 pr-3 pl-1.5 text-ink-2 outline-none transition-colors hover:bg-surface-2 focus-visible:ring-3 focus-visible:ring-ring/50';
 
-/** The mobile avatar control, shared with the interactive trigger. */
+/**
+ * The mobile account control's hit area, shared with the interactive trigger.
+ * `size-11` is 44px (the docs/ui.md floor) while the visible avatar stays 32px
+ * inside it — see `ACCOUNT_AVATAR_CIRCLE_CLASS` — so the touch target grows
+ * without changing the control's look or alignment.
+ */
 export const ACCOUNT_AVATAR_CLASS =
-  'grid size-8 cursor-pointer place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50';
+  'flex size-11 cursor-pointer items-center justify-end rounded-pill outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50';
+
+/**
+ * The visible 32×32 avatar circle, rendered inside `ACCOUNT_AVATAR_CLASS` by
+ * both the fallback and the trigger: no background or border sits on the
+ * 44px box, so the drawn avatar keeps its size and its flush-right position.
+ */
+export const ACCOUNT_AVATAR_CIRCLE_CLASS =
+  'grid size-8 place-items-center rounded-pill border border-accent-tint-border bg-accent-tint text-sm font-semibold text-accent-strong';
 
 /**
  * Out of flow on purpose: the secondary native action must not widen the slot
@@ -74,7 +87,9 @@ export function AccountMenuFallback({ userEmail, variant }: AccountMenuFallbackP
         </Link>
       ) : (
         <Link href="/profile" aria-label="Profile" className={ACCOUNT_AVATAR_CLASS}>
-          <span aria-hidden="true">{initial}</span>
+          <span aria-hidden="true" className={ACCOUNT_AVATAR_CIRCLE_CLASS}>
+            {initial}
+          </span>
         </Link>
       )}
 

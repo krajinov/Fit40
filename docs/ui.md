@@ -131,7 +131,9 @@ context. Raw reason codes never reach users. Locked semantics:
   hydrated. The visible pill/avatar reuses the trigger's own classes and the
   sign-out form sits out of flow, so the right-aligned slot keeps its footprint
   and nothing shifts at hydration; the menu items and the native sign-out
-  button all carry the 44px `min-h-11` touch-target floor.
+  button all carry the 44px `min-h-11` touch-target floor, and the mobile
+  control is a 44px (`size-11`) hit area around the unchanged 32px avatar
+  circle, so its target meets the floor without moving the avatar.
 - Breakpoint: Tailwind `md` (768px) switches mobile ↔ desktop shell.
 - Desktop content column is `max-w-[1120px]` centered (equals the 1440px
   design with 160px gutters); mobile gutters are 20px (`px-5`).

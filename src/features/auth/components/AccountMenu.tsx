@@ -7,6 +7,7 @@ import { useSyncExternalStore } from 'react';
 import { cn } from '@/lib/utils';
 import { logoutAction } from '@/features/auth/actions/logout';
 import {
+  ACCOUNT_AVATAR_CIRCLE_CLASS,
   ACCOUNT_AVATAR_CLASS,
   ACCOUNT_PILL_CLASS,
   AccountMenuFallback,
@@ -40,8 +41,10 @@ import {
  * assistive tech). Its classes are `ACCOUNT_PILL_CLASS` / `ACCOUNT_AVATAR_CLASS`,
  * shared with the fallback above, so the control occupies the same box before
  * and after hydration and the right-aligned slot never shifts (PR #16 review,
- * P2 #1). The panel items keep their typography and padding and carry
- * `min-h-11` (44px) as the touch-target floor (P2 #2).
+ * P2 #1). The mobile control is a 44px hit area (`size-11`) holding the 32px
+ * avatar circle, so its touch target meets the floor without changing the
+ * avatar's look or position (P2 #1). The panel items keep their typography and
+ * padding and carry `min-h-11` (44px) as the touch-target floor (P2 #2).
  */
 
 export interface AccountMenuProps {
@@ -112,7 +115,9 @@ export function AccountMenu({ userEmail, variant, defaultOpen }: AccountMenuProp
         </Menu.Trigger>
       ) : (
         <Menu.Trigger aria-label="Account" className={ACCOUNT_AVATAR_CLASS}>
-          <span aria-hidden="true">{initial}</span>
+          <span aria-hidden="true" className={ACCOUNT_AVATAR_CIRCLE_CLASS}>
+            {initial}
+          </span>
         </Menu.Trigger>
       )}
 

@@ -94,6 +94,7 @@ export default async function SessionPage({ params }: Props) {
           programSlug={ps}
           weekNumber={wn}
           workoutOrder={wo}
+          programCompletion={view.programCompletion}
         />
       ) : (
         <ActiveWorkoutScreen

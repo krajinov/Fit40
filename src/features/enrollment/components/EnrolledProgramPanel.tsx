@@ -6,6 +6,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import { LeaveProgramButton } from '@/features/enrollment/components/LeaveProgramButton';
+import { RestartProgramButton } from '@/features/enrollment/components/RestartProgramButton';
 
 interface EnrolledProgramPanelProps {
   readonly program: {
@@ -129,16 +130,31 @@ export function EnrolledProgramPanel({
           </Link>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-callout border border-accent-tint-border bg-accent-tint p-4 md:px-5">
-          <p className="text-sm font-semibold text-accent-strong">
-            Program completed — every workout is done.
-          </p>
-          <span
-            className="inline-flex h-7 items-center rounded-pill bg-accent-tint px-3 text-[13px] font-semibold text-accent-strong"
-          >
-            <Check aria-hidden="true" className="mr-1.5 size-3.5" />
-            Completed
-          </span>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-callout border border-accent-tint-border bg-accent-tint p-4 md:px-5">
+            <p className="text-sm font-semibold text-accent-strong">
+              Program completed — every workout is done.
+            </p>
+            <span
+              className="inline-flex h-7 items-center rounded-pill bg-accent-tint px-3 text-[13px] font-semibold text-accent-strong"
+            >
+              <Check aria-hidden="true" className="mr-1.5 size-3.5" />
+              Completed
+            </span>
+          </div>
+          {/* M14 (Slice 7): completion surfacing for the COMPLETE enrollment
+              only — summary link plus the shared Slice 6 restart leaf, with
+              Leave still available above/below. Incomplete enrollments never
+              reach this branch. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Link
+              href={`/programs/${program.slug}/completed`}
+              className={cn(buttonVariants({ variant: 'secondary' }), 'w-full sm:w-auto')}
+            >
+              View completion summary
+            </Link>
+            <RestartProgramButton programSlug={program.slug} className="w-full sm:w-auto" />
+          </div>
         </div>
       )}
 

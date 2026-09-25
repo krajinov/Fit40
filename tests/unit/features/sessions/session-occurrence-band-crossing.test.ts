@@ -170,6 +170,7 @@ async function renderScreenRerenderable(session: WorkoutSessionDto): Promise<{
       progress: buildSessionProgress(next),
       addableExercises: [],
       screenState: 'in-progress',
+      programCompletion: null,
     };
     await act(async () => {
       root.render(

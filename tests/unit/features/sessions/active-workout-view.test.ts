@@ -14,11 +14,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type { WorkoutSessionDto } from '@/application/dto/workout-session';
 
-const { lookupExecute, sessionExecute, targetsExecute, exerciseDataList } = vi.hoisted(() => ({
+const {
+  lookupExecute,
+  sessionExecute,
+  targetsExecute,
+  exerciseDataList,
+  programBySlugExecute,
+  enrollmentExecute,
+} = vi.hoisted(() => ({
   lookupExecute: vi.fn(),
   sessionExecute: vi.fn(),
   targetsExecute: vi.fn(),
   exerciseDataList: vi.fn(),
+  programBySlugExecute: vi.fn(),
+  enrollmentExecute: vi.fn(),
 }));
 
 vi.mock('@/features/programs/scheduled-workout-lookup', () => ({
@@ -55,6 +64,14 @@ vi.mock('@/features/sessions/services', () => ({
       };
     }),
   },
+}));
+
+vi.mock('@/features/programs/services', () => ({
+  getProgramBySlugUseCase: { execute: programBySlugExecute },
+}));
+
+vi.mock('@/features/enrollment/services', () => ({
+  getProgramEnrollmentUseCase: { execute: enrollmentExecute },
 }));
 
 import { buildActiveWorkoutView } from '@/features/sessions/active-workout-view';
@@ -406,5 +423,125 @@ describe('active-workout-view / skip-adjusted target resolution (M10)', () => {
     const requests = targetsExecute.mock.calls[0]?.[0].requests as { exerciseId: string }[];
     expect(requests).toHaveLength(2);
     expect(view.cards.map((card) => card.kind)).toEqual(['active', 'skipped', 'upcoming']);
+  });
+});
+
+describe('active-workout-view / program-complete callout (M14)', () => {
+  const ENROLLED_COMPLETE = {
+    status: 'enrolled',
+    enrolledAt: '2026-01-01T00:00:00.000Z',
+    progress: { totalWorkouts: 12, completedWorkouts: 12, percentage: 100 },
+    nextWorkout: null,
+    completedScheduledWorkoutIds: [],
+  };
+
+  /** A completed session plus every non-enrollment dependency of the view. */
+  function mockCompletedSession(): void {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        enrolled: true,
+        session: {
+          ...sessionDto([sessionLog()]),
+          status: 'completed',
+          completedAt: '2026-09-01T17:05:00.000Z',
+        },
+      },
+    });
+    targetsExecute.mockResolvedValue({ ok: true, data: [] });
+    programBySlugExecute.mockResolvedValue({
+      ok: true,
+      data: { program: { id: 'p-1' }, detail: { name: 'Program 1' } },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCompletedSession();
+    enrollmentExecute.mockResolvedValue({ ok: true, data: ENROLLED_COMPLETE });
+  });
+
+  it('exposes the completion fact when the current enrollment is complete', async () => {
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('completed');
+    expect(view.programCompletion).toEqual({
+      programName: 'Program 1',
+      summaryHref: '/programs/prog-1/completed',
+    });
+    // The conditional read, with the trusted user id: one program hydration
+    // (the enrollment use case's input contract) + one enrollment view.
+    expect(programBySlugExecute).toHaveBeenCalledTimes(1);
+    expect(programBySlugExecute).toHaveBeenCalledWith('prog-1');
+    expect(enrollmentExecute).toHaveBeenCalledTimes(1);
+    expect(enrollmentExecute).toHaveBeenCalledWith({
+      userId: USER.id,
+      program: { id: 'p-1' },
+    });
+  });
+
+  it('omits the callout for an incomplete enrollment', async () => {
+    enrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...ENROLLED_COMPLETE,
+        progress: { totalWorkouts: 12, completedWorkouts: 5, percentage: 42 },
+        nextWorkout: { weekNumber: 1, workoutOrder: 2 },
+      },
+    });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('completed');
+    expect(view.programCompletion).toBeNull();
+  });
+
+  it('omits the callout when the user is not enrolled', async () => {
+    enrollmentExecute.mockResolvedValue({ ok: true, data: { status: 'not-enrolled' } });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.programCompletion).toBeNull();
+  });
+
+  it('performs NO program-enrollment read for an active/in-progress session', async () => {
+    mockIngestedSession([sessionLog()]);
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('in-progress');
+    expect(view.programCompletion).toBeNull();
+    expect(programBySlugExecute).not.toHaveBeenCalled();
+    expect(enrollmentExecute).not.toHaveBeenCalled();
+  });
+
+  it('never claims completion when the optional program read is unavailable', async () => {
+    programBySlugExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'PROGRAM_NOT_FOUND', slug: 'prog-1', message: 'Program not found' },
+    });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.programCompletion).toBeNull();
+    expect(enrollmentExecute).not.toHaveBeenCalled();
+  });
+
+  it('never claims completion when the enrollment view read fails', async () => {
+    enrollmentExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'Invalid user id.', field: 'userId' },
+    });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.programCompletion).toBeNull();
   });
 });

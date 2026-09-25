@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
+import type { EnrollmentScheduleDto } from '@/application/dto/schedule';
 import { GetCurrentProgramDashboardUseCase } from '@/application/use-cases/get-current-program-dashboard';
+import type { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-enrollment-schedule';
 import { GetProgramBySlugUseCase } from '@/application/use-cases/get-program-by-slug';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { GetScheduledWorkoutUseCase } from '@/application/use-cases/get-scheduled-workout';
@@ -25,6 +27,24 @@ import {
 } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
+
+// Fixed request clock (M15 Slice 5): the schedule's "today" is its UTC
+// calendar day — the caller supplies the instant, application logic never does.
+const NOW = new Date('2026-02-18T09:30:00.000Z');
+
+/** A successful schedule read echoing the program aggregate it received. */
+function okSchedule(programSlug: string): { ok: true; data: EnrollmentScheduleDto } {
+  return {
+    ok: true,
+    data: {
+      programSlug,
+      configured: true,
+      today: '2026-02-18',
+      items: [],
+      focus: { today: null, next: null, pastDue: null },
+    },
+  };
+}
 
 function rep() {
   const r = createRepScheme(3, 8, 10);
@@ -147,6 +167,9 @@ function makeUseCase(
   programs: ReadonlyArray<ReturnType<typeof makeProgram>>,
   metadata: ReadonlyArray<{ id: string; slug: string; name: string }>,
   exercises: ReadonlyArray<ReturnType<typeof makeExercise>> = [makeExercise('ex-001')],
+  scheduleUseCase: Pick<GetEnrollmentScheduleUseCase, 'execute'> = {
+    execute: async (input) => okSchedule(input.program.slug),
+  },
 ) {
   const programRepo: ProgramRepository = {
     list: vi.fn(),
@@ -174,6 +197,7 @@ function makeUseCase(
       new GetScheduledWorkoutUseCase(programRepo, exerciseRepo),
       new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo),
     ),
+    scheduleUseCase,
   );
   return { enrollmentRepo, sessionRepo, uc };
 }
@@ -190,7 +214,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
   it('returns ok(null) when the user has no enrollments', async () => {
     const { uc } = makeUseCase([P1()], METADATA);
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -201,7 +225,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA);
     await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok || result.data === null) return;
@@ -231,7 +255,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
     await seedEnrollment(enrollmentRepo, 'enr-2', 'user-a', 'p2', '2026-02-01T10:00:00Z');
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok || result.data === null) return;
@@ -245,7 +269,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     const { enrollmentRepo, uc } = makeUseCase([P2()], METADATA);
     await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -258,7 +282,7 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA, []);
     await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok || result.data === null) return;
@@ -271,10 +295,108 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
     await seedSession(sessionRepo, 's-1', 'user-a', 'enr-1');
 
-    const result = await uc.execute('user-a');
+    const result = await uc.execute('user-a', NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok || result.data === null) return;
     expect(result.data.nextWorkout?.sessionState).toBe('in-progress');
+  });
+
+  it('reads the M15 schedule with the same hydrated program aggregate (one catalog hydration)', async () => {
+    const program = P1();
+    const scheduleExecute = vi.fn(async (input: { program: { slug: string } }) =>
+      okSchedule(input.program.slug),
+    );
+    const { enrollmentRepo, uc } = makeUseCase([program], METADATA, undefined, {
+      execute: scheduleExecute,
+    });
+    await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
+
+    const result = await uc.execute('user-a', NOW);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) return;
+    // The schedule read reuses the very aggregate this use case already
+    // hydrated, so no second catalog lookup happens anywhere in the request.
+    expect(scheduleExecute).toHaveBeenCalledTimes(1);
+    expect(scheduleExecute.mock.calls[0]?.[0]).toMatchObject({
+      userId: 'user-a',
+      now: NOW,
+    });
+    expect(scheduleExecute.mock.calls[0]?.[0].program).toBe(program);
+    expect(result.data.schedule).toEqual({
+      status: 'loaded',
+      schedule: expect.objectContaining({ programSlug: 'prog-1', configured: true }),
+    });
+  });
+
+  it('maps a typed schedule rejection to unavailable, never to unconfigured', async () => {
+    const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA, undefined, {
+      execute: async () => ({
+        ok: false as const,
+        error: { code: 'INVALID_INPUT' as const, message: 'bad id', field: 'userId' },
+      }),
+    });
+    await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await uc.execute('user-a', NOW);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) return;
+    expect(result.data.schedule).toEqual({ status: 'unavailable' });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('maps a thrown schedule read to unavailable (logged), never to unconfigured', async () => {
+    const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA, undefined, {
+      execute: async () => {
+        throw new Error('corrupt planned row');
+      },
+    });
+    await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await uc.execute('user-a', NOW);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) return;
+    expect(result.data.schedule).toEqual({ status: 'unavailable' });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('maps a vanished enrollment (ok(null)) to unavailable, not to unconfigured', async () => {
+    // The enrollment this use case already resolved disappeared before the
+    // schedule read — a concurrent leave. Reporting "unconfigured" would
+    // invent a state for a run that no longer exists.
+    const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA, undefined, {
+      execute: async () => ({ ok: true as const, data: null }),
+    });
+    await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await uc.execute('user-a', NOW);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) return;
+    expect(result.data.schedule).toEqual({ status: 'unavailable' });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('still reports no current program (null) when the user has no enrollment, without a schedule read', async () => {
+    const scheduleExecute = vi.fn(async (input: { program: { slug: string } }) =>
+      okSchedule(input.program.slug),
+    );
+    const { uc } = makeUseCase([P1()], METADATA, undefined, { execute: scheduleExecute });
+
+    const result = await uc.execute('user-a', NOW);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toBeNull();
+    expect(scheduleExecute).not.toHaveBeenCalled();
   });
 });

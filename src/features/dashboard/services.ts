@@ -18,6 +18,7 @@ import {
   listUserEnrollmentsUseCase,
 } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
+import { getEnrollmentScheduleUseCase } from '@/features/schedule/services';
 import { resolveNextWorkoutUseCase } from '@/features/sessions/services';
 
 export const getCurrentProgramDashboardUseCase = new GetCurrentProgramDashboardUseCase(
@@ -25,6 +26,9 @@ export const getCurrentProgramDashboardUseCase = new GetCurrentProgramDashboardU
   getProgramBySlugUseCase,
   getProgramEnrollmentUseCase,
   resolveNextWorkoutUseCase,
+  // M15 (Slice 5): the schedule read is composed here so it reuses the same
+  // hydrated program aggregate as the rest of the current-program view.
+  getEnrollmentScheduleUseCase,
 );
 
 /**

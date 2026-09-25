@@ -16,6 +16,7 @@ import { ProfileSummaryCard } from '@/features/dashboard/components/ProfileSumma
 import { ProgramCompletedCard } from '@/features/dashboard/components/ProgramCompletedCard';
 import { RecentPersonalBestsCard } from '@/features/dashboard/components/RecentPersonalBestsCard';
 import { RecentTrainingCard } from '@/features/dashboard/components/RecentTrainingCard';
+import { TrainingScheduleCard } from '@/features/dashboard/components/TrainingScheduleCard';
 import { WeeklyInsightsCard } from '@/features/dashboard/components/WeeklyInsightsCard';
 import { WeeklyProgressCard } from '@/features/dashboard/components/WeeklyProgressCard';
 
@@ -96,7 +97,7 @@ export default async function DashboardPage() {
               `order`; at md both wrappers restore as the main column and
               the aside, so neither card is rendered twice. */}
           <div className="contents md:flex md:min-w-0 md:flex-1 md:flex-col md:gap-6">
-            <div className="order-1">
+            <div className="order-1 flex flex-col gap-5 md:gap-6">
               {currentProgram.nextWorkoutPreview.status === 'available' ? (
                 <NextWorkoutCard
                   view={currentProgram.nextWorkoutPreview.workout}
@@ -110,6 +111,18 @@ export default async function DashboardPage() {
                   programSlug={currentProgram.program.slug}
                   completedWorkouts={currentProgram.enrollment.progress.completedWorkouts}
                   totalWorkouts={currentProgram.enrollment.progress.totalWorkouts}
+                />
+              )}
+              {/* M15 (Slice 5): the calendar view of this run sits directly
+                  under "Up next" so Today/Next/Past-due read in one place on
+                  both breakpoints. Additive only, and deliberately NOT rendered
+                  for a completed run — the M14 ProgramCompletedCard above stays
+                  the authoritative state, so no "next workout" can appear
+                  against it. The card itself returns null for a failed read. */}
+              {currentProgram.nextWorkoutPreview.status !== 'complete' && (
+                <TrainingScheduleCard
+                  state={currentProgram.schedule}
+                  programName={currentProgram.program.name}
                 />
               )}
             </div>

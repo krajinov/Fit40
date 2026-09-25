@@ -11,6 +11,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
+import type { EnrollmentScheduleDto, PlannedWorkoutDto } from '@/application/dto/schedule';
 import type {
   TrainingWeeklyInsightsDto,
   WeeklyInsightWeekDto,
@@ -51,6 +52,29 @@ vi.mock('@/features/sessions/services', () => ({
 vi.mock('@/features/history/services', () => ({
   listTrainingHistoryUseCase: { execute: listHistoryExecute },
 }));
+
+// M15 (Slice 5): the schedule read is composed into the current-program use
+// case through the scheduling feature's composition root. Unit tests replace
+// that use case (no database) and neutralise the repository module so its
+// postgres client never initialises in the node test environment.
+const { enrollmentScheduleExecute } = vi.hoisted(() => ({
+  enrollmentScheduleExecute: vi.fn(),
+}));
+
+vi.mock('@/features/schedule/services', () => ({
+  getEnrollmentScheduleUseCase: { execute: enrollmentScheduleExecute },
+}));
+
+// Default M15 schedule read for the fixture program. Individual tests override
+// it; no other block resets this mock, so it also serves the describes below.
+const SCHEDULE_DTO: EnrollmentScheduleDto = {
+  programSlug: 'prog-1',
+  configured: true,
+  today: '2026-02-18',
+  items: [],
+  focus: { today: null, next: null, pastDue: null },
+};
+enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: SCHEDULE_DTO });
 
 // The dashboard feature root also composes the insights use case over the
 // shared Drizzle repository singletons. Unit tests replace that use case (no
@@ -602,6 +626,123 @@ describe('buildDashboardView / weeklyInsights (M13)', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+describe('buildDashboardView / M15 schedule (Slice 5)', () => {
+  beforeEach(() => {
+    listEnrollmentsExecute.mockReset();
+    findBySlugExecute.mockReset();
+    getEnrollmentExecute.mockReset();
+    resolveNextExecute.mockReset();
+    listHistoryExecute.mockReset();
+    listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
+    weeklyInsightsExecute.mockReset();
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: insightsDtoFixture() });
+    enrollmentScheduleExecute.mockReset();
+    enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: SCHEDULE_DTO });
+  });
+
+  function enrolledView(): void {
+    listEnrollmentsExecute.mockResolvedValue([{ programSlug: 'prog-1' }]);
+    stubProgramAndEnrollment();
+    resolveNextExecute.mockResolvedValue(NEXT_DTO);
+  }
+
+  it('feeds the request clock and user to the schedule use case and passes the DTO through', async () => {
+    enrolledView();
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    // Schedule truth arrives through the composed GetEnrollmentScheduleUseCase
+    // (Slice 4) — no repository is touched anywhere in this view assembly.
+    expect(enrollmentScheduleExecute).toHaveBeenCalledTimes(1);
+    expect(enrollmentScheduleExecute.mock.calls[0]?.[0]).toMatchObject({
+      userId: 'user-a',
+      now: NOW,
+    });
+    if (view.currentProgram === null) throw new Error('expected a current program');
+    expect(view.currentProgram.schedule).toEqual({ status: 'loaded', schedule: SCHEDULE_DTO });
+  });
+
+  it('passes a focused schedule through verbatim — focus and today are never derived here', async () => {
+    enrolledView();
+    const focused: EnrollmentScheduleDto = {
+      ...SCHEDULE_DTO,
+      items: [
+        {
+          scheduledWorkoutId: 'sw-2',
+          weekNumber: 2,
+          workoutOrder: 1,
+          workoutName: 'Push B',
+          plannedDate: '2026-02-18',
+          status: 'planned',
+        },
+      ],
+      focus: {
+        today: {
+          scheduledWorkoutId: 'sw-2',
+          weekNumber: 2,
+          workoutOrder: 1,
+          workoutName: 'Push B',
+          plannedDate: '2026-02-18',
+          status: 'planned',
+        },
+        next: null,
+        pastDue: { count: 1, earliest: { scheduledWorkoutId: 'sw-1', weekNumber: 1, workoutOrder: 1, workoutName: 'Push A', plannedDate: '2026-02-16', status: 'past-due' } satisfies PlannedWorkoutDto },
+      },
+    };
+    enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: focused });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    if (view.currentProgram === null) throw new Error('expected a current program');
+    expect(view.currentProgram.schedule).toEqual({ status: 'loaded', schedule: focused });
+  });
+
+  it('keeps an unconfigured run distinct (configured: false is data, not failure)', async () => {
+    enrolledView();
+    const unconfigured: EnrollmentScheduleDto = { ...SCHEDULE_DTO, configured: false };
+    enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: unconfigured });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    if (view.currentProgram === null) throw new Error('expected a current program');
+    expect(view.currentProgram.schedule).toEqual({
+      status: 'loaded',
+      schedule: unconfigured,
+    });
+  });
+
+  it('maps a failed schedule read to unavailable — never to unconfigured — and logs it', async () => {
+    enrolledView();
+    enrollmentScheduleExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'bad id', field: 'userId' },
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+      if (view.currentProgram === null) throw new Error('expected a current program');
+      expect(view.currentProgram.schedule).toEqual({ status: 'unavailable' });
+      expect(errorSpy).toHaveBeenCalled();
+      // The rest of the dashboard keeps working.
+      expect(view.currentProgram.nextWorkoutPreview.status).toBe('available');
+      expect(view.weeklyInsights.status).toBe('loaded');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('never reads a schedule when the user has no current program', async () => {
+    listEnrollmentsExecute.mockResolvedValue([]);
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(view.currentProgram).toBeNull();
+    expect(enrollmentScheduleExecute).not.toHaveBeenCalled();
   });
 });
 

@@ -6,6 +6,7 @@
 
 export { programEnrollments } from './enrollments';
 export { exercises } from './exercises';
+export { plannedWorkouts } from './planned-workouts';
 export {
   programWeeks,
   scheduledWorkouts,

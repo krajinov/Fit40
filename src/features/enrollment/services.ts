@@ -11,6 +11,7 @@ import { GetProgramCompletionSummaryUseCase } from '@/application/use-cases/get-
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { LeaveProgramUseCase } from '@/application/use-cases/leave-program';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
+import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import {
   exerciseRepository,
@@ -55,4 +56,16 @@ export const getProgramCompletionSummaryUseCase = new GetProgramCompletionSummar
   workoutSessionRepository,
   personalRecordRepository,
   exerciseRepository,
+);
+
+/**
+ * The M14 restart of a completed program run (Slice 5). ONE write — Slice 3's
+ * atomic compare-and-replace — so a failed restart can never leave the user
+ * unenrolled, and the completed run's sessions survive as detached history.
+ */
+export const restartProgramUseCase = new RestartProgramUseCase(
+  programRepository,
+  programEnrollmentRepository,
+  workoutSessionRepository,
+  idGenerator,
 );

@@ -37,6 +37,11 @@ const METRIC_LABELS: Record<PersonalRecordMetricDto, string> = {
   'max-duration': 'Longest duration',
 };
 
+/** The metric's display label, shared with the M14 completion screen. */
+export function personalBestMetricLabel(metric: PersonalRecordMetricDto): string {
+  return METRIC_LABELS[metric];
+}
+
 /**
  * The record value in its metric's own unit. Loads keep meaningful decimals
  * (0 kg renders as "0 kg"); reps are integers; durations follow the timed-work

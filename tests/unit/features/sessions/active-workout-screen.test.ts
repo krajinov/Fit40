@@ -169,7 +169,10 @@ const WORKOUT: ScheduledWorkoutDetailDto = {
 };
 
 /** Builds the same view the session page builds, then renders the screen. */
-async function renderScreen(session: WorkoutSessionDto): Promise<HTMLElement> {
+async function renderScreen(
+  session: WorkoutSessionDto,
+  programCompletion: ActiveWorkoutView['programCompletion'] = null,
+): Promise<HTMLElement> {
   const cards = buildSessionExerciseCardViews({
     logs: session.exerciseLogs,
     targets: session.exerciseLogs.map(() => null),
@@ -184,6 +187,7 @@ async function renderScreen(session: WorkoutSessionDto): Promise<HTMLElement> {
     progress: buildSessionProgress(session),
     addableExercises: [],
     screenState: 'in-progress',
+    programCompletion,
   };
 
   const container = document.createElement('div');
@@ -466,6 +470,35 @@ describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #
     const container = await renderScreen(session);
 
     expect(documentOrderCircles(container)).toEqual(['1', '2', '3']);
+  });
+});
+
+describe('ActiveWorkoutScreen / M14 program-complete callout placement', () => {
+  it('never renders the program-complete callout — that moment belongs only to SessionCompletedPanel', async () => {
+    // Even a view that CARRIES the server-resolved fact (an unreachable
+    // combination the assembly never produces) must not surface it here:
+    // placement is structural, not incidental.
+    const session: WorkoutSessionDto = {
+      sessionId: 's-1',
+      scheduledWorkoutId: 'sw-1',
+      workoutId: 'w1',
+      status: 'in-progress',
+      startedAt: '2026-09-01T17:00:00.000Z',
+      completedAt: null,
+      version: 0,
+      exerciseLogs: [],
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+      prescribedSets: 0,
+      skippedExerciseCount: 0,
+    };
+
+    const container = await renderScreen(session, {
+      programName: 'Program 1',
+      summaryHref: '/programs/prog-1/completed',
+    });
+
+    expect(container.textContent).not.toContain('Program complete');
+    expect(container.querySelector('a[href="/programs/prog-1/completed"]')).toBeNull();
   });
 });
 

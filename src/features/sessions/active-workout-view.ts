@@ -38,6 +38,10 @@ import {
 } from '@/features/sessions/active-workout-views';
 import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
 import {
+  resolveSessionProgramCompletionFact,
+  type SessionProgramCompletionFact,
+} from '@/features/sessions/program-completion-fact';
+import {
   getActiveWorkoutExerciseDataUseCase,
   getNextExerciseTargetsUseCase,
   getWorkoutSessionUseCase,
@@ -66,6 +70,14 @@ export interface ActiveWorkoutView {
    */
   readonly addableExercises: ReadonlyArray<ExerciseSummaryDto>;
   readonly screenState: ActiveWorkoutScreenState;
+  /**
+   * M14 program-complete surfacing: non-null ONLY when this completed
+   * session's current program enrollment is authoritatively complete
+   * (server-derived). Null for every other screen state, for incomplete or
+   * missing enrollments, and when the optional read is unavailable — never
+   * inferred from workout order and never counted in Presentation.
+   */
+  readonly programCompletion: SessionProgramCompletionFact | null;
 }
 
 /** A targets array meaning "no personalized target for any position". */
@@ -223,6 +235,7 @@ export async function buildActiveWorkoutView(
       progress: null,
       addableExercises: [],
       screenState: !enrolled ? 'not-enrolled' : 'not-started',
+      programCompletion: null,
     };
   }
 
@@ -244,6 +257,18 @@ export async function buildActiveWorkoutView(
   const screenState: ActiveWorkoutScreenState =
     session.status === 'completed' ? 'completed' : 'in-progress';
 
+  // M14 (Slice 7): the program-complete callout read runs ONLY for the
+  // completed state — active/not-started/not-enrolled screens never invoke
+  // the enrollment view. The workout DTO already carries the program name,
+  // so no display data is re-derived here.
+  const programCompletion =
+    screenState === 'completed'
+      ? await resolveSessionProgramCompletionFact(
+          { programSlug: input.programSlug, programName: workout.programName },
+          user.id,
+        )
+      : null;
+
   return {
     workout,
     session,
@@ -257,6 +282,7 @@ export async function buildActiveWorkoutView(
     progress: buildSessionProgress(session),
     addableExercises: exerciseData.addableExercises,
     screenState,
+    programCompletion,
   };
 }
 

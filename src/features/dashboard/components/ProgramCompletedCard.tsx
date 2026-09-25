@@ -14,8 +14,11 @@ interface ProgramCompletedCardProps {
 
 /**
  * Completion state for the main column (no Pencil mockup exists for a
- * fully completed program): confirms the finished plan and links to the
- * program page, whose enrollment panel shows the same completion truth.
+ * fully completed program): confirms the finished plan, links to the M14
+ * completion summary (the primary completed-state destination), and keeps
+ * the catalog link. No restart control lives on the dashboard — that is a
+ * locked M14 product decision (restart belongs to the summary route and the
+ * program panel).
  */
 export function ProgramCompletedCard({
   programName,
@@ -41,14 +44,14 @@ export function ProgramCompletedCard({
         ({completedWorkouts} logged sessions). Explore a new program to keep going.
       </p>
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/programs" className={buttonVariants()}>
-          Browse programs
-        </Link>
         <Link
-          href={`/programs/${programSlug}`}
-          className={buttonVariants({ variant: 'secondary' })}
+          href={`/programs/${programSlug}/completed`}
+          className={buttonVariants()}
         >
-          View program
+          View summary
+        </Link>
+        <Link href="/programs" className={buttonVariants({ variant: 'secondary' })}>
+          Browse programs
         </Link>
       </div>
     </section>

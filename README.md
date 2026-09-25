@@ -35,6 +35,13 @@ history.
 - **Training history** — completed sessions across programs with per-exercise
   detail, plus user-global exercise history (`/history/exercises/[slug]`)
   showing every completed occurrence and a working-load trend.
+- **Program completion & restart** — finishing every scheduled workout
+  unlocks a truthful completion summary (`/programs/[slug]/completed`):
+  workout tally, derived completion date, distinct exercises trained, and
+  the run's historical personal-record events. "Start program again"
+  restarts the run through one atomic write while training history and
+  personal bests survive (see
+  [`docs/program-completion.md`](docs/program-completion.md)).
 
 ## Progressive Overload
 

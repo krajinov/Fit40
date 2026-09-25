@@ -13,6 +13,7 @@
  * domain or application code.
  */
 
+import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 import {
   SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
@@ -115,4 +116,29 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return [...ids];
   }
 
+  async listCompletedByEnrollment(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
+    // Mirrors the SQL read exactly: exact enrollment match (a detached null
+    // never equals a non-null enrollment id, so detached and other
+    // enrollments are excluded structurally), completed only, ordered by the
+    // port's total ladder — (completedAt, startedAt, session id) ascending.
+    // Session ids compare byte-wise, matching the database's text tie-break
+    // for the ASCII id values this store uses.
+    const completed = [...this.sessionsById.values()]
+      .filter(
+        (session): session is CompletedWorkoutSession =>
+          session.enrollmentId === enrollmentId && session.completedAt !== null,
+      )
+      .sort(
+        (a, b) =>
+          a.completedAt.getTime() - b.completedAt.getTime() ||
+          a.startedAt.getTime() - b.startedAt.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+
+    // Defensive clones per this repository's mutation-isolation convention:
+    // returned aggregates can never reach back into stored state.
+    return completed.map((session) => structuredClone(session));
+  }
 }

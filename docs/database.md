@@ -524,3 +524,19 @@ log tables for user scoping and completed-only filtering. There is no PR
 table, no persisted PR state, and no M12 migration; existing session/log/set
 indexes are reused. See [Personal Records](personal-records.md).
 
+## Program Enrollment Replacement (M14)
+
+`ProgramEnrollmentRepository.replaceExpectedWithNew(expectedId, next)` runs
+in ONE transaction: a targeted `DELETE … WHERE id = expected RETURNING` the
+identity columns (zero rows → `false`, no insert), an identity guard
+(`EnrollmentIdentityMismatchError` → rollback), then the fresh `INSERT`; any
+failure after the delete rolls back, restoring the old enrollment and its
+session attribution. Only a unique violation naming
+`program_enrollments_user_program_unique` maps to
+`EnrollmentAlreadyExistsError` — any other database error stays unexpected.
+Session detach on delete rides the existing `workout_sessions.enrollment_id`
+FK's `ON DELETE SET NULL`; **M14 added no schema change, no migration, and
+no completion or enrollment-history table.** `listCompletedByEnrollment`
+hydrates with 1 statement when empty and exactly 3 batched statements for
+N ≥ 1 (no N+1). See [Program Completion & Restart](program-completion.md).
+

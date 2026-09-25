@@ -5,8 +5,11 @@ import { ActiveWorkoutHeader } from '@/features/sessions/components/ActiveWorkou
 import { SessionProgressCard } from '@/features/sessions/components/SessionProgressCard';
 import { SessionExerciseCard } from '@/features/sessions/components/SessionExerciseCard';
 import { formatVolumeLabel } from '@/features/sessions/active-workout-views';
+import type { SessionProgramCompletionFact } from '@/features/sessions/program-completion-fact';
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type { WorkoutSessionExerciseDto } from '@/application/dto/workout-session';
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
 interface SessionCompletedPanelProps {
@@ -17,6 +20,12 @@ interface SessionCompletedPanelProps {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  /**
+   * M14 program-complete surfacing, resolved server-side only when the
+   * current program enrollment is authoritatively complete. Null on every
+   * other screen — the panel renders no callout, ever, on its own say-so.
+   */
+  readonly programCompletion: SessionProgramCompletionFact | null;
 }
 
 /**
@@ -34,6 +43,7 @@ export function SessionCompletedPanel({
   programSlug,
   weekNumber,
   workoutOrder,
+  programCompletion,
 }: SessionCompletedPanelProps) {
   const logsByOrder = new Map<number, WorkoutSessionExerciseDto>();
   for (const log of session.exerciseLogs) {
@@ -60,6 +70,29 @@ export function SessionCompletedPanel({
         )}
         {progress.loggedSets === 0 && <Badge>No sets logged</Badge>}
       </section>
+
+      {/* M14 (Slice 7): program-complete moment — shown ONLY on this completed
+          screen and ONLY for a server-confirmed complete enrollment. Factual,
+          compact, one action; never inferred here. */}
+      {programCompletion !== null && (
+        <section
+          aria-label="Program complete"
+          className="flex flex-col items-start gap-3 rounded-callout border border-accent-tint-border bg-accent-tint p-4 md:px-5"
+        >
+          <div className="flex flex-col gap-1">
+            <p className="font-display text-lg font-bold text-foreground">Program complete</p>
+            <p className="text-[13px] text-ink-2 md:text-sm">
+              You&apos;ve completed every scheduled workout in {programCompletion.programName}.
+            </p>
+          </div>
+          <Link
+            href={programCompletion.summaryHref}
+            className={cn(buttonVariants(), 'w-full md:w-auto')}
+          >
+            View completion summary
+          </Link>
+        </section>
+      )}
 
       <div className="flex flex-col gap-4 md:gap-6">
         {cards.map((card) => {

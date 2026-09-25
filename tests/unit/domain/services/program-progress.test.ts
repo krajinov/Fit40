@@ -12,7 +12,10 @@ import { ProgramGoal } from '@/domain/types/program';
 import {
   calculateProgramProgress,
   getNextWorkout,
+  isProgramComplete,
   listScheduledWorkoutsInOrder,
+  resolveProgramCompletionDate,
+  type SessionCompletionFact,
 } from '@/domain/services/program-progress';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
@@ -98,6 +101,35 @@ function makeTwoWeekProgram(): TrainingProgram {
 
   if (!result.ok) throw new Error(result.error.message);
   return result.data;
+}
+
+/**
+ * A structurally valid program whose schedule lists zero scheduled
+ * occurrences.
+ *
+ * `createTrainingProgram` currently rejects such a shape (every week must
+ * carry exactly `workoutsPerWeek` ≥ 1 occurrences), so this fixture
+ * deliberately derives it from a valid program by clearing each week's
+ * schedule. It exists to pin the M14 defense-in-depth contract: if catalog
+ * data ever hydrates into an empty schedule, completion must never be
+ * claimed from it.
+ */
+function makeZeroScheduledWorkoutProgram(): TrainingProgram {
+  const program = makeTwoWeekProgram();
+  return {
+    ...program,
+    weeks: program.weeks.map((week) => ({ ...week, scheduledWorkouts: [] })),
+  };
+}
+
+/** One completed-session fact for `resolveProgramCompletionDate` tests. */
+function completionFact(scheduledWorkoutId: string, completedAt: string): SessionCompletionFact {
+  const idResult = createScheduledWorkoutId(scheduledWorkoutId);
+  if (!idResult.ok) throw new Error(idResult.error.message);
+  return {
+    scheduledWorkoutId: idResult.data,
+    completedAt: new Date(completedAt),
+  };
 }
 
 describe('listScheduledWorkoutsInOrder', () => {
@@ -224,5 +256,198 @@ describe('getNextWorkout', () => {
     const next = getNextWorkout(program, scheduledIds(['unknown-id']));
 
     expect(next?.id).toBe('sched-a1');
+  });
+});
+
+describe('isProgramComplete', () => {
+  it('returns false when no scheduled workout is completed', () => {
+    const program = makeTwoWeekProgram();
+
+    expect(isProgramComplete(program, [])).toBe(false);
+  });
+
+  it('returns false when some but not all scheduled workouts are completed', () => {
+    const program = makeTwoWeekProgram();
+
+    const complete = isProgramComplete(program, scheduledIds(['sched-a1', 'sched-b1']));
+
+    expect(complete).toBe(false);
+  });
+
+  it('returns true when every scheduled workout is completed', () => {
+    const program = makeTwoWeekProgram();
+
+    const complete = isProgramComplete(
+      program,
+      scheduledIds(['sched-a1', 'sched-b1', 'sched-a2', 'sched-b2']),
+    );
+
+    expect(complete).toBe(true);
+  });
+
+  it('returns true when workouts were completed out of order', () => {
+    const program = makeTwoWeekProgram();
+
+    const complete = isProgramComplete(
+      program,
+      scheduledIds(['sched-b2', 'sched-a2', 'sched-b1', 'sched-a1']),
+    );
+
+    expect(complete).toBe(true);
+  });
+
+  it('is unaffected by duplicate completed ids', () => {
+    const program = makeTwoWeekProgram();
+
+    const completeWithDuplicates = isProgramComplete(
+      program,
+      scheduledIds(['sched-a1', 'sched-b1', 'sched-a2', 'sched-b2', 'sched-a1', 'sched-b2']),
+    );
+    const partialWithDuplicates = isProgramComplete(
+      program,
+      scheduledIds(['sched-a1', 'sched-a1', 'sched-a1']),
+    );
+
+    expect(completeWithDuplicates).toBe(true);
+    expect(partialWithDuplicates).toBe(false);
+  });
+
+  it('ignores unknown completed ids when every required id is covered', () => {
+    const program = makeTwoWeekProgram();
+
+    const complete = isProgramComplete(
+      program,
+      scheduledIds(['sched-a1', 'sched-b1', 'sched-a2', 'sched-b2', 'unknown-id']),
+    );
+
+    expect(complete).toBe(true);
+  });
+
+  it('does not let unknown ids make an incomplete program complete', () => {
+    const program = makeTwoWeekProgram();
+
+    const complete = isProgramComplete(
+      program,
+      scheduledIds(['sched-a1', 'unknown-1', 'unknown-2', 'unknown-3']),
+    );
+
+    expect(complete).toBe(false);
+  });
+
+  it('returns false for a program with zero scheduled workouts', () => {
+    const program = makeZeroScheduledWorkoutProgram();
+
+    // Even coverage over an empty schedule — or stray unknown ids — must
+    // never claim completion: nothing was ever scheduled.
+    expect(isProgramComplete(program, [])).toBe(false);
+    expect(isProgramComplete(program, scheduledIds(['unknown-id']))).toBe(false);
+  });
+
+  it('diverges deliberately from getNextWorkout for a zero-schedule program (locked M14 edge)', () => {
+    // Documented, pinned, and NOT an accidental inconsistency: getNextWorkout
+    // answers "no uncompleted workout" (null) for an empty schedule, which
+    // the dashboard preview historically renders as its `complete` preview
+    // state — unreachable with the current seeds and out of M14 scope to
+    // reconcile. isProgramComplete is the authoritative completion rule for
+    // the completion summary and the restart gate: false.
+    const program = makeZeroScheduledWorkoutProgram();
+
+    expect(getNextWorkout(program, [])).toBeNull();
+    expect(isProgramComplete(program, [])).toBe(false);
+  });
+});
+
+describe('resolveProgramCompletionDate', () => {
+  it('returns null when there are no completed sessions', () => {
+    const program = makeTwoWeekProgram();
+
+    expect(resolveProgramCompletionDate(program, [])).toBeNull();
+  });
+
+  it('returns null when no session belongs to the program schedule', () => {
+    const program = makeTwoWeekProgram();
+
+    const resolved = resolveProgramCompletionDate(program, [
+      completionFact('unknown-1', '2026-03-01T10:00:00.000Z'),
+      completionFact('unknown-2', '2026-03-02T10:00:00.000Z'),
+    ]);
+
+    expect(resolved).toBeNull();
+  });
+
+  it('returns the completedAt of a single matching session', () => {
+    const program = makeTwoWeekProgram();
+
+    const resolved = resolveProgramCompletionDate(program, [
+      completionFact('sched-a1', '2026-03-01T10:00:00.000Z'),
+    ]);
+
+    expect(resolved?.toISOString()).toBe('2026-03-01T10:00:00.000Z');
+  });
+
+  it('returns the latest completedAt among multiple matching sessions', () => {
+    const program = makeTwoWeekProgram();
+
+    const resolved = resolveProgramCompletionDate(program, [
+      completionFact('sched-a1', '2026-03-01T10:00:00.000Z'),
+      completionFact('sched-b1', '2026-03-05T10:00:00.000Z'),
+      completionFact('sched-a2', '2026-03-03T10:00:00.000Z'),
+    ]);
+
+    expect(resolved?.toISOString()).toBe('2026-03-05T10:00:00.000Z');
+  });
+
+  it('does not depend on input order', () => {
+    const program = makeTwoWeekProgram();
+    const facts = [
+      completionFact('sched-a1', '2026-03-01T10:00:00.000Z'),
+      completionFact('sched-b1', '2026-03-05T10:00:00.000Z'),
+      completionFact('sched-a2', '2026-03-03T10:00:00.000Z'),
+    ];
+
+    const forward = resolveProgramCompletionDate(program, facts);
+    const reversed = resolveProgramCompletionDate(program, [...facts].reverse());
+
+    expect(forward?.toISOString()).toBe('2026-03-05T10:00:00.000Z');
+    expect(reversed?.toISOString()).toBe(forward?.toISOString());
+  });
+
+  it('does not let an unknown later session become the completion date', () => {
+    const program = makeTwoWeekProgram();
+
+    const resolved = resolveProgramCompletionDate(program, [
+      completionFact('sched-a1', '2026-03-01T10:00:00.000Z'),
+      completionFact('unknown-id', '2026-03-09T10:00:00.000Z'),
+      completionFact('sched-b1', '2026-03-05T10:00:00.000Z'),
+    ]);
+
+    expect(resolved?.toISOString()).toBe('2026-03-05T10:00:00.000Z');
+  });
+
+  it('does not mutate its inputs and returns a fresh Date value', () => {
+    const program = makeTwoWeekProgram();
+    const facts = [
+      completionFact('sched-a1', '2026-03-01T10:00:00.000Z'),
+      completionFact('sched-b1', '2026-03-05T10:00:00.000Z'),
+      completionFact('unknown-id', '2026-03-09T10:00:00.000Z'),
+    ];
+    const snapshot = facts.map((fact) => ({
+      id: fact.scheduledWorkoutId,
+      completedAt: fact.completedAt.toISOString(),
+    }));
+
+    const resolved = resolveProgramCompletionDate(program, facts);
+
+    expect(resolved?.toISOString()).toBe('2026-03-05T10:00:00.000Z');
+    // The array, its order, and every fact's date are untouched...
+    expect(
+      facts.map((fact) => ({
+        id: fact.scheduledWorkoutId,
+        completedAt: fact.completedAt.toISOString(),
+      })),
+    ).toEqual(snapshot);
+    // ...and the result never aliases a supplied Date, so mutating it cannot
+    // reach back into the inputs.
+    expect(resolved).not.toBe(facts[1]?.completedAt);
   });
 });

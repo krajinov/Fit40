@@ -390,3 +390,15 @@ history at read time from completed sessions — performed ExerciseId
 attribution and exactly three locked metrics (`max-load`,
 `max-bodyweight-reps`, `max-duration`) — instead of persisting record state.
 Canonical semantics: [Personal Records](personal-records.md).
+
+## Program Completion & Restart (M14)
+
+Completion is derived state, not an entity field: `isProgramComplete` and
+`resolveProgramCompletionDate` (`src/domain/services/program-progress.ts`)
+answer completion and completion date from the program schedule plus the
+current enrollment's completed scheduled-workout ids — there is no enrollment
+status column, no persisted completion timestamp, and no completion flag. The
+current run is identified by the current `ProgramEnrollment` id. Deliberate
+edge: a zero-scheduled-workout program is never complete (diverging from
+legacy `getNextWorkout`'s null), and restart refuses it. Canonical reference:
+[Program Completion & Restart](program-completion.md).

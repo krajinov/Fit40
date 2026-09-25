@@ -9,6 +9,12 @@
  * user per program; a create racing that constraint surfaces as
  * EnrollmentAlreadyExistsError so use cases can map it to the
  * ALREADY_ENROLLED business outcome without leaking PostgreSQL details.
+ *
+ * `replaceExpectedWithNew` is the one compare-and-replace capability: it
+ * atomically swaps an EXPECTED enrollment for a fresh one, so a caller that
+ * owns the lifecycle decision (e.g. restarting a completed program) never
+ * has to compose a delete with a create and risk a committed intermediate
+ * "not enrolled" state.
  */
 
 import type { ProgramEnrollment } from '@/domain/entities/program-enrollment';
@@ -26,6 +32,29 @@ export class EnrollmentAlreadyExistsError extends Error {
   ) {
     super(`User "${userId}" is already enrolled in program "${programId}"`);
     this.name = 'EnrollmentAlreadyExistsError';
+  }
+}
+
+/**
+ * Thrown by `replaceExpectedWithNew` when the row identified by `expectedId`
+ * does not describe the same (userId, programId) identity as the replacement:
+ * the compare-and-replace precondition is violated, so the operation is a
+ * programming/state error rather than a business outcome. It is a
+ * persistence-backstop outcome (like the session repository's occurrence-key
+ * conflict): use cases do not translate it — it propagates as an unexpected
+ * error — and the replacement transaction rolls back completely.
+ */
+export class EnrollmentIdentityMismatchError extends Error {
+  constructor(
+    readonly enrollmentId: string,
+    readonly found: { readonly userId: string; readonly programId: string },
+    readonly next: { readonly userId: string; readonly programId: string },
+  ) {
+    super(
+      `Enrollment "${enrollmentId}" does not describe the same (user, program) identity as the replacement ` +
+        `(found ${found.userId}/${found.programId}, replacement ${next.userId}/${next.programId})`,
+    );
+    this.name = 'EnrollmentIdentityMismatchError';
   }
 }
 
@@ -65,4 +94,40 @@ export interface ProgramEnrollmentRepository {
    * user-owned history that no longer counts toward any program.
    */
   delete(id: EnrollmentId): Promise<boolean>;
+
+  /**
+   * Atomically replaces the enrollment `expectedId` with `next` — the SAME
+   * (userId, programId) identity — in ONE transaction: the targeted delete
+   * and the insert either both commit or neither does. There is never a
+   * committed state in which the user is unenrolled.
+   *
+   * Compare-and-replace contract:
+   * - The delete targets `expectedId` ONLY. An enrollment created afterwards
+   *   (e.g. by a concurrent replacement) has a different id and is NEVER
+   *   deleted or replaced by this call.
+   * - Returns true only when both steps committed: the old row is gone, its
+   *   sessions detached (the workout_sessions enrollment FK's ON DELETE SET
+   *   NULL, applied at commit), and `next` is the single live enrollment for
+   *   the pair.
+   * - Returns false when `expectedId` matches no row — a stale expected id.
+   *   Nothing is inserted and no other enrollment is touched; the
+   *   transaction commits as a no-op.
+   * - The row found at `expectedId` must carry exactly `next`'s (userId,
+   *   programId); otherwise the identity invariant is violated and
+   *   {@link EnrollmentIdentityMismatchError} is thrown, rolling back
+   *   everything.
+   * - May throw {@link EnrollmentAlreadyExistsError} when the insert races
+   *   the (user_id, program_id) unique constraint — translated for that
+   *   constraint only. The whole transaction rolls back, so the old
+   *   enrollment and its session attribution are preserved.
+   * - Any other failure rolls back and propagates as an unexpected error
+   *   (never translated).
+   * - Identity-based replacement only: no completion, progress, or restart
+   *   policy lives here. Whether a replacement is allowed is an
+   *   Application/Domain decision made by the caller.
+   */
+  replaceExpectedWithNew(
+    expectedId: EnrollmentId,
+    next: ProgramEnrollment,
+  ): Promise<boolean>;
 }

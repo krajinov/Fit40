@@ -1,5 +1,6 @@
-import { and, asc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
 
+import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 import {
   SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
@@ -44,6 +45,8 @@ const ENROLLMENT_FK_CONSTRAINT = 'workout_sessions_enrollment_id_program_enrollm
 const OCCURRENCE_KEY_UNIQUE_INDEX = 'exercise_logs_session_occurrence_key_unique';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
+type ExerciseLogRow = typeof exerciseLogs.$inferSelect;
+type SetLogRow = typeof setLogs.$inferSelect;
 
 /**
  * Drizzle implementation of the WorkoutSessionRepository port.
@@ -116,6 +119,35 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     // id is valid by schema constraint (database records are trusted at the
     // repository boundary).
     return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
+  }
+
+  async listCompletedByEnrollment(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
+    // Q1: the enrollment's completed session rows. `enrollment_id = ?`
+    // never matches a detached (NULL) row — SQL NULL equality — so detached,
+    // other-enrollment, and (via enrollment identity) other users' sessions
+    // are all excluded structurally. `completed_at IS NOT NULL` narrows to
+    // completed-only. The total-order ascending ladder mirrors the port.
+    const rows = await this.db
+      .select()
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          isNotNull(workoutSessions.completedAt),
+        ),
+      )
+      .orderBy(
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+      );
+
+    // Batched child hydration (Q2/Q3) only when there is something to
+    // hydrate — an empty result is one statement, a non-empty one is three,
+    // regardless of how many sessions the enrollment holds.
+    return rows.length === 0 ? [] : this.hydrateCompletedMany(rows);
   }
 
   async save(session: WorkoutSession): Promise<WorkoutSession> {
@@ -244,5 +276,72 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       exerciseLogs: logRows,
       setLogs: setRows,
     });
+  }
+
+  /**
+   * Batched hydration for a set of completed session rows: one query for the
+   * exercise logs and one for the set logs of ALL sessions, grouped per
+   * session, then the shared aggregate mapper per session — the same
+   * Q1/Q2/Q3 shape as the training-history read, so the statement count is
+   * fixed (never one query per session). Kept private and per-instance, the
+   * established per-repository convention; `mapSessionRows` stays the single
+   * shared hydration implementation, so every aggregate invariant (sequential
+   * exercise order, set shapes, provenance, skip, occurrence keys) is
+   * enforced exactly as in every other read path.
+   */
+  private async hydrateCompletedMany(
+    rows: ReadonlyArray<SessionRow>,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
+    const sessionIds = rows.map((row) => row.id);
+    const logRows = await this.db
+      .select()
+      .from(exerciseLogs)
+      .where(inArray(exerciseLogs.sessionId, sessionIds))
+      .orderBy(asc(exerciseLogs.sessionId), asc(exerciseLogs.exerciseOrder));
+    const setRows = await this.db
+      .select()
+      .from(setLogs)
+      .where(inArray(setLogs.sessionId, sessionIds))
+      .orderBy(asc(setLogs.sessionId), asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+
+    const logsBySession = new Map<string, ExerciseLogRow[]>();
+    for (const row of logRows) {
+      const list = logsBySession.get(row.sessionId) ?? [];
+      list.push(row);
+      logsBySession.set(row.sessionId, list);
+    }
+    const setsBySession = new Map<string, SetLogRow[]>();
+    for (const row of setRows) {
+      const list = setsBySession.get(row.sessionId) ?? [];
+      list.push(row);
+      setsBySession.set(row.sessionId, list);
+    }
+
+    return rows.map((row): CompletedWorkoutSession => {
+      const session: CompletedWorkoutSession = {
+        ...mapSessionRows({
+          session: row,
+          exerciseLogs: logsBySession.get(row.id) ?? [],
+          setLogs: setsBySession.get(row.id) ?? [],
+        }),
+        completedAt: this.completedAtOf(row),
+      };
+      return session;
+    });
+  }
+
+  /**
+   * Non-null narrowing for a completed-only read: a null timestamp surviving
+   * the `completed_at IS NOT NULL` filter is corrupt data — thrown as an
+   * unexpected error, never a business outcome (the history read applies the
+   * identical guard).
+   */
+  private completedAtOf(row: SessionRow): Date {
+    if (row.completedAt === null) {
+      throw new Error(
+        `Corrupt data in workout_sessions (id=${row.id}): completed_at is null despite the completed-only filter`,
+      );
+    }
+    return row.completedAt;
   }
 }

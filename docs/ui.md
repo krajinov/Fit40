@@ -609,3 +609,41 @@ Regression coverage:
 M13 integration suites in
 `tests/integration/database/training-history-repository.test.ts` and
 `tests/integration/database/personal-record-repository.test.ts`.
+
+## Program completion & restart (M14)
+
+- **Completion route** `/programs/[programSlug]/completed`: done badge,
+  program identity, "Completed workouts / Completed on / Exercises trained"
+  facts, and a "Personal records during this program" section whose caption
+  states the exact historical count ("… during this run — historical
+  records, not current personal bests") plus the truthful cap note ("Showing
+  the 5 most recent.") when the display list is capped; zero events renders
+  an honest empty state. Actions: primary "Start program again" (client
+  leaf; slug-only form, pending "Restarting…", typed errors via
+  `role="alert"`) and secondary "Choose another program" → `/programs`.
+  Not enrolled / incomplete / post-restart visits redirect to program
+  detail; unknown slug is a 404.
+- **Program detail — completed enrollment**: the completed callout keeps its
+  message and Completed pill and gains "View completion summary" plus the
+  shared restart button; Leave stays in both placements (desktop header and
+  mobile). Incomplete enrollments are untouched (up-next row, progress,
+  Leave) and never see completion or restart controls.
+- **Session Completed**: a factual "Program complete" callout ("You've
+  completed every scheduled workout in {Program}.") with "View completion
+  summary" renders only when the server-derived enrollment view says the run
+  is complete — never on the active/in-progress logger, never on workout
+  detail, and an unavailable optional read degrades to no callout rather
+  than a false claim.
+- **Dashboard**: the completed card's primary action is now "View summary" →
+  the completion route; "Browse programs" remains; there is deliberately
+  **no restart control on the dashboard** and no new dashboard read.
+- Copy bans held across all four surfaces: no XP/achievement/calories/
+  e1RM/adherence/training-time, no confetti, no current-PB claims ("M13
+  Current PBs set this week" language never appears here); interactive
+  targets keep the ≥ 44px contract (52px primary/secondary).
+- Regression coverage:
+  `tests/unit/features/enrollment/{completion-view,program-completion-summary,enrolled-program-panel,restart-action}.test.ts`,
+  `tests/unit/features/sessions/{session-completed-callout,active-workout-view,active-workout-screen}.test.ts`,
+  `tests/unit/features/dashboard/program-completed-card.test.ts`, and
+  `tests/unit/app/program-completed-page.test.ts`.
+- Canonical reference: [Program Completion & Restart](program-completion.md).

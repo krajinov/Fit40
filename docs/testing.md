@@ -456,3 +456,27 @@ npm run test:coverage
   implementation.
 - Canonical reference: [Personal Records](personal-records.md).
 
+## Program Completion & Restart (M14)
+
+- Domain: `tests/unit/domain/services/program-progress.test.ts` — the
+  completion rule, the locked zero-workout divergence from `getNextWorkout`,
+  and completion-date derivation.
+- Application: `restart-program.test.ts` (one-write CAS contract, stale-CAS
+  mappings, no-retry, zero-schedule refusal) and
+  `get-program-completion-summary.test.ts` (cheap incomplete path without
+  session/record/catalog reads, distinct-exercise rules, historical-PR
+  semantics vs current PBs, exact count vs display cap).
+- Infrastructure (real PostgreSQL):
+  `workout-session-repository.test.ts` (enrollment-scoped read + the
+  1-empty/3-statement bound via the postgres.js debug hook),
+  `program-enrollment-repository.test.ts` (atomic replace, rollback after a
+  post-delete insert failure, stale id, identity guard, constraint-name
+  pinning), `program-restart.test.ts` (A–E: atomic success, history/PB/M8
+  invariance, two truly concurrent restarts, serialized second restart,
+  ownership), and `program-completion-summary.test.ts` (Domain-fold oracle;
+  historical events, not M13 current PBs).
+- Presentation: completion route/page, completion view, restart action,
+  summary/restart button, callout placement, enrolled panel, dashboard card
+  under `tests/unit/app/` and `tests/unit/features/`.
+- Canonical reference: [Program Completion & Restart](program-completion.md).
+

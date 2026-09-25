@@ -303,3 +303,20 @@ the port expects — no PR table, no derived writes, no top-K approximation.
 Presentation formats values, dates and labels, renders the Personal Best
 cards and historical PR badges, and never infers record semantics.
 Canonical reference: [Personal Records](personal-records.md).
+
+## Program Completion & Restart (M14)
+
+Completion is derived, never persisted: the Domain service `isProgramComplete`
+(program has ≥ 1 scheduled workout and every scheduled workout has a
+completed session attached to the current enrollment) is the single
+authority, read through `listCompletedScheduledWorkoutIds`. Application owns
+`GetProgramCompletionSummaryUseCase` (completed-run facts + historical M12 PR
+events) and `RestartProgramUseCase`, which issues exactly ONE write —
+`ProgramEnrollmentRepository.replaceExpectedWithNew(oldId, fresh)`, a single
+PostgreSQL transaction (targeted delete → identity guard → fresh insert) with
+a single read-only re-check on a stale CAS. Infrastructure translates only
+the named `program_enrollments_user_program_unique` violation into
+`EnrollmentAlreadyExistsError`. Presentation owns the completion route, view
+mapping, and every surfacing (completed panel, conditional Session Completed
+callout, dashboard card) and never infers completion or counts sessions.
+Canonical reference: [Program Completion & Restart](program-completion.md).

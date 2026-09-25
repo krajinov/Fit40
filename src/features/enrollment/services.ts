@@ -7,11 +7,14 @@
  */
 
 import { EnrollInProgramUseCase } from '@/application/use-cases/enroll-in-program';
+import { GetProgramCompletionSummaryUseCase } from '@/application/use-cases/get-program-completion-summary';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { LeaveProgramUseCase } from '@/application/use-cases/leave-program';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import {
+  exerciseRepository,
+  personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
   workoutSessionRepository,
@@ -38,4 +41,18 @@ export const getProgramEnrollmentUseCase = new GetProgramEnrollmentUseCase(
 export const listUserEnrollmentsUseCase = new ListUserEnrollmentsUseCase(
   programEnrollmentRepository,
   programRepository,
+);
+
+/**
+ * The M14 completion summary of the current enrollment (Slice 4). Composed
+ * beside the enrollment read use cases: it reuses Slice 2's enrollment-scoped
+ * completed-session read and the M12 personal-record pipeline, and adds no
+ * persistence of its own.
+ */
+export const getProgramCompletionSummaryUseCase = new GetProgramCompletionSummaryUseCase(
+  programRepository,
+  programEnrollmentRepository,
+  workoutSessionRepository,
+  personalRecordRepository,
+  exerciseRepository,
 );

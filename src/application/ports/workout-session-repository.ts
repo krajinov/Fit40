@@ -15,6 +15,7 @@ import type {
   ScheduledWorkoutId,
   WorkoutSessionId,
 } from '@/domain/types/ids';
+import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 
 /**
  * Thrown by `save` when a second session for the same enrollment and
@@ -149,4 +150,32 @@ export interface WorkoutSessionRepository {
   listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
   ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
+
+  /**
+   * Returns the enrollment's COMPLETED sessions as fully hydrated
+   * aggregates, ordered deterministically ascending by
+   * `(completedAt, startedAt, session id)` — a total order even when
+   * timestamps tie.
+   *
+   * Contract:
+   * - Enrollment-scoped: sessions of other enrollments (including other
+   *   users' enrollments) are excluded by enrollment identity, and detached
+   *   sessions (enrollment_id nulled by a leave) can never match a non-null
+   *   enrollment id.
+   * - Completed sessions only: an in-progress session never appears. The
+   *   returned aggregates carry a non-null `completedAt` by construction —
+   *   this read reuses the established `CompletedWorkoutSession` narrowed
+   *   type rather than inventing a second completed-session model.
+   * - Fully hydrated: exercise logs and set logs ride the aggregate with all
+   *   persisted truth intact — occurrence source provenance, authored and
+   *   performed exercise identity, prescription/rest snapshots, skip state,
+   *   occurrence keys, and ordering.
+   * - Read in a bounded number of batched statements regardless of how many
+   *   sessions the enrollment holds — never one query per session (no N+1).
+   * - Pure read: no program-completion policy lives here. Whether these
+   *   sessions complete the program is decided by the Domain.
+   */
+  listCompletedByEnrollment(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>>;
 }

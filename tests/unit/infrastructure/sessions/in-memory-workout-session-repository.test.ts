@@ -26,10 +26,13 @@ function createTestSession(override?: Partial<{ id: string; swId: string; userId
   return r.data;
 }
 
-function completed(session: ReturnType<typeof createTestSession>) {
+function completed(
+  session: ReturnType<typeof createTestSession>,
+  completedAtIso = '2025-01-01T11:00:00Z',
+) {
   const rs = logSessionSet(session, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
   if (!rs.ok) throw Error();
-  const c = completeWorkoutSession(rs.data, new Date('2025-01-01T11:00:00Z'));
+  const c = completeWorkoutSession(rs.data, new Date(completedAtIso));
   if (!c.ok) throw Error();
   return c.data;
 }
@@ -228,5 +231,192 @@ describe('InMemoryWorkoutSessionRepository', () => {
         expect(!(log.isSkipped && log.sets.length > 0)).toBe(true);
       }
     }
+  });
+
+  describe('listCompletedByEnrollment', () => {
+    it('returns hydrated completed sessions attached to the enrollment', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed).toHaveLength(1);
+      expect(listed[0]?.id).toBe('s-1');
+      expect(listed[0]?.completedAt).toBeInstanceOf(Date);
+      expect(listed[0]?.completedAt.toISOString()).toBe('2025-01-01T11:00:00.000Z');
+      // Fully hydrated: exercise logs and set logs ride the aggregate.
+      expect(listed[0]?.exerciseLogs).toHaveLength(1);
+      expect(listed[0]?.exerciseLogs[0]?.sets).toHaveLength(1);
+      expect(listed[0]?.exerciseLogs[0]?.sets[0]).toMatchObject({ type: 'reps', reps: 10 });
+    });
+
+    it('excludes in-progress sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-done', swId: 'sw-done' })));
+      await repo.save(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed.map((session) => session.id)).toEqual(['s-done']);
+    });
+
+    it('excludes sessions belonging to another enrollment', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-own', swId: 'sw-own' })));
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-other', swId: 'sw-other', enrollmentId: 'enr-2' }),
+        ),
+      );
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed.map((session) => session.id)).toEqual(['s-own']);
+    });
+
+    it('excludes detached sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-detached', swId: 'sw-detached', enrollmentId: null }),
+        ),
+      );
+
+      expect(await repo.listCompletedByEnrollment(enid('enr-1'))).toEqual([]);
+    });
+
+    it("excludes sessions belonging to another user's enrollment", async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(
+        completed(
+          createTestSession({
+            id: 's-user-2',
+            swId: 'sw-user-2',
+            userId: 'user-2',
+            enrollmentId: 'enr-2',
+          }),
+        ),
+      );
+
+      expect(await repo.listCompletedByEnrollment(enid('enr-1'))).toEqual([]);
+    });
+
+    it('orders ascending by completedAt', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      // Saved deliberately out of order; ids also contradict completion order
+      // so an id-ordered (or insertion-ordered) read would fail this.
+      await repo.save(
+        completed(
+          createTestSession({ id: 'session-a-done-last', swId: 'sw-late' }),
+          '2025-01-03T11:00:00Z',
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({ id: 'session-b-done-first', swId: 'sw-early' }),
+          '2025-01-01T11:00:00Z',
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({ id: 'session-c-done-middle', swId: 'sw-mid' }),
+          '2025-01-02T11:00:00Z',
+        ),
+      );
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed.map((session) => session.id)).toEqual([
+        'session-b-done-first',
+        'session-c-done-middle',
+        'session-a-done-last',
+      ]);
+    });
+
+    it('breaks completedAt ties by startedAt ascending', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      // Both complete at the same instant; the later-starting session carries
+      // the alphabetically SMALLER id, so an id tie-break would invert the
+      // expected order and fail this test.
+      await repo.save(
+        completed(
+          createTestSession({
+            id: 'session-x',
+            swId: 'sw-x',
+            startedAt: '2025-01-01T10:00:00Z',
+          }),
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({
+            id: 'session-y',
+            swId: 'sw-y',
+            startedAt: '2025-01-01T09:00:00Z',
+          }),
+        ),
+      );
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed.map((session) => session.id)).toEqual(['session-y', 'session-x']);
+    });
+
+    it('breaks completedAt and startedAt ties by session id ascending', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      // Identical timestamps; saved in reverse id order so an insertion-
+      // ordered read would fail this.
+      await repo.save(
+        completed(
+          createTestSession({
+            id: 'session-b',
+            swId: 'sw-b',
+            startedAt: '2025-01-01T10:00:00Z',
+          }),
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({
+            id: 'session-a',
+            swId: 'sw-a',
+            startedAt: '2025-01-01T10:00:00Z',
+          }),
+        ),
+      );
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+
+      expect(listed.map((session) => session.id)).toEqual(['session-a', 'session-b']);
+    });
+
+    it('returns [] for an enrollment with no completed sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      expect(await repo.listCompletedByEnrollment(enid('enr-empty'))).toEqual([]);
+
+      await repo.save(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
+      expect(await repo.listCompletedByEnrollment(enid('enr-empty'))).toEqual([]);
+      expect(await repo.listCompletedByEnrollment(enid('enr-1'))).toEqual([]);
+    });
+
+    it('returns defensive clones that cannot mutate stored state', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+
+      const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
+      const returned = listed[0];
+      expect(returned).toBeDefined();
+
+      // Mutate the returned aggregate's Date in place: stored state must not
+      // react (structuredClone isolation, the repository's standing rule).
+      returned!.completedAt.setTime(0);
+      expect(returned!.completedAt.getTime()).toBe(0);
+
+      const idR = createWorkoutSessionId('s-1');
+      if (!idR.ok) throw Error();
+      const stored = await repo.findById(idR.data);
+      expect(stored?.completedAt?.toISOString()).toBe('2025-01-01T11:00:00.000Z');
+      expect(stored?.exerciseLogs[0]?.sets).toHaveLength(1);
+    });
   });
 });

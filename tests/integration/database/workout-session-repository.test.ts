@@ -5,10 +5,12 @@ import {
   createWorkoutSession,
   deleteSessionSet,
   logSessionSet,
+  OccurrenceSource,
   updateSessionSet,
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
+import { substituteSessionExercise } from '@/domain/services/session-exercise-substitution';
 import {
   createEnrollmentId,
   createExerciseId,
@@ -26,6 +28,11 @@ import {
 } from '@/application/ports/workout-session-repository';
 import { users, workoutSessions } from '@/infrastructure/database/schema';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+
+import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
+import * as schema from '@/infrastructure/database/schema';
 
 import {
   closeDatabase,
@@ -34,6 +41,7 @@ import {
   resetAndSeed,
   workoutSessionRepository,
 } from './setup';
+import { getTestDatabaseUrl } from './test-env';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -555,6 +563,335 @@ describe('DrizzleWorkoutSessionRepository', () => {
       }),
     ).rejects.toMatchObject({
       cause: expect.objectContaining({ code: '23503' }), // foreign_key_violation
+    });
+  });
+
+  describe('listCompletedByEnrollment()', () => {
+    beforeEach(async () => {
+      // A second enrollment for the same user in a different program (the
+      // (user, program) unique constraint allows one per program) and an
+      // enrollment with no sessions — both for scoping assertions.
+      await seedEnrollment('enrollment-test-a2', 'user-test-a', 'prog-strong-at-home');
+      await seedEnrollment('enrollment-test-empty', 'user-test-a', 'prog-strength-mobility');
+    });
+
+    /** Completes a session (one logged set) at an explicit instant. */
+    function completeAt(session: WorkoutSession, iso: string): WorkoutSession {
+      const done = completeWorkoutSession(withOneRepSet(session), new Date(iso));
+      if (!done.ok) throw new Error(done.error.message);
+      return done.data;
+    }
+
+    async function listedBy(enrollment: string) {
+      return workoutSessionRepository.listCompletedByEnrollment(enrollmentId(enrollment));
+    }
+
+    it("returns the enrollment's completed sessions as fully hydrated aggregates", async () => {
+      const session = completed(makeSession('session-list-1'));
+      await workoutSessionRepository.save(session);
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed).toHaveLength(1);
+      const found = listed[0];
+      expect(found?.id).toBe('session-list-1');
+      // Non-null by construction — the completed-narrowed aggregate type.
+      expect(found?.completedAt).toEqual(new Date('2025-01-01T11:00:00Z'));
+      expect(found?.exerciseLogs).toHaveLength(2);
+      expect(found?.exerciseLogs[0]?.sets).toEqual([
+        { type: 'reps', setNumber: 1, reps: 10, weightKg: 20, rpe: 7 },
+      ]);
+      expect(found?.exerciseLogs[1]?.prescription).toEqual(duration());
+      expect(found?.exerciseLogs[1]?.restSeconds).toBe(60);
+    });
+
+    it('excludes in-progress sessions', async () => {
+      await workoutSessionRepository.save(completed(makeSession('session-done')));
+      await workoutSessionRepository.save(
+        makeSession('session-in-progress', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+        }),
+      );
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed.map((session) => session.id)).toEqual(['session-done']);
+    });
+
+    it('excludes sessions belonging to another enrollment', async () => {
+      await workoutSessionRepository.save(completed(makeSession('session-own')));
+      await workoutSessionRepository.save(
+        completed(
+          makeSession('session-other-enrollment', {
+            enrollmentId: 'enrollment-test-a2',
+            scheduledWorkoutId: 'strong-at-home-w1-1',
+            workoutId: 'wo-home-a',
+          }),
+        ),
+      );
+
+      const own = await listedBy('enrollment-test-a');
+      const other = await listedBy('enrollment-test-a2');
+
+      // Exact scoping in both directions: nothing leaks either way.
+      expect(own.map((session) => session.id)).toEqual(['session-own']);
+      expect(other.map((session) => session.id)).toEqual(['session-other-enrollment']);
+    });
+
+    it('excludes detached sessions', async () => {
+      const session = completed(makeSession('session-detached'));
+      await workoutSessionRepository.save(session);
+
+      // Leaving the program deletes the enrollment; the FK detaches the row.
+      const deleted = await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
+      expect(deleted).toBe(true);
+
+      expect(await listedBy('enrollment-test-a')).toEqual([]);
+      // The history itself survives as user-owned, detached truth.
+      const stored = await workoutSessionRepository.findById(session.id);
+      expect(stored?.completedAt).not.toBeNull();
+      expect(stored?.enrollmentId).toBeNull();
+    });
+
+    it("excludes sessions belonging to another user's enrollment", async () => {
+      await workoutSessionRepository.save(
+        completed(
+          makeSession('session-user-b', {
+            userId: 'user-test-b',
+            enrollmentId: 'enrollment-test-b',
+          }),
+        ),
+      );
+
+      expect(await listedBy('enrollment-test-a')).toEqual([]);
+      // ...and the owning user still sees their own session.
+      expect((await listedBy('enrollment-test-b')).map((session) => session.id)).toEqual([
+        'session-user-b',
+      ]);
+    });
+
+    it('orders ascending by completedAt', async () => {
+      // Saved out of order; the ids also contradict completion order so an
+      // id-ordered (or insertion-ordered) read would fail this assertion.
+      const doneLast = completeAt(
+        makeSession('session-a-done-last', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+        }),
+        '2025-01-03T11:00:00Z',
+      );
+      const doneFirst = completeAt(makeSession('session-b-done-first'), '2025-01-01T11:00:00Z');
+      const doneMiddle = completeAt(
+        makeSession('session-c-done-middle', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+          workoutId: 'wo-beginner-strength-c',
+        }),
+        '2025-01-02T11:00:00Z',
+      );
+      await workoutSessionRepository.save(doneLast);
+      await workoutSessionRepository.save(doneFirst);
+      await workoutSessionRepository.save(doneMiddle);
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed.map((session) => session.id)).toEqual([
+        'session-b-done-first',
+        'session-c-done-middle',
+        'session-a-done-last',
+      ]);
+    });
+
+    it('breaks completedAt ties by startedAt ascending', async () => {
+      // Both complete at the same instant; the later-starting session carries
+      // the alphabetically smaller id, so an id tie-break would invert the
+      // expected order and fail this assertion.
+      const laterStart = completed(
+        makeSession('session-x-later-start', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+          startedAt: '2025-01-01T10:00:00Z',
+        }),
+      );
+      const earlierStart = completed(
+        makeSession('session-y-earlier-start', { startedAt: '2025-01-01T09:00:00Z' }),
+      );
+      await workoutSessionRepository.save(laterStart);
+      await workoutSessionRepository.save(earlierStart);
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed.map((session) => session.id)).toEqual([
+        'session-y-earlier-start',
+        'session-x-later-start',
+      ]);
+    });
+
+    it('breaks completedAt and startedAt ties by session id ascending', async () => {
+      // Identical timestamps on both ladder rungs; saved in reverse id order
+      // so an insertion-ordered read would fail this assertion.
+      const first = completed(
+        makeSession('session-tie-b', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+          startedAt: '2025-01-01T10:00:00Z',
+        }),
+      );
+      const second = completed(
+        makeSession('session-tie-a', { startedAt: '2025-01-01T10:00:00Z' }),
+      );
+      await workoutSessionRepository.save(first);
+      await workoutSessionRepository.save(second);
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed.map((session) => session.id)).toEqual(['session-tie-a', 'session-tie-b']);
+    });
+
+    it('preserves exercise logs, set logs, provenance, skip state, and prescription snapshots', async () => {
+      const built = createWorkoutSession({
+        id: 'session-rich',
+        userId: userId('user-test-a'),
+        enrollmentId: enrollmentId('enrollment-test-a'),
+        scheduledWorkoutId: scheduledWorkoutId('fit40-beginner-strength-w1-1'),
+        workoutId: workoutId('wo-beginner-strength-a'),
+        startedAt: new Date('2025-01-01T10:00:00Z'),
+        exerciseLogs: [
+          { authoredExerciseId: exerciseId('ex-002'), order: 1, prescription: reps(), restSeconds: 90 },
+          { authoredExerciseId: exerciseId('ex-015'), order: 2, prescription: duration(), restSeconds: 60 },
+          {
+            authoredExerciseId: exerciseId('ex-002'),
+            order: 3,
+            prescription: reps(),
+            restSeconds: 45,
+            source: OccurrenceSource.UserAdded,
+          },
+          {
+            authoredExerciseId: exerciseId('ex-015'),
+            order: 4,
+            prescription: reps(),
+            restSeconds: 60,
+            isSkipped: true,
+          },
+        ],
+      });
+      if (!built.ok) throw new Error(built.error.message);
+
+      // Substitution on the not-yet-logged occurrence 2: authored ex-015,
+      // performed ex-010. Sets are logged on occurrence 1 only.
+      const substituted = substituteSessionExercise(built.data, {
+        exerciseOrder: 2,
+        replacementExerciseId: exerciseId('ex-010'),
+      });
+      if (!substituted.ok) throw new Error(substituted.error.message);
+
+      const withSets = withTwoRepSets(substituted.data);
+      const done = completeWorkoutSession(withSets, new Date('2025-01-01T12:00:00Z'));
+      if (!done.ok) throw new Error(done.error.message);
+      await workoutSessionRepository.save(done.data);
+
+      const listed = await listedBy('enrollment-test-a');
+
+      expect(listed).toHaveLength(1);
+      const found = listed[0];
+      expect(found?.completedAt).toEqual(new Date('2025-01-01T12:00:00Z'));
+      expect(found?.exerciseLogs.map((log) => log.order)).toEqual([1, 2, 3, 4]);
+
+      const [first, second, third, fourth] = found!.exerciseLogs;
+
+      // Fully hydrated set logs survive the batched read with their values.
+      expect(first?.sets).toEqual([
+        { type: 'reps', setNumber: 1, reps: 10, weightKg: 20, rpe: 7 },
+        { type: 'reps', setNumber: 2, reps: 12, weightKg: 22.5, rpe: 8 },
+      ]);
+      // Prescription/rest snapshots survive untouched by the read.
+      expect(first?.prescription).toEqual(reps());
+      expect(first?.restSeconds).toBe(90);
+
+      // Substitution provenance: authored identity kept, performed rewritten,
+      // prescription unchanged by the substitution.
+      expect(second?.authoredExerciseId).toBe('ex-015');
+      expect(second?.performedExerciseId).toBe('ex-010');
+      expect(second?.source).toBe(OccurrenceSource.Template);
+      expect(second?.prescription).toEqual(duration());
+      expect(second?.restSeconds).toBe(60);
+
+      // User-added provenance survives.
+      expect(third?.source).toBe(OccurrenceSource.UserAdded);
+      expect(third?.authoredExerciseId).toBe('ex-002');
+      expect(third?.performedExerciseId).toBe('ex-002');
+      expect(third?.restSeconds).toBe(45);
+
+      // Skip truth survives: the decision rides the occurrence, which keeps
+      // its full authored contract and zero sets.
+      expect(fourth?.isSkipped).toBe(true);
+      expect(fourth?.sets).toEqual([]);
+      expect(fourth?.authoredExerciseId).toBe('ex-015');
+      expect(fourth?.prescription).toEqual(reps());
+
+      // Occurrence keys survive distinctly per occurrence.
+      expect(new Set(found!.exerciseLogs.map((log) => log.occurrenceKey)).size).toBe(4);
+    });
+
+    it('returns [] for an enrollment with no completed sessions', async () => {
+      // Another enrollment has data, so this emptiness is scoped — not an
+      // artifact of an empty database.
+      await workoutSessionRepository.save(completed(makeSession('session-somewhere')));
+
+      expect(await listedBy('enrollment-test-empty')).toEqual([]);
+    });
+
+    it('issues a fixed three statements regardless of session count (no N+1)', async () => {
+      await workoutSessionRepository.save(completed(makeSession('session-batch-1')));
+      await workoutSessionRepository.save(
+        completed(
+          makeSession('session-batch-2', {
+            scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+            workoutId: 'wo-beginner-strength-b',
+          }),
+        ),
+      );
+      await workoutSessionRepository.save(
+        completed(
+          makeSession('session-batch-3', {
+            scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+            workoutId: 'wo-beginner-strength-c',
+          }),
+        ),
+      );
+
+      // A dedicated counting client: postgres.js' debug hook fires once per
+      // executed statement, so the read's statement count is observable.
+      let statements = 0;
+      const countingClient = postgres(getTestDatabaseUrl(), {
+        max: 1,
+        debug: () => {
+          statements += 1;
+        },
+      });
+      try {
+        const countingDb = drizzle(countingClient, { schema });
+        const countingRepo = new DrizzleWorkoutSessionRepository(countingDb);
+
+        // Warm the connection first: a fresh postgres.js client runs a
+        // one-time pg_catalog type-introspection statement on its very first
+        // query — connection initialization, not part of the read. Measuring
+        // the second invocation isolates the read's own statement count.
+        await countingRepo.listCompletedByEnrollment(enrollmentId('enrollment-test-a'));
+        statements = 0;
+
+        const listed = await countingRepo.listCompletedByEnrollment(
+          enrollmentId('enrollment-test-a'),
+        );
+
+        expect(listed).toHaveLength(3);
+        // One session query + one batched exercise-log query + one batched
+        // set-log query — exactly three statements for N sessions, never one
+        // query per session.
+        expect(statements).toBe(3);
+      } finally {
+        await countingClient.end();
+      }
     });
   });
 });

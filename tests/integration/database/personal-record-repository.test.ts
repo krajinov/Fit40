@@ -1375,3 +1375,632 @@ describe('completed session record events — read-flow wiring', () => {
     expect(foreign.error.code).toBe('SESSION_NOT_FOUND');
   });
 });
+
+// ─── Current personal bests established in a window (M13 Slice 2) ────────────
+
+/**
+ * The UTC window the windowed read is asked about. `WINDOW_FROM` is inclusive
+ * and `WINDOW_TO` exclusive; the fixtures below place sessions exactly on both
+ * edges so the contract is observable.
+ */
+const WINDOW_FROM = new Date('2026-03-02T00:00:00.000Z');
+const WINDOW_TO = new Date('2026-03-09T00:00:00.000Z');
+
+/** The read under test, bound to the shared window unless a test overrides it. */
+function bestsEstablishedIn(
+  from: Date = WINDOW_FROM,
+  to: Date = WINDOW_TO,
+): Promise<ReadonlyArray<PersonalBest>> {
+  return personalRecordRepository.findCurrentPersonalBestsSetBetween(owner(), from, to);
+}
+
+describe('current bests established in a window — inclusion rules', () => {
+  it('returns a current best established inside the window', async () => {
+    await savePrSessions(
+      // Established before the window: 50 kg.
+      prSession({
+        id: 'win-earlier',
+        userId: OWNER,
+        startedAt: '2026-02-01T09:00:00Z',
+        completedAt: '2026-02-01T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 50 }] }],
+      }),
+      // Established inside the window, and still the all-time best.
+      prSession({
+        id: 'win-inside',
+        userId: OWNER,
+        occurrence: 1,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+    );
+
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_BENCH}/max-load/60@win-inside.1.1`,
+    ]);
+  });
+
+  it('omits a still-standing best established before the window', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-old',
+        userId: OWNER,
+        startedAt: '2026-02-01T09:00:00Z',
+        completedAt: '2026-02-01T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+    );
+
+    expect(await bestsEstablishedIn()).toEqual([]);
+    // It IS the current all-time best — just not established in the window.
+    expect(
+      bestLines(await personalRecordRepository.findCurrentPersonalBests(owner(), [exerciseId(EX_BENCH)])),
+    ).toEqual([`${EX_BENCH}/max-load/60@win-old.1.1`]);
+  });
+
+  it('omits an in-window performance that a later session surpassed', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-surpassed',
+        userId: OWNER,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+      prSession({
+        id: 'win-later',
+        userId: OWNER,
+        occurrence: 1,
+        startedAt: '2026-03-20T09:00:00Z',
+        completedAt: '2026-03-20T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 80 }] }],
+      }),
+    );
+
+    // The 60 kg happened inside the window but is no longer a current best, so
+    // this is NOT a PR-event count: nothing is returned.
+    expect(await bestsEstablishedIn()).toEqual([]);
+  });
+
+  it('does not return the window-local best when it is not the all-time current best', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-local-best',
+        userId: OWNER,
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 50 }] }],
+      }),
+      prSession({
+        id: 'win-all-time',
+        userId: OWNER,
+        occurrence: 1,
+        startedAt: '2026-03-10T09:00:00Z',
+        completedAt: '2026-03-10T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 70 }] }],
+      }),
+    );
+
+    // 50 kg is the best INSIDE the window; the window never narrows the
+    // ranking, so it is not a current best and must not be returned.
+    expect(await bestsEstablishedIn()).toEqual([]);
+    expect(
+      bestLines(await personalRecordRepository.findCurrentPersonalBests(owner(), [exerciseId(EX_BENCH)])),
+    ).toEqual([`${EX_BENCH}/max-load/70@win-all-time.1.1`]);
+  });
+});
+
+describe('current bests established in a window — ownership', () => {
+  it('keeps the earliest equal owner and filters by that owner, never by the window copy', async () => {
+    await savePrSessions(
+      // (a) An equal maximum whose earliest owner sits BEFORE the window.
+      prSession({
+        id: 'win-tie-owner-old',
+        userId: OWNER,
+        startedAt: '2026-01-10T09:00:00Z',
+        completedAt: '2026-01-10T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+      prSession({
+        id: 'win-tie-copy-inside',
+        userId: OWNER,
+        occurrence: 1,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+      }),
+      // (b) An equal maximum whose earliest owner sits INSIDE the window.
+      prSession({
+        id: 'win-tie-owner-inside',
+        userId: OWNER,
+        occurrence: 2,
+        startedAt: '2026-03-05T09:00:00Z',
+        completedAt: '2026-03-05T10:00:00Z',
+        logs: [{ exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 12, weightKg: 40 }] }],
+      }),
+      prSession({
+        id: 'win-tie-copy-later',
+        userId: OWNER,
+        occurrence: 3,
+        startedAt: '2026-04-01T09:00:00Z',
+        completedAt: '2026-04-01T10:00:00Z',
+        logs: [{ exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 12, weightKg: 40 }] }],
+      }),
+    );
+
+    // The bench tie's owner predates the window (absent); the goblet tie's
+    // owner is inside it, so the entry points at that earlier owner session.
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_GOBLET}/max-load/40@win-tie-owner-inside.1.1`,
+    ]);
+  });
+
+  it('returns in-window first exposures across the load, bodyweight, 0 kg and duration metrics', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-first-exposures',
+        userId: OWNER,
+        startedAt: '2026-03-05T09:00:00Z',
+        completedAt: '2026-03-05T10:00:00Z',
+        logs: [
+          { exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] },
+          { exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 25, weightKg: null }] },
+          { exerciseId: 'ex-004', type: 'reps', sets: [{ reps: 12, weightKg: 0 }] },
+          // A duration set's load is irrelevant: seconds are the value.
+          { exerciseId: EX_CARRY, type: 'duration', sets: [{ durationSeconds: 45, weightKg: 24 }] },
+        ],
+      }),
+    );
+
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_BENCH}/max-load/60@win-first-exposures.1.1`,
+      `${EX_GOBLET}/max-bodyweight-reps/25@win-first-exposures.2.1`,
+      `ex-004/max-load/0@win-first-exposures.3.1`,
+      `${EX_CARRY}/max-duration/45@win-first-exposures.4.1`,
+    ]);
+  });
+
+  it('counts detached and attached history alike', async () => {
+    await seedEnrollment('win-enrollment', OWNER, 'prog-beginner-strength');
+    await savePrSessions(
+      // Detached (the fixtures' default): enrollment_id is null.
+      prSession({
+        id: 'win-detached',
+        userId: OWNER,
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+      }),
+      // Still attached to a real enrollment.
+      prSession({
+        id: 'win-attached',
+        userId: OWNER,
+        enrollmentId: 'win-enrollment',
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 12, weightKg: 40 }] }],
+      }),
+    );
+
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_BENCH}/max-load/40@win-detached.1.1`,
+      `${EX_GOBLET}/max-load/40@win-attached.1.1`,
+    ]);
+  });
+});
+
+describe('current bests established in a window — attribution and inactivity', () => {
+  it('credits a substitution to the performed exercise', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-substituted',
+        userId: OWNER,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [
+          {
+            exerciseId: EX_BENCH,
+            performedExerciseId: 'ex-004',
+            type: 'reps',
+            sets: [{ reps: 8, weightKg: 70 }],
+          },
+        ],
+      }),
+    );
+
+    // The replacement owns the record; the authored exercise receives nothing.
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      'ex-004/max-load/70@win-substituted.1.1',
+    ]);
+    expect(
+      bestLines(await personalRecordRepository.findCurrentPersonalBests(owner(), [exerciseId(EX_BENCH)])),
+    ).toEqual([]);
+  });
+
+  it('includes a user-added occurrence', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-user-added',
+        userId: OWNER,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [
+          {
+            exerciseId: EX_GOBLET,
+            source: 'user_added',
+            type: 'reps',
+            sets: [{ reps: 15, weightKg: 24 }],
+          },
+        ],
+      }),
+    );
+
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_GOBLET}/max-load/24@win-user-added.1.1`,
+    ]);
+  });
+
+  it('produces no candidate for skipped or zero-set occurrences', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-inactive',
+        userId: OWNER,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [
+          // A real performance, so the session is completable at all…
+          { exerciseId: 'ex-006', type: 'reps', sets: [{ reps: 8, weightKg: 30 }] },
+          // …while these two stay candidate-free: explicitly skipped, and never
+          // skipped but left set-less.
+          { exerciseId: 'ex-004', type: 'reps', isSkipped: true, sets: [] },
+          { exerciseId: 'ex-005', type: 'reps', sets: [] },
+        ],
+      }),
+    );
+
+    // Only the logged occurrence produces a best.
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      'ex-006/max-load/30@win-inactive.1.1',
+    ]);
+    expect(
+      bestLines(
+        await personalRecordRepository.findCurrentPersonalBests(owner(), [
+          exerciseId('ex-004'),
+          exerciseId('ex-005'),
+        ]),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('current bests established in a window — boundaries and batching', () => {
+  it('treats the window as [from, to): from inclusive, to exclusive', async () => {
+    await savePrSessions(
+      prSession({
+        id: 'win-at-from',
+        userId: OWNER,
+        startedAt: '2026-03-02T00:00:00.000Z',
+        completedAt: '2026-03-02T00:00:00.000Z',
+        logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 35 }] }],
+      }),
+      prSession({
+        id: 'win-just-inside',
+        userId: OWNER,
+        occurrence: 1,
+        startedAt: '2026-03-08T09:00:00Z',
+        completedAt: '2026-03-08T23:59:59.999Z',
+        logs: [{ exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 12, weightKg: 35 }] }],
+      }),
+      prSession({
+        id: 'win-at-to',
+        userId: OWNER,
+        occurrence: 2,
+        startedAt: '2026-03-09T00:00:00.000Z',
+        completedAt: '2026-03-09T00:00:00.000Z',
+        logs: [{ exerciseId: EX_CARRY, type: 'duration', sets: [{ durationSeconds: 35 }] }],
+      }),
+    );
+
+    expect(bestLines(await bestsEstablishedIn())).toEqual([
+      `${EX_BENCH}/max-load/35@win-at-from.1.1`,
+      `${EX_GOBLET}/max-load/35@win-just-inside.1.1`,
+    ]);
+    // The session completed exactly at `to` IS a current best — it is simply
+    // outside the window, which is why it is absent above.
+    expect(
+      bestLines(
+        await personalRecordRepository.findCurrentPersonalBests(owner(), [exerciseId(EX_CARRY)]),
+      ),
+    ).toEqual([`${EX_CARRY}/max-duration/35@win-at-to.1.1`]);
+  });
+
+  it('answers the window in a single statement regardless of history size', async () => {
+    const counting = createQueryCountingRepository();
+    try {
+      await savePrSessions(
+        prSession({
+          id: 'win-batch-1',
+          userId: OWNER,
+          startedAt: '2026-03-04T09:00:00Z',
+          completedAt: '2026-03-04T10:00:00Z',
+          logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+        }),
+      );
+
+      // Warm up: a driver's first statement is its own type discovery.
+      await counting.repository.findCurrentPersonalBestsSetBetween(owner(), WINDOW_FROM, WINDOW_TO);
+
+      const beforeSmall = counting.queries.length;
+      await counting.repository.findCurrentPersonalBestsSetBetween(owner(), WINDOW_FROM, WINDOW_TO);
+      const smallHistory = counting.queries.length - beforeSmall;
+
+      await savePrSessions(
+        prSession({
+          id: 'win-batch-2',
+          userId: OWNER,
+          occurrence: 1,
+          startedAt: '2026-03-05T09:00:00Z',
+          completedAt: '2026-03-05T10:00:00Z',
+          logs: [{ exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+        }),
+        prSession({
+          id: 'win-batch-3',
+          userId: OWNER,
+          occurrence: 2,
+          startedAt: '2026-03-06T09:00:00Z',
+          completedAt: '2026-03-06T10:00:00Z',
+          logs: [{ exerciseId: 'ex-004', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+        }),
+      );
+
+      const beforeLarge = counting.queries.length;
+      await counting.repository.findCurrentPersonalBestsSetBetween(owner(), WINDOW_FROM, WINDOW_TO);
+      const largerHistory = counting.queries.length - beforeLarge;
+
+      // One statement for the whole window: the window is a predicate on the
+      // ranked result, never a second query and never one per exercise.
+      expect(smallHistory).toBe(1);
+      expect(largerHistory).toBe(1);
+    } finally {
+      await counting.close();
+    }
+  });
+});
+
+// ─── Oracle: the windowed projection against the authoritative Domain fold ───
+
+/**
+ * The core of the oracle history: a best improved inside the window (its
+ * pre-window value must not surface), in-window first exposures across the load,
+ * bodyweight, 0 kg and duration metrics, a user-added occurrence, and a
+ * substitution that must credit the performed exercise.
+ */
+async function seedWindowOracleCore(): Promise<void> {
+  await savePrSessions(
+    prSession({
+      id: 'window-oracle-pre',
+      userId: OWNER,
+      startedAt: '2026-02-10T09:00:00Z',
+      completedAt: '2026-02-10T10:00:00Z',
+      logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 50 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-improve',
+      userId: OWNER,
+      occurrence: 1,
+      startedAt: '2026-03-05T09:00:00Z',
+      completedAt: '2026-03-05T10:00:00Z',
+      logs: [{ exerciseId: EX_BENCH, type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-first-exposures',
+      userId: OWNER,
+      occurrence: 2,
+      startedAt: '2026-03-04T09:00:00Z',
+      completedAt: '2026-03-04T10:00:00Z',
+      logs: [
+        { exerciseId: EX_GOBLET, type: 'reps', sets: [{ reps: 25, weightKg: null }] },
+        { exerciseId: 'ex-004', type: 'reps', sets: [{ reps: 12, weightKg: 0 }] },
+        { exerciseId: EX_CARRY, type: 'duration', sets: [{ durationSeconds: 45, weightKg: 24 }] },
+      ],
+    }),
+    prSession({
+      id: 'window-oracle-user-added',
+      userId: OWNER,
+      occurrence: 3,
+      startedAt: '2026-03-05T11:00:00Z',
+      completedAt: '2026-03-05T12:00:00Z',
+      logs: [
+        {
+          exerciseId: 'ex-005',
+          source: 'user_added',
+          type: 'reps',
+          sets: [{ reps: 15, weightKg: 24 }],
+        },
+      ],
+    }),
+    prSession({
+      id: 'window-oracle-substituted',
+      userId: OWNER,
+      occurrence: 4,
+      startedAt: '2026-03-04T11:00:00Z',
+      completedAt: '2026-03-04T12:00:00Z',
+      logs: [
+        {
+          exerciseId: 'ex-006',
+          performedExerciseId: 'ex-007',
+          type: 'reps',
+          sets: [{ reps: 8, weightKg: 55 }],
+        },
+      ],
+    }),
+  );
+}
+
+/**
+ * The edge cases of the oracle history: a still-standing pre-window best, an
+ * in-window best later surpassed, tied maxima whose earliest owner sits outside
+ * and inside the window, a skipped and a zero-set occurrence, both window
+ * edges, an attached session, and an in-progress session.
+ */
+async function seedWindowOracleEdges(): Promise<void> {
+  await seedEnrollment('window-oracle-enrollment', OWNER, 'prog-beginner-strength');
+  await savePrSessions(
+    // Still-standing best established before the window.
+    prSession({
+      id: 'window-oracle-old-standing',
+      userId: OWNER,
+      startedAt: '2026-02-10T09:00:00Z',
+      completedAt: '2026-02-10T10:00:00Z',
+      logs: [{ exerciseId: 'ex-008', type: 'reps', sets: [{ reps: 8, weightKg: 30 }] }],
+    }),
+    // In-window best that a later session surpassed.
+    prSession({
+      id: 'window-oracle-surpassed',
+      userId: OWNER,
+      occurrence: 1,
+      startedAt: '2026-03-06T09:00:00Z',
+      completedAt: '2026-03-06T10:00:00Z',
+      logs: [{ exerciseId: 'ex-010', type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-surpasser',
+      userId: OWNER,
+      occurrence: 2,
+      startedAt: '2026-03-25T09:00:00Z',
+      completedAt: '2026-03-25T10:00:00Z',
+      logs: [{ exerciseId: 'ex-010', type: 'reps', sets: [{ reps: 8, weightKg: 80 }] }],
+    }),
+    // Tied maximum whose earliest owner predates the window.
+    prSession({
+      id: 'window-oracle-tie-owner-old',
+      userId: OWNER,
+      occurrence: 3,
+      startedAt: '2026-02-20T09:00:00Z',
+      completedAt: '2026-02-20T10:00:00Z',
+      logs: [{ exerciseId: 'ex-011', type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-tie-copy',
+      userId: OWNER,
+      occurrence: 4,
+      startedAt: '2026-03-07T09:00:00Z',
+      completedAt: '2026-03-07T10:00:00Z',
+      logs: [{ exerciseId: 'ex-011', type: 'reps', sets: [{ reps: 8, weightKg: 60 }] }],
+    }),
+    // Tied maximum whose earliest owner is inside the window.
+    prSession({
+      id: 'window-oracle-tie-owner-inside',
+      userId: OWNER,
+      occurrence: 5,
+      startedAt: '2026-03-08T09:00:00Z',
+      completedAt: '2026-03-08T10:00:00Z',
+      logs: [{ exerciseId: 'ex-012', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-tie-copy-later',
+      userId: OWNER,
+      occurrence: 6,
+      startedAt: '2026-03-30T09:00:00Z',
+      completedAt: '2026-03-30T10:00:00Z',
+      logs: [{ exerciseId: 'ex-012', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+    }),
+    // A skipped and a set-less occurrence: no candidates at all. One logged set
+    // keeps the session completable, and it sits below ex-008's pre-window best
+    // (30 kg), so this pair stays outside the window too.
+    prSession({
+      id: 'window-oracle-inactive',
+      userId: OWNER,
+      occurrence: 7,
+      startedAt: '2026-03-06T11:00:00Z',
+      completedAt: '2026-03-06T12:00:00Z',
+      logs: [
+        { exerciseId: 'ex-008', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] },
+        { exerciseId: 'ex-013', type: 'reps', isSkipped: true, sets: [] },
+        { exerciseId: 'ex-014', type: 'reps', sets: [] },
+      ],
+    }),
+    // Both window edges: `from` inclusive, `to` exclusive.
+    prSession({
+      id: 'window-oracle-at-from',
+      userId: OWNER,
+      startedAt: '2026-03-02T00:00:00.000Z',
+      completedAt: '2026-03-02T00:00:00.000Z',
+      logs: [{ exerciseId: 'ex-015', type: 'reps', sets: [{ reps: 8, weightKg: 35 }] }],
+    }),
+    prSession({
+      id: 'window-oracle-at-to',
+      userId: OWNER,
+      occurrence: 1,
+      startedAt: '2026-03-09T00:00:00.000Z',
+      completedAt: '2026-03-09T00:00:00.000Z',
+      logs: [{ exerciseId: 'ex-016', type: 'reps', sets: [{ reps: 8, weightKg: 35 }] }],
+    }),
+    // Attached history is eligible too.
+    prSession({
+      id: 'window-oracle-attached',
+      userId: OWNER,
+      enrollmentId: 'window-oracle-enrollment',
+      startedAt: '2026-03-06T13:00:00Z',
+      completedAt: '2026-03-06T14:00:00Z',
+      logs: [{ exerciseId: 'ex-017', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+    }),
+    // In progress, and heavier than everything: never history.
+    prSession({
+      id: 'window-oracle-in-progress',
+      userId: OWNER,
+      occurrence: 2,
+      startedAt: '2026-03-06T15:00:00Z',
+      logs: [{ exerciseId: 'ex-003', type: 'reps', sets: [{ reps: 8, weightKg: 500 }] }],
+    }),
+  );
+}
+
+describe('current bests established in a window — oracle against the Domain fold', () => {
+  beforeEach(async () => {
+    await seedWindowOracleCore();
+    await seedWindowOracleEdges();
+  });
+
+  it('matches the Domain fold’s current bests established in the window', async () => {
+    const sessions = await hydrateCompletedHistory(owner());
+    const folded = foldPersonalRecords(sessions);
+    if (!folded.ok) throw new Error(folded.error.message);
+
+    const expected = folded.data.currentBests.filter(
+      (best) =>
+        best.position.completedAt.getTime() >= WINDOW_FROM.getTime() &&
+        best.position.completedAt.getTime() < WINDOW_TO.getTime(),
+    );
+    const windowed = await bestsEstablishedIn();
+
+    // Non-trivial with no rounding room: nine pairs are established inside the
+    // window, while the pre-window, surpassed, out-of-window-owner, inactive and
+    // at-`to` cases stay out.
+    expect(expected).toHaveLength(9);
+    expect(windowed).toEqual(expected);
+  });
+
+  it('surfaces exactly the all-time winners for the pairs it returns', async () => {
+    const sessions = await hydrateCompletedHistory(owner());
+    const folded = foldPersonalRecords(sessions);
+    if (!folded.ok) throw new Error(folded.error.message);
+
+    const allTime = await personalRecordRepository.findCurrentPersonalBests(
+      owner(),
+      folded.data.currentBests.map((best) => best.exerciseId),
+    );
+    const windowed = await bestsEstablishedIn();
+
+    expect(windowed.length).toBeLessThan(allTime.length);
+    for (const best of windowed) {
+      const winner = allTime.find(
+        (entry) => entry.exerciseId === best.exerciseId && entry.metric === best.metric,
+      );
+      // Each windowed entry IS the all-time winner for its pair — never a
+      // window-local value that merely happens to lie inside [from, to).
+      expect(winner).toEqual(best);
+    }
+  });
+});

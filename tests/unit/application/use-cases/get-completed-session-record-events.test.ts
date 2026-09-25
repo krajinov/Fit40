@@ -147,6 +147,7 @@ function makeHistoryRepo(value: CompletedSessionContext | null) {
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
+    listCompletedSessionActivity: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn().mockResolvedValue(value),
   } satisfies TrainingHistoryRepository;
@@ -159,6 +160,8 @@ function makeHistoryRepo(value: CompletedSessionContext | null) {
 function makeRecordRepo(bestByIndex: ReadonlyArray<number | null>) {
   return {
     findCurrentPersonalBests: vi.fn<PersonalRecordRepository['findCurrentPersonalBests']>(),
+    findCurrentPersonalBestsSetBetween:
+      vi.fn<PersonalRecordRepository['findCurrentPersonalBestsSetBetween']>(),
     findBestValuesBefore: vi
       .fn<PersonalRecordRepository['findBestValuesBefore']>()
       .mockImplementation(async (_userId, candidates) =>

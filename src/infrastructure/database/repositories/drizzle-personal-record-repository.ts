@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type { PersonalRecordRepository } from '@/application/ports/personal-record-repository';
@@ -69,6 +69,44 @@ export class DrizzlePersonalRecordRepository implements PersonalRecordRepository
       return [];
     }
 
+    return mapCurrentPersonalBests(await this.selectRankedBestRows(userId, exerciseIds, null));
+  }
+
+  async findCurrentPersonalBestsSetBetween(
+    userId: UserId,
+    from: Date,
+    to: Date,
+  ): Promise<ReadonlyArray<PersonalBest>> {
+    // Rank first, filter the winner afterwards: the window reaches the shared
+    // projection as a predicate on the rank-1 row only, so the ranking itself
+    // always sees all eligible history and this can never answer "best value
+    // within the window" or "PR events in the window".
+    return mapCurrentPersonalBests(await this.selectRankedBestRows(userId, null, { from, to }));
+  }
+
+  /**
+   * The shared ranked projection behind both current-best reads: ONE statement
+   * that ranks every eligible set of the user's completed history per
+   * (PERFORMED exercise, metric) — maximum value first, then the ascending
+   * chronological ladder, so a tied maximum stays with its earliest owner.
+   *
+   * `exerciseIds` narrows candidacy (an eligibility scope, never a ranking
+   * input) and is `null` to rank every exercise. `establishedIn`, when given,
+   * is applied ONLY to the winning row beside `rank = 1`: the ranking always
+   * sees all eligible history, which is exactly what makes
+   * `findCurrentPersonalBestsSetBetween` mean "current best ESTABLISHED in the
+   * window" rather than "best value within the window".
+   *
+   * This method is the single definition of the M12 metric projection, value
+   * projection and rank ladder; both public reads share it and the Domain
+   * `foldPersonalRecords` oracle verifies its output in the integration suite.
+   * Callers perform no further filtering, re-ranking or re-interpretation.
+   */
+  private async selectRankedBestRows(
+    userId: UserId,
+    exerciseIds: ReadonlyArray<ExerciseId> | null,
+    establishedIn: { readonly from: Date; readonly to: Date } | null,
+  ): Promise<ReadonlyArray<RecordBestRow>> {
     // The metric projection: a duration set is always `max-duration` (its load
     // is irrelevant), a loaded rep set is `max-load` (0 kg included, since the
     // check is IS NOT NULL and never truthiness), and an unloaded rep set is
@@ -122,12 +160,12 @@ export class DrizzlePersonalRecordRepository implements PersonalRecordRepository
         and(
           eq(workoutSessions.userId, userId),
           isNotNull(workoutSessions.completedAt),
-          inArray(exerciseLogs.exerciseId, [...exerciseIds]),
+          exerciseIds === null ? undefined : inArray(exerciseLogs.exerciseId, [...exerciseIds]),
         ),
       )
       .as('ranked');
 
-    const rows: RecordBestRow[] = await this.db
+    return this.db
       .select({
         exerciseId: ranked.exerciseId,
         metric: ranked.metric,
@@ -139,10 +177,20 @@ export class DrizzlePersonalRecordRepository implements PersonalRecordRepository
         setNumber: ranked.setNumber,
       })
       .from(ranked)
-      .where(eq(ranked.rank, 1))
+      .where(
+        and(
+          eq(ranked.rank, 1),
+          // The window is a predicate on the WINNER only. `from` is inclusive
+          // and `to` exclusive, matching the Domain's `[from, to)` contract.
+          establishedIn === null
+            ? undefined
+            : and(
+                gte(ranked.completedAt, establishedIn.from),
+                lt(ranked.completedAt, establishedIn.to),
+              ),
+        ),
+      )
       .orderBy(sql`${ranked.exerciseId} collate "C" asc`, sql`${ranked.metric} collate "C" asc`);
-
-    return mapCurrentPersonalBests(rows);
   }
 
   async findBestValuesBefore(

@@ -1,4 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 
 import {
   completeWorkoutSession,
@@ -26,6 +28,9 @@ import {
   GetExerciseHistoryUseCase,
 } from '@/application/use-cases/get-exercise-history';
 import type { CompletedSessionDto } from '@/application/dto/completed-session';
+import type { TrainingHistoryRepository } from '@/application/ports/training-history-repository';
+import { DrizzleTrainingHistoryRepository } from '@/infrastructure/database/repositories/drizzle-training-history-repository';
+import * as schema from '@/infrastructure/database/schema';
 import { users } from '@/infrastructure/database/schema';
 
 import {
@@ -37,6 +42,7 @@ import {
   resetAndSeed,
   trainingHistoryRepository,
 } from './setup';
+import { getTestDatabaseUrl } from './test-env';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -2220,6 +2226,299 @@ describe('training history — user-added occurrences (M11)', () => {
       enrollmentId('enrollment-hist-a'),
     );
     expect(scheduledIds.map(String)).toEqual(['fit40-beginner-strength-w1-1']);
+  });
+});
+
+// ─── Bounded session activity (M13 Slice 2) ──────────────────────────────────
+
+/**
+ * The UTC window bound the activity read is asked about: a session completed
+ * exactly at `SINCE` is the inclusive edge, `SINCE - 1ms` is outside it.
+ */
+const SINCE = new Date('2026-03-02T00:00:00.000Z');
+
+interface CountingHistoryRepository {
+  readonly repository: TrainingHistoryRepository;
+  /** Statements the driver ran since creation, in order. */
+  readonly queries: ReadonlyArray<string>;
+  close: () => Promise<void>;
+}
+
+/**
+ * A second, isolated connection pool whose driver reports every statement it
+ * executes, so the activity read's statement count is observable. The
+ * repository under test is the production class.
+ */
+function createCountingHistoryRepository(): CountingHistoryRepository {
+  const queries: string[] = [];
+  const countingClient = postgres(getTestDatabaseUrl(), {
+    max: 1,
+    // Simple protocol: one driver callback per executed statement.
+    prepare: false,
+    debug: (_connection, query) => {
+      queries.push(query);
+    },
+  });
+  const repository = new DrizzleTrainingHistoryRepository(drizzle(countingClient, { schema }));
+
+  return {
+    repository,
+    queries,
+    close: async () => {
+      await countingClient.end();
+    },
+  };
+}
+
+function activity(since: Date = SINCE) {
+  return trainingHistoryRepository.listCompletedSessionActivity(userId(OWNER_A), since);
+}
+
+describe('training history — bounded activity window semantics', () => {
+  it('includes a session completed exactly at the inclusive since edge and excludes earlier ones', async () => {
+    await saveAll(
+      historySession({
+        id: 'activity-before-since',
+        startedAt: '2026-03-01T09:00:00Z',
+        completedAt: '2026-03-01T23:59:59.999Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'activity-at-since',
+        occurrence: 1,
+        startedAt: '2026-03-02T00:00:00.000Z',
+        completedAt: '2026-03-02T00:00:00.000Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+    );
+
+    expect((await activity()).map((entry) => String(entry.sessionId))).toEqual([
+      'activity-at-since',
+    ]);
+  });
+
+  it('excludes in-progress sessions and includes detached completed history', async () => {
+    await saveAll(
+      // Detached: no enrollment — leaving a program never removes history.
+      historySession({
+        id: 'activity-detached',
+        enrollmentId: null,
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 40 }] }],
+      }),
+      // Still attached to the seeded enrollment.
+      historySession({
+        id: 'activity-attached',
+        occurrence: 1,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 42 }] }],
+      }),
+      // In progress: started inside the window, never completed.
+      historySession({
+        id: 'activity-in-progress',
+        occurrence: 2,
+        startedAt: '2026-03-05T09:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 99 }] }],
+      }),
+    );
+
+    const entries = await activity();
+
+    expect(entries.map((entry) => String(entry.sessionId))).toEqual([
+      'activity-attached',
+      'activity-detached',
+    ]);
+    // Completion instants cross the boundary as real instants, not strings.
+    expect(entries[0]!.completedAt.toISOString()).toBe('2026-03-04T10:00:00.000Z');
+    expect(entries[1]!.completedAt.toISOString()).toBe('2026-03-03T10:00:00.000Z');
+  });
+
+  it('orders by the deterministic recency ladder: completedAt desc, startedAt desc, id desc', async () => {
+    await saveAll(
+      historySession({
+        id: 'activity-a',
+        startedAt: '2026-03-03T08:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'activity-b',
+        occurrence: 1,
+        startedAt: '2026-03-03T08:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'activity-c',
+        occurrence: 2,
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+    );
+
+    // Equal completion instants: the later start wins, then the id tiebreaker.
+    expect((await activity()).map((entry) => String(entry.sessionId))).toEqual([
+      'activity-c',
+      'activity-b',
+      'activity-a',
+    ]);
+  });
+});
+
+describe('training history — activity projection contents', () => {
+  it('counts each session’s logged sets and returns 0 for a session without set rows', async () => {
+    await saveAll(
+      historySession({
+        id: 'activity-with-sets',
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [
+          {
+            exerciseId: 'ex-001',
+            type: 'reps',
+            sets: [
+              { reps: 8, weightKg: 20 },
+              { reps: 8, weightKg: 22.5 },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // The domain's completion gate requires at least one logged set, so a
+    // completed session with no set rows cannot come from the write path — only
+    // from legacy or externally written data. The read must still return it,
+    // with a truthful 0, rather than dropping a completed session.
+    await db.insert(schema.workoutSessions).values({
+      id: 'activity-zero-sets',
+      userId: OWNER_A,
+      enrollmentId: null,
+      scheduledWorkoutId: OCCURRENCES[1].scheduledWorkoutId,
+      workoutId: OCCURRENCES[1].workoutId,
+      startedAt: new Date('2026-03-04T09:00:00Z'),
+      completedAt: new Date('2026-03-04T10:00:00Z'),
+    });
+
+    const entries = await activity();
+    const byId = new Map(entries.map((entry) => [String(entry.sessionId), entry]));
+
+    expect(entries).toHaveLength(2);
+    expect(byId.get('activity-with-sets')?.loggedSets).toBe(2);
+    expect(byId.get('activity-zero-sets')?.loggedSets).toBe(0);
+  });
+
+  it('counts several sessions independently and resolves workout and program names by join', async () => {
+    await saveAll(
+      historySession({
+        id: 'activity-named-1',
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'activity-named-2',
+        occurrence: 1,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [
+          { exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] },
+          { exerciseId: 'ex-002', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+          { exerciseId: 'ex-003', type: 'reps', sets: [{ reps: 10, weightKg: 20 }] },
+        ],
+      }),
+    );
+
+    const entries = await activity();
+    const byId = new Map(entries.map((entry) => [String(entry.sessionId), entry]));
+
+    expect(byId.get('activity-named-1')?.loggedSets).toBe(1);
+    expect(byId.get('activity-named-2')?.loggedSets).toBe(3);
+    // Occurrences 0 and 1 are different workout templates of one program.
+    expect(byId.get('activity-named-1')?.workoutName).not.toBe(
+      byId.get('activity-named-2')?.workoutName,
+    );
+    expect(byId.get('activity-named-1')?.programName).toBe(
+      byId.get('activity-named-2')?.programName,
+    );
+    expect(byId.get('activity-named-1')?.programName.length).toBeGreaterThan(0);
+  });
+
+  it('never leaks another user’s sessions', async () => {
+    await saveAll(
+      historySession({
+        id: 'activity-owned-by-a',
+        startedAt: '2026-03-03T09:00:00Z',
+        completedAt: '2026-03-03T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+      }),
+      historySession({
+        id: 'activity-owned-by-b',
+        userId: OWNER_B,
+        enrollmentId: null,
+        occurrence: 1,
+        startedAt: '2026-03-04T09:00:00Z',
+        completedAt: '2026-03-04T10:00:00Z',
+        logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 80 }] }],
+      }),
+    );
+
+    expect((await activity()).map((entry) => String(entry.sessionId))).toEqual([
+      'activity-owned-by-a',
+    ]);
+  });
+});
+
+describe('training history — activity batching', () => {
+  it('answers any window size with the same two statements', async () => {
+    const counting = createCountingHistoryRepository();
+    try {
+      await saveAll(
+        historySession({
+          id: 'activity-count-1',
+          startedAt: '2026-03-03T09:00:00Z',
+          completedAt: '2026-03-03T10:00:00Z',
+          logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+        }),
+      );
+
+      // Warm up: a driver's first statement is its own type discovery.
+      await counting.repository.listCompletedSessionActivity(userId(OWNER_A), SINCE);
+
+      const beforeOne = counting.queries.length;
+      await counting.repository.listCompletedSessionActivity(userId(OWNER_A), SINCE);
+      const oneSession = counting.queries.length - beforeOne;
+
+      await saveAll(
+        historySession({
+          id: 'activity-count-2',
+          occurrence: 1,
+          startedAt: '2026-03-04T09:00:00Z',
+          completedAt: '2026-03-04T10:00:00Z',
+          logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+        }),
+        historySession({
+          id: 'activity-count-3',
+          occurrence: 2,
+          startedAt: '2026-03-05T09:00:00Z',
+          completedAt: '2026-03-05T10:00:00Z',
+          logs: [{ exerciseId: 'ex-001', type: 'reps', sets: [{ reps: 8, weightKg: 20 }] }],
+        }),
+      );
+
+      const beforeMany = counting.queries.length;
+      await counting.repository.listCompletedSessionActivity(userId(OWNER_A), SINCE);
+      const threeSessions = counting.queries.length - beforeMany;
+
+      // One bounded session query plus one grouped set-count query — never one
+      // statement per session.
+      expect(oneSession).toBe(2);
+      expect(threeSessions).toBe(2);
+    } finally {
+      await counting.close();
+    }
   });
 });
 

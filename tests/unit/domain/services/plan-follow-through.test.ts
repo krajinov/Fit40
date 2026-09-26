@@ -357,19 +357,32 @@ describe('summarizeFollowThrough', () => {
     expect(totalsLine(reordered)).toBe(totalsLine(forward));
   });
 
-  it('counts one occurrence once when the same fact is supplied twice', () => {
-    const duplicated = [
+  it('throws when one occurrence is supplied more than once', () => {
+    // Duplicates cannot come from storage — the `planned_workouts` primary key
+    // allows one row per occurrence, and `workout_sessions` allows one session
+    // per occurrence — so a repeat is a caller bug (a JOIN that fanned out, or
+    // an assembly mistake). Merging the two facts would report a count matching
+    // neither row, so the violation fails loudly instead of being reconciled.
+    const contradictory = [
       occurrence('sw-a', '2026-09-22', { active: true }),
       occurrence('sw-a', '2026-09-22', { completedAt: '2026-09-22T09:00:00.000Z' }),
     ];
+    const duplicatedFact = [
+      occurrence('sw-a', '2026-09-22', { completedAt: '2026-09-22T09:00:00.000Z' }),
+      occurrence('sw-a', '2026-09-22', { completedAt: '2026-09-22T09:00:00.000Z' }),
+    ];
 
-    const forward = summarizeFollowThrough(duplicated, WINDOWS, NOW);
-    const reversed = summarizeFollowThrough([...duplicated].reverse(), WINDOWS, NOW);
-
-    expect(weekLine(firstWeek(forward))).toBe(
-      '2026-09-21T00:00:00.000Z|closed|planned:1|completed:1|early:0|late:0|started:0|pastDue:0',
+    expect(() => summarizeFollowThrough(contradictory, WINDOWS, NOW)).toThrow(
+      'Follow-through contract violated: occurrence "sw-a" was supplied more than once',
     );
-    expect(weekLine(firstWeek(reversed))).toBe(weekLine(firstWeek(forward)));
+    expect(() => summarizeFollowThrough([...contradictory].reverse(), WINDOWS, NOW)).toThrow(
+      /was supplied more than once/,
+    );
+    // Identical repetition is not tolerated either: one fact per occurrence is
+    // the contract, and no identity comparison is performed to soften it.
+    expect(() => summarizeFollowThrough(duplicatedFact, WINDOWS, NOW)).toThrow(
+      /was supplied more than once/,
+    );
   });
 
   it('does not mutate the supplied occurrences or windows', () => {

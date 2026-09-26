@@ -22,9 +22,7 @@ import {
   type PlannedOccurrenceFacts,
 } from '@/domain/services/plan-follow-through';
 import type { TrainingWeekWindow } from '@/domain/services/training-week';
-import type { ScheduledWorkoutId } from '@/domain/types/ids';
 import {
-  comparePlannedDates,
   isPlannedDateBefore,
   plannedDateFromInstant,
   type PlannedDate,
@@ -93,7 +91,12 @@ function emptyCounts(): MutableCounts {
  *   window with nothing planned is omitted rather than rendered as a fake
  *   zero-planned week. The result mirrors the given window order.
  * - One occurrence contributes to exactly one week and exactly one counter, so
- *   no outcome can be counted twice.
+ *   no outcome can be counted twice. The input must therefore hold one fact per
+ *   occurrence — which the schema guarantees (the `planned_workouts` primary key
+ *   and `workout_sessions_enrollment_occurrence_unique`) — and a repeated
+ *   `scheduledWorkoutId` is a contract violation that THROWS rather than being
+ *   merged: merging two contradictory facts would report a number matching
+ *   neither source, which is precisely what this module must never do.
  * - Occurrences dated outside every supplied window are ignored: they are
  *   simply not part of the requested span, which is not an error.
  * - `closed` is `now >= weekEnd`, and `today` is the UTC calendar day of `now`,
@@ -111,7 +114,7 @@ export function summarizeFollowThrough(
   const windowEnds = windows.map((window) => plannedDateFromInstant(window.weekEnd));
   const countsByWindow = windows.map(() => emptyCounts());
 
-  for (const occurrence of collapseOccurrences(occurrences)) {
+  for (const occurrence of assertUniqueOccurrences(occurrences)) {
     const index = windows.findIndex((_window, position) => {
       const weekStart = windowStarts[position];
       const weekEnd = windowEnds[position];
@@ -199,58 +202,30 @@ function applyOutcome(counts: MutableCounts, outcome: FollowThroughOutcome): voi
 }
 
 /**
- * Collapses the occurrences to one entry per `scheduledWorkoutId`.
+ * Returns the occurrences unchanged, after asserting one fact per occurrence.
  *
- * `(enrollmentId, scheduledWorkoutId)` is unique in the database, so the
- * bounded read feeding this module cannot produce a duplicate. The collapse is
- * defensive and deterministic: a caller that supplies the same occurrence twice
- * cannot inflate a week's counts. The strongest fact wins (a completion
- * outranks a live session, which outranks no session) and ties are broken by
- * the earliest planned date, then the earliest completion instant, so the
- * counts never depend on input order.
+ * `(enrollmentId, scheduledWorkoutId)` is unique in `planned_workouts` and in
+ * `workout_sessions`, so the bounded reads feeding this module return at most
+ * one planned row and at most one session per occurrence. A repeat here means a
+ * caller (usually a JOIN that fanned out, or an assembly bug) produced two
+ * facts for one occurrence, and it is NOT reconciled: two facts for one
+ * occurrence can contradict each other, and any "winner" rule would invent a
+ * policy and report a count matching neither row. The violation fails loudly
+ * (the `plannedDateWeekday` / `'Schedule contract violated: …'` convention)
+ * instead of being silently normalized.
  */
-function collapseOccurrences(
+function assertUniqueOccurrences(
   occurrences: ReadonlyArray<PlannedOccurrenceFacts>,
 ): ReadonlyArray<PlannedOccurrenceFacts> {
-  const byOccurrence = new Map<ScheduledWorkoutId, PlannedOccurrenceFacts>();
+  const seen = new Set<string>();
 
   for (const occurrence of occurrences) {
-    const existing = byOccurrence.get(occurrence.scheduledWorkoutId);
-    if (existing === undefined || outranks(occurrence, existing)) {
-      byOccurrence.set(occurrence.scheduledWorkoutId, occurrence);
+    const id = occurrence.scheduledWorkoutId;
+    if (seen.has(id)) {
+      throw new Error(`Follow-through contract violated: occurrence "${id}" was supplied more than once`);
     }
+    seen.add(id);
   }
 
-  return [...byOccurrence.values()];
-}
-
-/** Whether `candidate` is the stronger fact for one occurrence. */
-function outranks(candidate: PlannedOccurrenceFacts, existing: PlannedOccurrenceFacts): boolean {
-  const candidateStrength = factStrength(candidate);
-  const existingStrength = factStrength(existing);
-  if (candidateStrength !== existingStrength) {
-    return candidateStrength > existingStrength;
-  }
-
-  const byDate = comparePlannedDates(candidate.plannedDate, existing.plannedDate);
-  if (byDate !== 0) {
-    return byDate < 0;
-  }
-
-  return completionTime(candidate) < completionTime(existing);
-}
-
-/** Completion (2) outranks a live session (1), which outranks neither (0). */
-function factStrength(occurrence: PlannedOccurrenceFacts): number {
-  if (occurrence.completedAt !== null) {
-    return 2;
-  }
-  return occurrence.hasActiveSession ? 1 : 0;
-}
-
-/** Epoch milliseconds of the completion instant, or `Infinity` when absent. */
-function completionTime(occurrence: PlannedOccurrenceFacts): number {
-  return occurrence.completedAt === null
-    ? Number.POSITIVE_INFINITY
-    : occurrence.completedAt.getTime();
+  return occurrences;
 }

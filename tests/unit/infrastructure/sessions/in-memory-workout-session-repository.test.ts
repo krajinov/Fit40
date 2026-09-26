@@ -465,4 +465,112 @@ describe('InMemoryWorkoutSessionRepository', () => {
       expect(stored?.exerciseLogs[0]?.sets).toHaveLength(1);
     });
   });
+
+  describe('listCompletedOccurrenceActivity', () => {
+    it('returns the completed occurrence identity and instant for the enrollment', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+
+      const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
+
+      expect(activity).toHaveLength(1);
+      expect(activity[0]?.scheduledWorkoutId).toBe('sw-1');
+      expect(activity[0]?.completedAt.toISOString()).toBe('2025-01-01T11:00:00.000Z');
+    });
+
+    it('excludes in-progress sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(createTestSession({ id: 's-1', swId: 'sw-1' }));
+
+      expect(await repo.listCompletedOccurrenceActivity(enid('enr-1'))).toEqual([]);
+    });
+
+    it('excludes another enrollment and detached sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(
+        completed(createTestSession({ id: 's-other', swId: 'sw-other', enrollmentId: 'enr-2' })),
+      );
+      await repo.save(
+        completed(createTestSession({ id: 's-detached', swId: 'sw-detached', enrollmentId: null })),
+      );
+
+      expect(await repo.listCompletedOccurrenceActivity(enid('enr-1'))).toEqual([]);
+
+      const otherRun = await repo.listCompletedOccurrenceActivity(enid('enr-2'));
+      expect(otherRun.map((item) => item.scheduledWorkoutId)).toEqual(['sw-other']);
+      expect(otherRun[0]?.completedAt.toISOString()).toBe('2025-01-01T11:00:00.000Z');
+    });
+
+    it('returns each completed occurrence exactly once', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-b', swId: 'sw-b' })));
+      await repo.save(completed(createTestSession({ id: 's-a', swId: 'sw-a' })));
+      await repo.save(completed(createTestSession({ id: 's-c', swId: 'sw-c' })));
+
+      const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
+      const occurrences = activity.map((item) => item.scheduledWorkoutId);
+
+      // Identical instants leave the session id to decide the order.
+      expect(occurrences).toEqual(['sw-a', 'sw-b', 'sw-c']);
+      expect(new Set(occurrences).size).toBe(3);
+    });
+
+    it('orders by completedAt, then startedAt, then session id', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      // Saved newest-first so the assertion cannot pass on insertion order.
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-01T07:00:00Z' }),
+          '2025-01-01T11:00:00Z',
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-tie-c', swId: 'sw-tie-c', startedAt: '2025-01-01T08:30:00Z' }),
+          '2025-01-01T10:00:00Z',
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-tie-z', swId: 'sw-tie-z', startedAt: '2025-01-01T08:00:00Z' }),
+          '2025-01-01T10:00:00Z',
+        ),
+      );
+      await repo.save(
+        completed(
+          createTestSession({ id: 's-tie-a', swId: 'sw-tie-a', startedAt: '2025-01-01T08:00:00Z' }),
+          '2025-01-01T10:00:00Z',
+        ),
+      );
+
+      // sw-tie-a and sw-tie-z tie on both instants, so the session id decides
+      // ('s-tie-a' < 's-tie-z'); sw-tie-c follows on the later start; sw-late is
+      // last on the later completion.
+      expect(
+        (await repo.listCompletedOccurrenceActivity(enid('enr-1'))).map(
+          (item) => item.scheduledWorkoutId,
+        ),
+      ).toEqual(['sw-tie-a', 'sw-tie-z', 'sw-tie-c', 'sw-late']);
+    });
+
+    it('returns [] for an enrollment with no completed sessions', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+
+      expect(await repo.listCompletedOccurrenceActivity(enid('enr-1'))).toEqual([]);
+    });
+
+    it('returns mutation-safe completion instants', async () => {
+      const repo = new InMemoryWorkoutSessionRepository();
+      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+
+      const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
+      // Mutate the returned instant in place: stored state must not react (the
+      // repository's standing mutation-isolation rule).
+      activity[0]?.completedAt.setTime(0);
+
+      const reloaded = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
+      expect(reloaded[0]?.completedAt.toISOString()).toBe('2025-01-01T11:00:00.000Z');
+    });
+  });
+
 });

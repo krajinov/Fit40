@@ -60,8 +60,9 @@ vi.mock('@/features/schedule/services', () => ({
   getEnrollmentScheduleUseCase: { execute: scheduleExecute },
 }));
 
-// The enrollment leaves post to Server Actions that pull the DB composition
-// root; stubbed at the module boundary (the program-completed-page pattern).
+// The enrollment leaves AND the Slice 7 scheduling leaves post to Server
+// Actions that pull the DB composition root; stubbed at the module boundary
+// (the program-completed-page pattern).
 vi.mock('@/features/enrollment/actions/join-program', () => ({
   joinProgramAction: vi.fn(),
 }));
@@ -70,6 +71,12 @@ vi.mock('@/features/enrollment/actions/leave-program', () => ({
 }));
 vi.mock('@/features/enrollment/actions/restart-program', () => ({
   restartProgramAction: vi.fn(),
+}));
+vi.mock('@/features/schedule/actions/configure-training-days', () => ({
+  configureTrainingDaysAction: vi.fn(),
+}));
+vi.mock('@/features/schedule/actions/reschedule-planned-workout', () => ({
+  reschedulePlannedWorkoutAction: vi.fn(),
 }));
 
 import ProgramDetailPage from '@/app/(app)/programs/[programSlug]/page';
@@ -238,8 +245,12 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     // The approved setup helper renders (exact text + occurrence counts are
     // pinned in the section's own tests via decoded textContent).
     expect(markup).toContain('UTC calendar — the same calendar your weekly insights use.');
-    // Slice 6 is read-only: nothing that appears to save exists yet.
-    expect(markup).not.toContain('<form');
+    // Slice 7: the real configuration form renders here — seven weekday
+    // controls and the setup submit — and none is pre-checked (M15 stores
+    // dates, not weekdays, so no stored preference is claimed).
+    expect(markup).toContain('name="weekday"');
+    expect(markup).toContain('Set training days');
+    expect(markup).not.toMatch(/name="weekday"[^>]*checked/);
   });
 
   it('keeps the M14 completed state authoritative: no schedule read, no section, restart/leave intact', async () => {
@@ -291,6 +302,31 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it('exposes the scheduling mutation affordances for a configured run', async () => {
+    const markup = await renderPage();
+
+    expect(markup).toContain('Change training days');
+    expect(markup).toContain('Save training days');
+    // The fixture's single item is a planned workout dated today: it offers
+    // Move, and the date input carries the canonical planned date unchanged.
+    expect(markup).toContain('Move workout');
+    expect(markup).toContain('type="date"');
+    expect(markup).toContain('value="2026-09-23"');
+    expect(markup).toContain('New date for Lower Body B');
+  });
+
+  it('never renders scheduling mutation controls for a completed run', async () => {
+    enrollmentExecute.mockResolvedValue({ ok: true, data: ENROLLED_COMPLETE });
+
+    const markup = await renderPage();
+
+    expect(markup).not.toContain('Set training days');
+    expect(markup).not.toContain('Change training days');
+    expect(markup).not.toContain('Move workout');
+    expect(markup).not.toContain('name="weekday"');
+    expect(markup).not.toContain('type="date"');
   });
 
   it('keeps authored week/workout navigation and hides no EnrollmentId or user id', async () => {

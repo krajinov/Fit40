@@ -8,6 +8,7 @@ import {
   plannedStatusLabel,
   type WeekDaySlotView,
 } from '@/features/schedule/schedule-week-view';
+import { MovePlannedWorkoutForm } from '@/features/schedule/components/MovePlannedWorkoutForm';
 import { sessionPathFromRoute } from '@/features/sessions/session-path';
 
 interface WeeklyScheduleCalendarProps {
@@ -97,6 +98,20 @@ export function WeeklyScheduleCalendar({
                 >
                   Resume
                 </Link>
+              )}
+              {/* Move is offered for NEVER-STARTED workouts only: `planned`
+                  and `past-due` (the approved plan names manual rescheduling
+                  as a past-due remedy, and the use case accepts any target
+                  today-or-later). Completed and in-progress cells stay
+                  read-only — the use case rejects those moves authoritatively. */}
+              {(slot.item.status === 'planned' || slot.item.status === 'past-due') && (
+                <MovePlannedWorkoutForm
+                  programSlug={programSlug}
+                  weekNumber={slot.item.weekNumber}
+                  workoutOrder={slot.item.workoutOrder}
+                  plannedDate={slot.item.plannedDate}
+                  workoutName={slot.item.workoutName}
+                />
               )}
             </div>
           )}

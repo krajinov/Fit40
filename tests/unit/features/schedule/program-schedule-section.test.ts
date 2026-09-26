@@ -11,9 +11,19 @@
  * authored-coordinate navigation, and no EnrollmentId anywhere.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+
+// The Slice 7 client leaves post to Server Actions that pull the DB
+// composition root; stubbed at the module boundary (the enrolled-program-panel
+// pattern). The contracts under test are what the markup exposes.
+vi.mock('@/features/schedule/actions/configure-training-days', () => ({
+  configureTrainingDaysAction: vi.fn(),
+}));
+vi.mock('@/features/schedule/actions/reschedule-planned-workout', () => ({
+  reschedulePlannedWorkoutAction: vi.fn(),
+}));
 
 import type { PlannedWorkoutDto, ScheduleReadState } from '@/application/dto/schedule';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
@@ -152,7 +162,7 @@ describe('ProgramScheduleSection (M15 Slice 6)', () => {
     expect(container.textContent).not.toContain('Choose your training days');
   });
 
-  it('renders the setup state with the single approved UTC helper and no mutation control', async () => {
+  it('renders the setup state with the single approved UTC helper and the real training-days form', async () => {
     const container = await renderSection(unconfiguredState());
 
     expect(container.querySelector('section')?.id).toBe('training-schedule');
@@ -165,9 +175,13 @@ describe('ProgramScheduleSection (M15 Slice 6)', () => {
     // Exactly one setup disclosure; no weekly caption in this state.
     expect(occurrences(container.textContent ?? '', SETUP_UTC_LINE)).toBe(1);
     expect(occurrences(container.textContent ?? '', 'UTC')).toBe(1);
-    // Slice 6 is read-only: no fake form, no button, nothing that appears to save.
-    expect(container.querySelectorAll('form')).toHaveLength(0);
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+
+    // Slice 7: the setup state offers the real, minimal form — seven labelled
+    // weekday controls and one submit — and no change-mode copy yet.
+    expect(container.querySelectorAll('input[name="weekday"]')).toHaveLength(7);
+    expect(container.querySelector('button[type="submit"]')?.textContent).toBe('Set training days');
+    expect(container.querySelectorAll('form')).toHaveLength(1);
+    expect(container.textContent).not.toContain('Choose a new weekly pattern.');
   });
 
   it('renders seven accessible Monday–Sunday day positions for the current week', async () => {
@@ -291,8 +305,57 @@ describe('ProgramScheduleSection (M15 Slice 6)', () => {
       expect(href.startsWith(`/programs/${SLUG}/weeks/`)).toBe(true);
       expect(href).not.toContain('enr-');
     }
-    expect(container.querySelectorAll('form')).toHaveLength(0);
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    // Slice 7: only public fields exist in the scheduling forms — two Move
+    // forms (Monday past-due, Friday planned) plus the change-days form — and
+    // no enrollment/database/session/user identity anywhere.
+    expect(container.querySelectorAll('form')).toHaveLength(3);
+    const fieldNames = [...container.querySelectorAll<HTMLInputElement>('input')].map(
+      (input) => input.name,
+    );
+    expect(fieldNames.every((name) => name === 'weekday' || name === 'date')).toBe(true);
+    expect(fieldNames).not.toContain('enrollmentId');
+    expect(fieldNames).not.toContain('scheduledWorkoutId');
+    expect(fieldNames).not.toContain('sessionId');
+    expect(fieldNames).not.toContain('userId');
+  });
+
+  it('offers the change-training-days affordance with the replacement copy and an empty selection', async () => {
+    const container = await renderSection(configuredState());
+
+    const summary = [...container.querySelectorAll('summary')].find(
+      (node) => node.textContent === 'Change training days',
+    );
+    expect(summary).not.toBeUndefined();
+    expect(container.textContent).toContain(
+      'Choose a new weekly pattern. Saving replaces the dates of future workouts; completed workouts stay in history and in-progress workouts keep their current date.',
+    );
+    // The current planned dates imply weekdays, but M15 stores dates — the
+    // replacement selection never claims to be a persisted preference.
+    const weekdayInputs = [
+      ...container.querySelectorAll<HTMLInputElement>('input[name="weekday"]'),
+    ];
+    expect(weekdayInputs).toHaveLength(7);
+    expect(weekdayInputs.every((input) => input.checked === false)).toBe(true);
+  });
+
+  it('offers Move only for never-started workouts, never for completed or in-progress ones', async () => {
+    const container = await renderSection(configuredState());
+    const slots = [...container.querySelectorAll('ol li')];
+    const moveCount = (index: number): number =>
+      [...(slots[index]?.querySelectorAll('summary') ?? [])].filter(
+        (node) => node.textContent === 'Move',
+      ).length;
+
+    // Mon = past-due and Fri = planned are never-started, so both expose Move
+    // (the approved plan names manual rescheduling as a past-due remedy).
+    expect(moveCount(0)).toBe(1);
+    expect(moveCount(4)).toBe(1);
+    // Wed = in-progress and Sun = completed stay read-only.
+    expect(moveCount(2)).toBe(0);
+    expect(moveCount(6)).toBe(0);
+    // Empty days expose nothing at all.
+    expect(moveCount(1)).toBe(0);
+    expect(moveCount(3)).toBe(0);
   });
 
   it('renders component-based date labels, never raw canonical ISO dates', async () => {

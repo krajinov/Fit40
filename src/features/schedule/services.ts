@@ -10,6 +10,7 @@
  */
 
 import { ConfigureTrainingDaysUseCase } from '@/application/use-cases/configure-training-days';
+import { GetEnrollmentFollowThroughUseCase } from '@/application/use-cases/get-enrollment-follow-through';
 import { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-enrollment-schedule';
 import { ReschedulePlannedWorkoutUseCase } from '@/application/use-cases/reschedule-planned-workout';
 import {
@@ -25,6 +26,18 @@ import {
  * hydrates the program exactly once.
  */
 export const getEnrollmentScheduleUseCase = new GetEnrollmentScheduleUseCase(
+  programEnrollmentRepository,
+  plannedWorkoutRepository,
+  workoutSessionRepository,
+);
+
+/**
+ * The run's plan follow-through (M16): the last 8 UTC weeks of calendar intent
+ * reconciled with session facts. Read-only, and like the schedule read the
+ * caller passes the program aggregate it already loaded, so one request
+ * hydrates the program exactly once.
+ */
+export const getEnrollmentFollowThroughUseCase = new GetEnrollmentFollowThroughUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,

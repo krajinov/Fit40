@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
 import { PageContainer } from '@/components/shared/PageContainer';
+import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { TrainingProgram } from '@/domain/entities/training-program';
@@ -11,7 +12,10 @@ import { getProgramEnrollmentUseCase } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
 import { ProgramDetail } from '@/features/programs/components/ProgramDetail';
 import { programSlugSchema } from '@/features/programs/schemas/program-routes-schema';
-import { getEnrollmentScheduleUseCase } from '@/features/schedule/services';
+import {
+  getEnrollmentFollowThroughUseCase,
+  getEnrollmentScheduleUseCase,
+} from '@/features/schedule/services';
 import {
   buildNextWorkoutView,
   nextWorkoutPreviewState,
@@ -66,6 +70,46 @@ async function readEnrollmentSchedule(
   }
 }
 
+/**
+ * Reads the run's M16 plan follow-through at the server boundary with the SAME
+ * request clock and the SAME already-hydrated program aggregate the schedule
+ * read uses — no second catalog lookup. The section is additive, so this
+ * follows the page's existing section-read behavior: a failure (or a `null`
+ * DTO, meaning the enrollment vanished between this page's own reads) is
+ * logged and renders no section. It is never turned into `configured: false`,
+ * an empty report or fabricated weeks, and not-enrolled is simply no section —
+ * expected absence is data, an unexpected failure is still logged as a failure.
+ */
+async function readEnrollmentFollowThrough(
+  userId: string,
+  program: TrainingProgram,
+  now: Date,
+): Promise<EnrollmentFollowThroughDto | null> {
+  try {
+    const result = await getEnrollmentFollowThroughUseCase.execute({ userId, program, now });
+    if (!result.ok) {
+      console.error(
+        `Unexpected failure reading plan follow-through for program "${program.slug}"`,
+        result.error,
+      );
+      return null;
+    }
+    if (result.data === null) {
+      console.error(
+        `Plan follow-through for program "${program.slug}" became unreadable: the enrollment no longer exists`,
+      );
+      return null;
+    }
+    return result.data;
+  } catch (error: unknown) {
+    console.error(
+      `Unexpected failure reading plan follow-through for program "${program.slug}"`,
+      error,
+    );
+    return null;
+  }
+}
+
 export async function generateMetadata({
   params,
 }: ProgramDetailPageProps): Promise<Metadata> {
@@ -100,6 +144,7 @@ export default async function ProgramDetailPage({
   let enrollment: ProgramEnrollmentViewDto | null = null;
   let nextWorkoutPreview: NextWorkoutPreviewState | null = null;
   let schedule: ScheduleReadState | null = null;
+  let followThrough: EnrollmentFollowThroughDto | null = null;
   if (user !== null) {
     const enrollmentResult = await getProgramEnrollmentUseCase.execute({
       userId: user.id,
@@ -131,16 +176,27 @@ export default async function ProgramDetailPage({
             });
       nextWorkoutPreview = nextWorkoutPreviewState(enrollment.nextWorkout, workout);
 
-      // M15 (Slice 6): one server-owned request clock, captured here at the
-      // page boundary and passed to the schedule read — application/domain
-      // logic never creates its own clock, and no client input is accepted.
-      // A COMPLETED run (nextWorkout null) never reads planning: the M14
-      // completion surface stays the only lifecycle state shown, and the page
-      // passes schedule = null so no scheduling section renders (Slice 5
-      // precedent). Not-enrolled and anonymous visitors likewise never read.
+      // M15 (Slice 6) + M16 (Slice 5): one server-owned request clock,
+      // captured here at the page boundary and shared by both section reads —
+      // application/domain logic never creates its own clock, no client input
+      // is accepted, and both reads agree on `today`. A COMPLETED run
+      // (nextWorkout null) never reads either: the M14 completion surface stays
+      // the only lifecycle state shown, and the page passes null so no
+      // scheduling or follow-through section renders. Not-enrolled and
+      // anonymous visitors likewise never read.
+      //
+      // The two section reads are independent — neither decides whether the
+      // other should happen — so they are issued together rather than
+      // serialized. The enrollment read above stays sequential on purpose: it
+      // is the authority that gates them.
       if (enrollment.nextWorkout !== null) {
         const now = new Date();
-        schedule = await readEnrollmentSchedule(user.id, result.data.program, now);
+        const [scheduleState, followThroughResult] = await Promise.all([
+          readEnrollmentSchedule(user.id, result.data.program, now),
+          readEnrollmentFollowThrough(user.id, result.data.program, now),
+        ]);
+        schedule = scheduleState;
+        followThrough = followThroughResult;
       }
     }
   }
@@ -152,6 +208,7 @@ export default async function ProgramDetailPage({
         enrollment={enrollment}
         nextWorkoutPreview={nextWorkoutPreview}
         schedule={schedule}
+        followThrough={followThrough}
       />
     </PageContainer>
   );

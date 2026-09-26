@@ -1,3 +1,4 @@
+import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
 import type { ScheduleReadState } from '@/application/dto/schedule';
@@ -8,6 +9,7 @@ import { AnonymousVisitorCard } from '@/features/enrollment/components/Anonymous
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
 import type { ProgramWeekStatus } from '@/features/programs/components/ProgramWeekSection';
+import { PlanFollowThroughSection } from '@/features/schedule/components/PlanFollowThroughSection';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
 interface ProgramDetailProps {
@@ -31,6 +33,14 @@ interface ProgramDetailProps {
    * state shown. Composition only — status/focus arrive derived.
    */
   readonly schedule: ScheduleReadState | null;
+  /**
+   * The M16 plan follow-through read for this run (Slice 5): non-null only when
+   * the page resolved an enrolled, not-completed run and the read succeeded.
+   * `configured: false` is passed through — the section renders nothing for it,
+   * because configuring training days belongs to the M15 surface just above.
+   * Composition only — every count arrives derived.
+   */
+  readonly followThrough: EnrollmentFollowThroughDto | null;
 }
 
 /**
@@ -62,14 +72,16 @@ function weekStatus(
 
 /**
  * Program detail screen (locked design): header, the visitor-specific
- * enrollment area, and the weekly schedule. Composition only — all data
- * arrives as DTOs/props from the page's use cases.
+ * enrollment area, the M15 week calendar, the M16 plan follow-through, and the
+ * authored weekly schedule. Composition only — all data arrives as DTOs/props
+ * from the page's use cases.
  */
 export function ProgramDetail({
   program,
   enrollment,
   nextWorkoutPreview,
   schedule,
+  followThrough,
 }: ProgramDetailProps) {
   const completedIds =
     enrollment !== null && enrollment.status === 'enrolled'
@@ -144,6 +156,13 @@ export function ProgramDetail({
           degrades to null inside the section, and a completed run never passes
           a schedule at all, so the M14 surface above stays authoritative. */}
       {schedule !== null && <ProgramScheduleSection schedule={schedule} />}
+
+      {/* M16 (Slice 5): how this run's calendar has held up, directly below the
+          M15 week it describes and above the authored weeks. Additive and
+          read-only: a failed read arrives as null (logged at the page), an
+          unconfigured run renders nothing inside the section, and a completed
+          run is never passed one — the M14 surface above stays authoritative. */}
+      {followThrough !== null && <PlanFollowThroughSection followThrough={followThrough} />}
 
       <div className="flex flex-col gap-4 md:gap-6">
         <h2 className="font-display text-[22px] font-bold tracking-tight text-foreground md:text-2xl">

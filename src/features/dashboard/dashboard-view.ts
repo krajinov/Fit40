@@ -19,6 +19,7 @@
  */
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
+import type { DashboardScheduleState } from '@/application/dto/dashboard';
 import type { ProgramDetailDto } from '@/application/dto/program';
 import type { TrainingHistoryPageDto } from '@/application/dto/training-history';
 import type { TrainingWeeklyInsightsDto } from '@/application/dto/training-insights';
@@ -66,6 +67,14 @@ export interface DashboardProgramView {
    * reports no next workout at all.
    */
   readonly nextWorkoutPreview: NextWorkoutPreviewState;
+  /**
+   * The run's M15 training calendar (M15 Slice 5): pass-through of the
+   * application's schedule state — this module derives nothing from it.
+   * `unavailable` (failed read) and `configured: false` (never set up) stay
+   * distinct, and the completed-program state is keyed exclusively off
+   * `nextWorkoutPreview` as before.
+   */
+  readonly schedule: DashboardScheduleState;
 }
 
 /**
@@ -204,7 +213,7 @@ export async function buildDashboardView(
   now: Date,
 ): Promise<DashboardView> {
   const [result, recentTraining, weeklyInsights] = await Promise.all([
-    getCurrentProgramDashboardUseCase.execute(userId),
+    getCurrentProgramDashboardUseCase.execute(userId, now),
     readRecentTrainingPage(userId).then(toRecentTraining),
     readWeeklyInsights(userId, now).then(toWeeklyInsightsState),
   ]);
@@ -238,6 +247,7 @@ export async function buildDashboardView(
             program: current.program,
             enrollment: current.enrollment,
             nextWorkoutPreview,
+            schedule: current.schedule,
           },
     recentTraining,
     weeklyInsights,

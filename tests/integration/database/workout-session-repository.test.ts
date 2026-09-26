@@ -354,6 +354,158 @@ describe('DrizzleWorkoutSessionRepository', () => {
     expect(listed).toEqual([]);
   });
 
+  it('listInProgressScheduledWorkoutIds() returns only that enrollment\'s in-progress ids', async () => {
+    const inProgress = makeSession('session-in-progress');
+    const otherEnrollment = makeSession('session-other-enrollment', {
+      userId: 'user-test-b',
+      enrollmentId: 'enrollment-test-b',
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+      workoutId: 'wo-beginner-strength-b',
+    });
+    const completedOwn = completed(
+      makeSession('session-completed-own', {
+        scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+        workoutId: 'wo-beginner-strength-c',
+      }),
+    );
+    await workoutSessionRepository.save(inProgress);
+    await workoutSessionRepository.save(otherEnrollment);
+    await workoutSessionRepository.save(completedOwn);
+
+    const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    // Authored occurrence id of the live session only: neither the completed
+    // session for this run nor the other enrollment's session appears.
+    expect(listed).toEqual([inProgress.scheduledWorkoutId]);
+  });
+
+  it('listInProgressScheduledWorkoutIds() excludes detached sessions', async () => {
+    await workoutSessionRepository.save(
+      makeSession('session-detached-in-progress', { enrollmentId: null }),
+    );
+
+    const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    expect(listed).toEqual([]);
+  });
+
+  it('listInProgressScheduledWorkoutIds() orders ids by start time ascending', async () => {
+    // Saved out of order on purpose: the projection must ORDER BY started_at.
+    const late = makeSession('session-late-in-progress', {
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+      workoutId: 'wo-beginner-strength-b',
+      startedAt: '2025-01-02T10:00:00Z',
+    });
+    const early = makeSession('session-early-in-progress', {
+      startedAt: '2025-01-01T09:00:00Z',
+    });
+    await workoutSessionRepository.save(late);
+    await workoutSessionRepository.save(early);
+
+    const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    expect(listed).toEqual([early.scheduledWorkoutId, late.scheduledWorkoutId]);
+  });
+
+  it('listInProgressScheduledWorkoutIds() breaks startedAt ties by session id', async () => {
+    // Same instant on purpose: the ordering must fall back to the session id
+    // so the projection is deterministic even when start times tie.
+    const second = makeSession('session-tie-b', {
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+      workoutId: 'wo-beginner-strength-b',
+      startedAt: '2025-01-01T09:00:00Z',
+    });
+    const first = makeSession('session-tie-a', {
+      scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+      workoutId: 'wo-beginner-strength-c',
+      startedAt: '2025-01-01T09:00:00Z',
+    });
+    await workoutSessionRepository.save(second);
+    await workoutSessionRepository.save(first);
+
+    const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    expect(listed).toEqual([first.scheduledWorkoutId, second.scheduledWorkoutId]);
+  });
+
+  it('listInProgressScheduledWorkoutIds() returns [] when nothing is in progress', async () => {
+    await workoutSessionRepository.save(
+      completed(
+        makeSession('session-only-completed', {
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+        }),
+      ),
+    );
+
+    const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
+      enrollmentId('enrollment-test-a'),
+    );
+
+    expect(listed).toEqual([]);
+  });
+
+  it('listInProgressScheduledWorkoutIds() issues exactly one statement (no N+1)', async () => {
+    await workoutSessionRepository.save(
+      makeSession('session-batch-ip-1', { startedAt: '2025-01-01T08:00:00Z' }),
+    );
+    await workoutSessionRepository.save(
+      makeSession('session-batch-ip-2', {
+        scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+        workoutId: 'wo-beginner-strength-b',
+        startedAt: '2025-01-01T08:30:00Z',
+      }),
+    );
+    await workoutSessionRepository.save(
+      makeSession('session-batch-ip-3', {
+        scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+        workoutId: 'wo-beginner-strength-c',
+        startedAt: '2025-01-01T09:00:00Z',
+      }),
+    );
+
+    // A dedicated counting client: postgres.js' debug hook fires once per
+    // executed statement, so the read's statement count is observable.
+    let statements = 0;
+    const countingClient = postgres(getTestDatabaseUrl(), {
+      max: 1,
+      debug: () => {
+        statements += 1;
+      },
+    });
+    try {
+      const countingDb = drizzle(countingClient, { schema });
+      const countingRepo = new DrizzleWorkoutSessionRepository(countingDb);
+
+      // Warm the connection first: a fresh postgres.js client runs a one-time
+      // pg_catalog type-introspection statement on its very first query —
+      // connection initialization, not part of the read. Measuring the second
+      // invocation isolates the read's own statement count.
+      await countingRepo.listInProgressScheduledWorkoutIds(enrollmentId('enrollment-test-a'));
+      statements = 0;
+
+      const listed = await countingRepo.listInProgressScheduledWorkoutIds(
+        enrollmentId('enrollment-test-a'),
+      );
+
+      expect(listed).toHaveLength(3);
+      // Exactly one single-column SELECT for N sessions: no session aggregate
+      // hydration, no exercise-log/set-log queries, no planned_workouts read,
+      // and never one query per session.
+      expect(statements).toBe(1);
+    } finally {
+      await countingClient.end();
+    }
+  });
+
   it('leaving a program detaches sessions and they survive as user history', async () => {
     const session = completed(makeSession());
     await workoutSessionRepository.save(session);

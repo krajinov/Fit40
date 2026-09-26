@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 import {
@@ -114,6 +114,35 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
         ),
       )
       .orderBy(asc(workoutSessions.startedAt));
+
+    // Trusted DB values: the column is a FK into scheduled_workouts, so each
+    // id is valid by schema constraint (database records are trusted at the
+    // repository boundary).
+    return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
+  }
+
+  async listInProgressScheduledWorkoutIds(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>> {
+    // Lightweight projection for scheduling reads: a single one-column query —
+    // no session aggregates, exercise logs, or set logs are hydrated, and
+    // `planned_workouts` is never consulted. `enrollment_id = ?` never matches
+    // a detached (NULL) row — SQL NULL equality — so detached,
+    // other-enrollment, and (via enrollment identity) other users' sessions
+    // are excluded structurally; `completed_at IS NULL` narrows to in-progress
+    // sessions only. Ordering mirrors the completed projection (started_at
+    // asc) with the session-id tie-break of listCompletedByEnrollment, so ties
+    // still read deterministically.
+    const rows = await this.db
+      .select({ scheduledWorkoutId: workoutSessions.scheduledWorkoutId })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          isNull(workoutSessions.completedAt),
+        ),
+      )
+      .orderBy(asc(workoutSessions.startedAt), asc(workoutSessions.id));
 
     // Trusted DB values: the column is a FK into scheduled_workouts, so each
     // id is valid by schema constraint (database records are trusted at the

@@ -181,9 +181,10 @@ the sign-in links; the menu performs no authorization itself.
   workout's week), week lifecycle badges (completed / in progress /
   upcoming), per-week completion counts, Start vs. Resume CTA labels
   (session status), date eyebrow, age from birth year.
-- **C (no source — omitted, not fabricated):** calendar day dots
-  (Mon–Sun) — programs schedule per program-week, not per weekday, and no
-  completion timestamps are exposed to presentation; session history rows
+- **C (no source — omitted, not fabricated):** per-weekday completion dots on
+  the authored week cards (sessions carry no per-day completion timestamps, and
+  M15's planned-date calendar is a separate, explicitly rendered surface — see
+  the M15 section below); session history rows
   (date · sets · volume) and "View history" — no session-history use case
   exists; "Mon · Wed · Fri" cadence; mobile "unlocks after Week N" — the
   domain enforces no week locking (`start-workout-session` allows any
@@ -647,3 +648,59 @@ M13 integration suites in
   `tests/unit/features/dashboard/program-completed-card.test.ts`, and
   `tests/unit/app/program-completed-page.test.ts`.
 - Canonical reference: [Program Completion & Restart](program-completion.md).
+
+## Workout scheduling & training calendar (M15)
+
+- **Dashboard schedule card** (under "Up next", rendered only while the run is
+  not complete): unconfigured runs get the setup state — "Training schedule",
+  "Choose your training days to put this program on your calendar.", "No
+  training days set yet.", the setup UTC helper line, and "Set training days"
+  linking to `/programs/[slug]` (where the form lives). Configured runs get
+  **TODAY** (accent badge + "Week N · Workout N" eyebrow + workout name;
+  "Start workout" / "Resume workout" via the existing session route, or a
+  `done` badge "Completed today" with no Start), **NEXT WORKOUT** (neutral
+  badge; rendered only when nothing is actionable today; "Planned for Sep 30"
+  from the component-based date formatter; secondary "View details" only, so it
+  never competes with an actionable Today), and a neutral past-due line ("N
+  planned workout(s) behind schedule"). A failed read renders nothing — it
+  never masquerades as "not configured". Copy bans hold: never "failed",
+  "missed" or "skipped"; M13 insights, recent training and the M14 completed
+  card are untouched, and completed runs never show this card.
+- **Program detail schedule section** (anchored `id="training-schedule"`,
+  between the enrollment panel and the unchanged authored weeks):
+  unconfigured = heading + copy + setup UTC helper + the **training-days
+  form** (seven labelled weekday chips — native checkboxes, ≥48px, keyboard
+  operable, nothing pre-checked in either mode — and "Set training days").
+  Configured = past-due summary (count + "Earliest: …"), the **seven-slot
+  Monday–Sunday week** as an `<ol>` (vertical list on mobile, 7-column grid
+  from `md`, never horizontally scrolling): each slot shows the day label, the
+  date label ("Sep 23" — never the raw ISO string), today marked by the word
+  "Today" **and** `aria-current="date"`, empty days as neutral "No workout
+  planned", statuses as text badges (Planned / In progress / Completed / Past
+  due), an in-progress "Resume" link to the session route, and a collapsed
+  **"Move"** disclosure (native `type="date"` input defaulting to the canonical
+  date, label "New date for {workout}", submit "Move workout") on
+  never-started cells only — `planned` and `past-due` expose Move, `completed`
+  and `in-progress` never do. A collapsed **"Change training days"**
+  disclosure hosts the same fresh-selection form with the replacement copy
+  ("Choose a new weekly pattern. Saving replaces the dates of future
+  workouts; completed workouts stay in history and in-progress workouts keep
+  their current date.").
+- **UTC disclosure (exactly two lines, both on program detail):** the setup
+  helper "Weeks run Monday–Sunday on the app's UTC calendar — the same
+  calendar your weekly insights use." and the configured caption "Weeks run
+  Monday–Sunday (UTC)." No other schedule label, date, error or form mentions
+  UTC; the dashboard carries none.
+- **Accessibility & trust:** errors use `role="alert"`; pending submits are
+  disabled ("Saving…" / "Moving…"); interactive targets stay ≥44px; forms
+  carry only `weekday` values or one date field plus server-injected public
+  coordinates — no `EnrollmentId`, `ScheduledWorkoutId`, `SessionId` or `userId`
+  appears in the DOM, forms or URLs; today is distinguished by text and
+  semantics, not colour alone.
+- **Completed runs:** the page renders no scheduling section at all, and the
+  M14 completion/restart/leave surface stays the only lifecycle state.
+- Regression coverage:
+  `tests/unit/features/schedule/{schedule-week-view,program-schedule-section,training-days-form,move-planned-workout-form,configure-training-days-action,reschedule-planned-workout-action,schedule-actions-schema}.test.ts`,
+  `tests/unit/features/dashboard/{training-schedule-card,dashboard-view}.test.ts`,
+  and `tests/unit/app/{dashboard-page,program-detail-page}.test.ts`.
+- Canonical reference: [Workout Scheduling & Training Calendar](scheduling.md).

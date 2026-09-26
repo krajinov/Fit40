@@ -28,6 +28,7 @@ Entities have **identity** and **lifecycle**. Two entities with the same data bu
 | `WorkoutSession` | A user's instance of performing a workout | `SessionId` |
 | `ExerciseLog` | Log of performing one exercise in a session | `ExerciseLogId` |
 | `SetLog` | Log of a single set (weight, reps, RPE) | `SetLogId` |
+| `PlannedWorkout` | A planned calendar date for one occurrence of a run (M15) | Composite: `(EnrollmentId, ScheduledWorkoutId)` — no surrogate id |
 
 ### Entity Rules
 
@@ -68,6 +69,8 @@ Value Objects are defined by their **values**, not identity. Two VOs with the sa
 | `DateRange` | Start and end date | start ≤ end |
 | `Percentage` | Percentage value | 0–100 |
 | `Duration` | Time duration | Non-negative |
+| `PlannedDate` | Canonical calendar date (M15 `YYYY-MM-DD`) | Real calendar date in range; no time, no zone; UTC arithmetic only |
+| `TrainingDays` | Selected weekly training days (M15) | Non-empty ISO weekdays 1–7, canonical ascending order |
 
 ### Value Object Rules
 

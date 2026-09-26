@@ -320,3 +320,25 @@ the named `program_enrollments_user_program_unique` violation into
 mapping, and every surfacing (completed panel, conditional Session Completed
 callout, dashboard card) and never infers completion or counts sessions.
 Canonical reference: [Program Completion & Restart](program-completion.md).
+
+## Workout Scheduling & Training Calendar (M15)
+
+Calendar intent is enrollment-scoped and derived, never authoritative for
+history. Domain owns the `PlannedDate` / `TrainingDays` value objects, the
+`PlannedWorkout` entity (composite identity `(enrollmentId,
+scheduledWorkoutId)`), deterministic generation (`generatePlannedSchedule`:
+completed excluded, in-progress rows frozen, occupied dates skipped) and the
+locked status/focus precedence. Application owns
+`GetEnrollmentScheduleUseCase`, `ConfigureTrainingDaysUseCase` and
+`ReschedulePlannedWorkoutUseCase` — all three take the trusted user plus a
+**caller-supplied `now`** (no application code calls `Date.now()`), and the
+mutations map stale writes from exactly one read-only re-check with no retry.
+Infrastructure persists `planned_workouts` (migration 0013: DATE column, PK
+per occurrence, per-date unique, enrollment CASCADE / occurrence RESTRICT) and
+serializes every planning write behind a parent-first `FOR NO KEY UPDATE` lock
+on the enrollment row, translating only the named date-unique violation into
+`PlannedDateConflictError`. Presentation consumes the schedule DTO as-is —
+the dashboard focus card, the program-detail weekly calendar and the two
+Server Actions (weekday form + Move form) never recompute status, eligibility
+or dates, and expose only authored public coordinates. Canonical reference:
+[Workout Scheduling & Training Calendar](scheduling.md).

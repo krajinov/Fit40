@@ -116,6 +116,29 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return [...ids];
   }
 
+  async listInProgressScheduledWorkoutIds(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>> {
+    // Mirrors the SQL projection: exact enrollment match (a detached null
+    // never equals a non-null enrollment id, so detached and other
+    // enrollments are excluded structurally), in-progress only
+    // (completedAt === null), ordered by (startedAt, session id) ascending —
+    // the completed projection's started_at ladder plus the same deterministic
+    // id tie-break. save() already enforces one session per occurrence, so ids
+    // are unique without deduplication. Returned values are primitive ids, so
+    // the result can never reach back into stored state.
+    return [...this.sessionsById.values()]
+      .filter(
+        (session) => session.enrollmentId === enrollmentId && session.completedAt === null,
+      )
+      .sort(
+        (a, b) =>
+          a.startedAt.getTime() - b.startedAt.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      )
+      .map((session) => session.scheduledWorkoutId);
+  }
+
   async listCompletedByEnrollment(
     enrollmentId: EnrollmentId,
   ): Promise<ReadonlyArray<CompletedWorkoutSession>> {

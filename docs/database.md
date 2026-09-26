@@ -297,6 +297,7 @@ npx drizzle-kit migrate
 | `set_logs` | `exercise_log_id` | Load sets for a log |
 | `program_enrollments` | `user_id` | Find enrollments by user |
 | `program_enrollments` | `program_id` | Find enrollments by program |
+| `planned_workouts` | `scheduled_workout_id` | FK restrict checks against `scheduled_workouts` (the composite PK leads with `enrollment_id`) |
 
 ---
 
@@ -539,4 +540,42 @@ FK's `ON DELETE SET NULL`; **M14 added no schema change, no migration, and
 no completion or enrollment-history table.** `listCompletedByEnrollment`
 hydrates with 1 statement when empty and exactly 3 batched statements for
 N ≥ 1 (no N+1). See [Program Completion & Restart](program-completion.md).
+
+## Workout Scheduling (M15)
+
+Migration **0013** adds the single scheduling table `planned_workouts`:
+
+- `enrollment_id` → `program_enrollments.id` **ON DELETE CASCADE** (leaving or
+  atomically restarting a run deletes its planning with it — M14's one-write
+  restart contract is untouched), `scheduled_workout_id` →
+  `scheduled_workouts.id` **ON DELETE RESTRICT** (authored structure is never
+  deletable from scheduling), and `planned_date date NOT NULL`.
+- **Composite PK** `(enrollment_id, scheduled_workout_id)` — at most one
+  planned workout per authored occurrence per run — and **UNIQUE**
+  `(enrollment_id, planned_date)` — at most one per calendar date per run. The
+  date-unique constraint's exact name
+  (`planned_workouts_enrollment_date_unique`) is the only constraint
+  `DrizzlePlannedWorkoutRepository` translates, into `PlannedDateConflictError`
+  (the one business conflict); every other database error stays unexpected.
+- The DATE column is read/written in Drizzle `mode: 'string'` so the canonical
+  `YYYY-MM-DD` value never round-trips through a JavaScript `Date`.
+- **No backfill and no weekday-preference column:** existing enrollments start
+  unconfigured (zero rows) and the generated dates are the only persisted
+  truth.
+- **Write serialization:** every planning write (whole-set replacement and
+  single-occurrence reschedule) opens with
+  `SELECT id FROM program_enrollments WHERE id = $1 FOR NO KEY UPDATE` before
+  touching `planned_workouts` — parent-first, so planning and M14
+  restart/leave contend on the same row in the same order (no lock cycles),
+  while the `NO KEY UPDATE` strength stays compatible with the `FOR KEY SHARE`
+  a session INSERT takes for its FK check. A zero-row lock read means a
+  lifecycle write won: nothing is written and the caller performs exactly one
+  read-only re-check — never a retry. Statement bounds are pinned in
+  `planned-workout-repository.test.ts` (1-statement read; constant
+  3-statement replacement regardless of set size).
+- `WorkoutSessionRepository` gained the enrollment-scoped read projection
+  `listInProgressScheduledWorkoutIds` (`enrollment_id = ? AND completed_at IS
+  NULL`, one statement, no hydration) — a read-only addition, no schema
+  change.
+- See [Workout Scheduling & Training Calendar](scheduling.md).
 

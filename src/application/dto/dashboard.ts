@@ -8,7 +8,19 @@
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
+
+/**
+ * M15 schedule state of the current program (Slice 5).
+ *
+ * Alias of the shared {@link ScheduleReadState} (Slice 6): `loaded` carries the
+ * application schedule read — a DTO with `configured: false` means the run was
+ * never set up — while `unavailable` is a FAILED read that must never be
+ * rendered as "unconfigured" (see the type's own documentation).
+ */
+export type DashboardScheduleState = ScheduleReadState;
+
 
 /** Whether the next workout's session has already been started by the user. */
 export type NextWorkoutSessionState = 'not-started' | 'in-progress';
@@ -47,4 +59,11 @@ export interface CurrentProgramDashboardDto {
   readonly program: ProgramDetailDto;
   readonly enrollment: Extract<ProgramEnrollmentViewDto, { status: 'enrolled' }>;
   readonly nextWorkout: NextWorkoutDto | null;
+  /**
+   * The run's M15 training calendar (Slice 5). Read with the SAME hydrated
+   * program aggregate as the rest of this view, so one request hydrates the
+   * catalog exactly once. `unavailable` is a failed read — see
+   * {@link DashboardScheduleState}.
+   */
+  readonly schedule: DashboardScheduleState;
 }

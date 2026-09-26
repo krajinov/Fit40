@@ -152,6 +152,33 @@ export interface WorkoutSessionRepository {
   ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
 
   /**
+   * Returns the IDs of the scheduled workouts the enrollment has IN-PROGRESS
+   * sessions for (started but not completed), ordered by session start time
+   * ascending with the session ID as a deterministic tie-break.
+   *
+   * This is the M15 scheduling read: which occurrences are currently live, so
+   * schedule generation can freeze their planned dates and schedule status can
+   * be derived from session truth rather than from planned_workouts. It is a
+   * lightweight projection: no full session aggregates, exercise logs, or set
+   * logs are hydrated, and `planned_workouts` is never consulted —
+   * WorkoutSession remains the authority for actual session lifecycle.
+   *
+   * Contract:
+   * - Enrollment-scoped: sessions of other enrollments are excluded by
+   *   enrollment identity, and detached sessions (enrollment_id nulled by a
+   *   leave) can never match a non-null enrollment id.
+   * - In-progress only: a completed session never appears
+   *   (`completedAt IS NULL`).
+   * - IDs are unique — the (enrollment, scheduled workout) constraint admits
+   *   at most one session per occurrence, so no deduplication is needed.
+   * - Pure read: it never creates, resumes, or mutates sessions, versions,
+   *   completion state, or planning rows.
+   */
+  listInProgressScheduledWorkoutIds(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
+
+  /**
    * Returns the enrollment's COMPLETED sessions as fully hydrated
    * aggregates, ordered deterministically ascending by
    * `(completedAt, startedAt, session id)` — a total order even when

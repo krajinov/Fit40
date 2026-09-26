@@ -1,5 +1,6 @@
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
@@ -7,6 +8,7 @@ import { AnonymousVisitorCard } from '@/features/enrollment/components/Anonymous
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
 import type { ProgramWeekStatus } from '@/features/programs/components/ProgramWeekSection';
+import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
 interface ProgramDetailProps {
   readonly program: ProgramDetailDto;
@@ -21,6 +23,14 @@ interface ProgramDetailProps {
    * controls or up-next area then.
    */
   readonly nextWorkoutPreview: NextWorkoutPreviewState | null;
+  /**
+   * The M15 schedule read for this run (Slice 6): non-null only when the page
+   * resolved an enrolled, not-completed run. `unavailable` (failed read) and
+   * `configured: false` stay distinct inside the state, and a completed run
+   * arrives as null so the M14 completion surface remains the only lifecycle
+   * state shown. Composition only — status/focus arrive derived.
+   */
+  readonly schedule: ScheduleReadState | null;
 }
 
 /**
@@ -59,6 +69,7 @@ export function ProgramDetail({
   program,
   enrollment,
   nextWorkoutPreview,
+  schedule,
 }: ProgramDetailProps) {
   const completedIds =
     enrollment !== null && enrollment.status === 'enrolled'
@@ -127,6 +138,12 @@ export function ProgramDetail({
           }
         />
       )}
+
+      {/* M15 (Slice 6): the calendar view of this run, between the enrollment
+          area and the authored weeks. Read-only and additive — a failed read
+          degrades to null inside the section, and a completed run never passes
+          a schedule at all, so the M14 surface above stays authoritative. */}
+      {schedule !== null && <ProgramScheduleSection schedule={schedule} />}
 
       <div className="flex flex-col gap-4 md:gap-6">
         <h2 className="font-display text-[22px] font-bold tracking-tight text-foreground md:text-2xl">

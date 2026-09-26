@@ -163,6 +163,52 @@ describe('InMemoryWorkoutSessionRepository', () => {
     expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
   });
 
+  it('listInProgressScheduledWorkoutIds returns only that enrollment\'s in-progress ids', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(createTestSession({ id: 's-ip1', swId: 'sw-ip1', enrollmentId: 'enr-1' }));
+    await repo.save(completed(createTestSession({ id: 's-done', swId: 'sw-done', enrollmentId: 'enr-1' })));
+    await repo.save(createTestSession({ id: 's-ip2', swId: 'sw-ip2', enrollmentId: 'enr-2' }));
+
+    // In-progress only: the completed session of enr-1 and the other
+    // enrollment's live session are both excluded.
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-ip1']);
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-2'))).toEqual(['sw-ip2']);
+  });
+
+  it('listInProgressScheduledWorkoutIds excludes detached sessions', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    await repo.save(createTestSession({ id: 's-det', swId: 'sw-det', enrollmentId: null }));
+
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
+  });
+
+  it('listInProgressScheduledWorkoutIds orders ids by start time ascending', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Saved out of order on purpose: the projection must sort by startedAt.
+    await repo.save(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' }));
+    await repo.save(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' }));
+
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
+  });
+
+  it('listInProgressScheduledWorkoutIds breaks startedAt ties by session id', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    // Same instant on purpose: the port's total order falls back to session id.
+    await repo.save(createTestSession({ id: 's-b', swId: 'sw-b', startedAt: '2025-01-01T09:00:00Z' }));
+    await repo.save(createTestSession({ id: 's-a', swId: 'sw-a', startedAt: '2025-01-01T09:00:00Z' }));
+
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-a', 'sw-b']);
+  });
+
+  it('listInProgressScheduledWorkoutIds returns [] when nothing is in progress', async () => {
+    const repo = new InMemoryWorkoutSessionRepository();
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
+
+    // Empty even when the enrollment holds only completed history.
+    await repo.save(completed(createTestSession({ id: 's-only-done', swId: 'sw-only-done' })));
+    expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
+  });
+
   it('rejects saving over a row whose enrollment changed since the snapshot', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Persisted state AFTER a concurrent leave: the row is detached (null).

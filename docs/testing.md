@@ -517,3 +517,46 @@ npm run test:coverage
   integration tests.
 - Canonical reference: [Workout Scheduling & Training Calendar](scheduling.md).
 
+## Plan Follow-Through (M16)
+
+- Domain: `tests/unit/domain/services/plan-follow-through.test.ts` (seven
+  outcomes, locked precedence, UTC midnight boundary, week bucketing against
+  `[weekStart, weekEnd)`, empty-window omission, totals = sum of rows,
+  order-independence, no input mutation, `closed` at the exclusive end,
+  duplicate-occurrence contract violation) and
+  `schedule-follow-through-parity.test.ts` — **the M15 drift guard**: the real
+  `resolvePlannedWorkoutStatus` is called on a shared fixture and M16's three
+  completed variants must normalize back to `completed`.
+- Application: `get-enrollment-follow-through.test.ts` (`INVALID_INPUT`,
+  `ok(null)` with no downstream reads, `configured: false` with no session read
+  and no fabricated zeros, fact assembly with completion precedence, orphan
+  activity ignored, the 8-week horizon, exact DTO key set, concurrent activity
+  reads, no repository write, failures propagating rather than degrading).
+- Presentation: `follow-through-view.test.ts` (labels from the DTO,
+  deliberately self-inconsistent fixtures displayed verbatim, empty-horizon
+  statement, `isCurrent` never recomputing `closed`, vocabulary and `%` scan)
+  and `plan-follow-through-section.test.ts` (unconfigured renders nothing,
+  framing, rows, totals, `aria-current="date"`, the single disclosure, no
+  interactive elements, no banned copy).
+- Wiring: `tests/unit/app/program-detail-page.test.ts` (placement below the M15
+  calendar, one hydrated aggregate, one shared server clock, gates preserved,
+  logged degradation to no section, and a throwing module mock that fails if
+  presentation imports repositories).
+- Architecture guards: `tests/unit/architecture/follow-through.test.ts` —
+  Domain/Application import boundaries, presentation free of repositories/ports/
+  use cases, page reads only through the feature composition root, no
+  `"use client"`, no M16 table or migration, no Drizzle import from M16 sources,
+  and the M16 vocabulary/percentage/clock bans in presentation code.
+- Infrastructure (real PostgreSQL):
+  `follow-through-round-trip.test.ts` (the full vertical: real planned rows and
+  sessions → real use case → Domain summary → DTO, all seven outcomes, empty
+  windows, `closed` from a fixed clock, totals = sum of rows, the unplanned
+  completed occurrence stays history, another run and detached history excluded,
+  exactly four `SELECT`s and no write) and the Slice 2 addition to
+  `workout-session-repository.test.ts` (one row per occurrence, the completed
+  ladder, detached/other-run exclusion, one fan-out-free statement, no
+  `planned_workouts` access).
+- Totals: 179 unit test files / 2344 unit tests; 24 integration files / 324
+  integration tests.
+- Canonical reference: [Plan Follow-Through](follow-through.md).
+

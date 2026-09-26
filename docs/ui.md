@@ -704,3 +704,46 @@ M13 integration suites in
   `tests/unit/features/dashboard/{training-schedule-card,dashboard-view}.test.ts`,
   and `tests/unit/app/{dashboard-page,program-detail-page}.test.ts`.
 - Canonical reference: [Workout Scheduling & Training Calendar](scheduling.md).
+
+## Screen notes: Plan follow-through (M16)
+
+- **Placement:** program detail, immediately **below the M15 schedule section**
+  and above the authored "Weekly schedule" list (`PlanFollowThroughSection`, a
+  Server Component). No route, nav item or dashboard change; placement on the
+  page is the page's decision, and M16 adds no client code, no browser clock and
+  no fetch.
+- **Framing (locked):** title **“This plan so far”** with the hint **“last 8
+  weeks”**; one `<ul aria-label="Plan follow-through by week">` of rows: week
+  range label (component-based from the window's own bounds — `Sep 21–27`
+  inside a month, `Sep 28–Oct 4` across one, never a raw instant), `"N of M
+  done"` straight from the DTO, optional `"n started"` and `"n past due"` (only
+  when non-zero), and **“This week”** with `aria-current="date"` on the open
+  week containing `today`. The current week is distinguished by words and
+  semantics, never colour, and no row or total is ever framed as unfinished or
+  failed.
+- **Totals line:** factual fragments from the DTO totals —
+  `7 planned · 5 done · 1 completed early · 1 completed late · 1 started · 3
+  past due` — with the two core counts always shown (a real zero stays a zero).
+  The configured report whose weeks are all outside the horizon renders the
+  honest **“No planned dates in the last 8 weeks.”** instead of six zero counts.
+- **Disclosure (exactly one, M16's only new caption):** “This describes the
+  dates currently on your calendar. Changing your training days replaces them.”
+  No UTC wording appears in this section — M15's two UTC lines remain the only
+  UTC text in this UI (see `docs/scheduling.md`), and there is no
+  consistency/history disclosure here.
+- **States:** `configured: false`, `ok(null)`, a completed run, and a failed
+  read all render **nothing** (no empty card, no zero weeks, no setup CTA);
+  configuring training days stays exclusively M15's surface. A failed read is
+  logged at the page and degrades this section only — it is never rendered as
+  `configured: false` and never fabricates weeks.
+- **Copy bans:** never `missed`, `failed`, `skipped`, `streak`, `adherence`,
+  `score`, `goal`, `on track`/`off track`, or a percentage; `past due`,
+  `completed early` and `completed late` are the approved factual terms. The
+  page provides no interactive control here (no button, link or disclosure), so
+  no target-size or focus handling applies.
+- Regression coverage:
+  `tests/unit/features/schedule/{follow-through-view,plan-follow-through-section}.test.ts`,
+  `tests/unit/app/program-detail-page.test.ts`,
+  `tests/unit/architecture/follow-through.test.ts`, and the real-PostgreSQL
+  `tests/integration/database/follow-through-round-trip.test.ts`.
+- Canonical reference: [Plan Follow-Through](follow-through.md).

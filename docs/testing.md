@@ -480,3 +480,40 @@ npm run test:coverage
   under `tests/unit/app/` and `tests/unit/features/`.
 - Canonical reference: [Program Completion & Restart](program-completion.md).
 
+## Workout Scheduling & Training Calendar (M15)
+
+- Domain: `tests/unit/domain/value-objects/{planned-date,training-days}.test.ts`,
+  `entities/planned-workout.test.ts`,
+  `services/{planned-schedule,schedule-focus}.test.ts` — generation partition
+  and locked edge cases A–G (frozen past dates, reserved weekdays, manual-move
+  overwrite, legacy bootstrap), ordering/determinism, cross-enrollment guard,
+  and the completed > in-progress > past-due > planned precedence with focus
+  (today / next / pastDue) selection.
+- Application: `get-enrollment-schedule.test.ts` (ownership, `ok(null)` vs
+  `configured: false`, DTO pass-through, corrupt-row fail-loud, no writes),
+  `configure-training-days.test.ts` and `reschedule-planned-workout.test.ts`
+  (one hydration, trusted inputs, stale `false` → one read-only re-check →
+  `NOT_ENROLLED`/`SCHEDULE_CHANGED`, no retry, session port never written),
+  plus `get-current-program-dashboard.test.ts` for the composed dashboard
+  read (`execute(userId, now)`, `unavailable` ≠ unconfigured).
+- Infrastructure (real PostgreSQL): `planned-workout-schema.test.ts` (exact
+  constraint names), `planned-workout-repository.test.ts` (PK/unique
+  enforcement, ownership isolation, 1-statement read and constant
+  3-statement replacement), `planned-workout-lifecycle.test.ts` (leave/restart
+  cascade, detached history, fresh run starts with zero planning, no orphan
+  rows), `planned-workout-concurrency.test.ts` (forced-overlap matrix:
+  configure‖configure, configure/reschedule ‖ restart/leave both orders,
+  deadlock absence, session INSERT never blocked), the InMemory fake + mapper
+  tests, and `workout-session-repository.test.ts` for the 1-statement
+  in-progress projection.
+- Presentation & actions: `training-schedule-card`, `dashboard-view`,
+  `dashboard-page`, `schedule-week-view`, `program-schedule-section`,
+  `training-days-form`, `move-planned-workout-form`, `program-detail-page`,
+  `schedule-actions-schema`, `configure-training-days-action`,
+  `reschedule-planned-workout-action`, and `lib/dates` — Move gating, single
+  UTC line per state, no database ids in DOM/forms, trusted session user,
+  server-owned clock, exact two-path revalidation, pending/alert states.
+- Totals: 173 unit test files / 2251 unit tests; 23 integration files / 313
+  integration tests.
+- Canonical reference: [Workout Scheduling & Training Calendar](scheduling.md).
+

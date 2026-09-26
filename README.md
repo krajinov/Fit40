@@ -42,6 +42,13 @@ history.
   restarts the run through one atomic write while training history and
   personal bests survive (see
   [`docs/program-completion.md`](docs/program-completion.md)).
+- **Workout scheduling & training calendar** — pick training days for a run
+  and get a deterministic calendar of planned workout dates: Today / Next /
+  past-due on the dashboard, a current-week Monday–Sunday calendar on program
+  detail, Set/Change training days, and a manual Move for never-started
+  workouts. Planning is calendar intent only — completion, history and
+  progression still read completed sessions (see
+  [`docs/scheduling.md`](docs/scheduling.md)).
 
 ## Progressive Overload
 
@@ -232,8 +239,10 @@ Feature modules under `src/features/`: `auth`, `dashboard`, `enrollment`,
 
 Early development (v0.1): authentication, profiles, program enrollment, guided
 workout sessions, progressive-overload recommendations, training history with
-Personal Records, and the dashboard's weekly training insights are
-implemented. Program generation via AI, richer progress charts, OAuth, and
+Personal Records, the dashboard's weekly training insights, and an
+enrollment-scoped workout training calendar (choose training days, get a
+deterministic planned-date schedule with Set/Change training days and a manual
+Move) are implemented. Program generation via AI, richer progress charts, OAuth, and
 email verification are listed as planned work in the docs. No deployment or
 Docker setup is included yet.
 

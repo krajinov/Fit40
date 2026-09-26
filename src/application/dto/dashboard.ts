@@ -8,22 +8,18 @@
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
-import type { EnrollmentScheduleDto } from '@/application/dto/schedule';
+import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
 /**
  * M15 schedule state of the current program (Slice 5).
  *
- * - `loaded` carries the application schedule read. A DTO inside it with
- *   `configured: false` means the run was never set up — a real state the
- *   dashboard renders as a training-days setup prompt.
- * - `unavailable` is a FAILED read (typed rejection or unexpected throw).
- *   It must never be rendered as "unconfigured": absence of data is not
- *   absence of configuration, and the failure is logged at the read site.
+ * Alias of the shared {@link ScheduleReadState} (Slice 6): `loaded` carries the
+ * application schedule read — a DTO with `configured: false` means the run was
+ * never set up — while `unavailable` is a FAILED read that must never be
+ * rendered as "unconfigured" (see the type's own documentation).
  */
-export type DashboardScheduleState =
-  | { readonly status: 'loaded'; readonly schedule: EnrollmentScheduleDto }
-  | { readonly status: 'unavailable' };
+export type DashboardScheduleState = ScheduleReadState;
 
 
 /** Whether the next workout's session has already been started by the user. */

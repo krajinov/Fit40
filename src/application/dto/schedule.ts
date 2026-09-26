@@ -68,3 +68,19 @@ export interface EnrollmentScheduleDto {
   readonly items: ReadonlyArray<PlannedWorkoutDto>;
   readonly focus: ScheduleFocusDto;
 }
+
+/**
+ * The outcome of one schedule read, for presentation (M15 Slice 6).
+ *
+ * - `loaded` carries the DTO. Inside it `configured: false` means the run was
+ *   never set up — a real state rendered as the training-days setup surface.
+ * - `unavailable` is a FAILED read (typed rejection or unexpected throw) and
+ *   must never be rendered as "unconfigured": absence of data is not absence
+ *   of configuration. The failure is logged at the read site.
+ *
+ * Shared by the dashboard (Slice 5, exported there as
+ * `DashboardScheduleState`) and the program-detail surface (Slice 6).
+ */
+export type ScheduleReadState =
+  | { readonly status: 'loaded'; readonly schedule: EnrollmentScheduleDto }
+  | { readonly status: 'unavailable' };

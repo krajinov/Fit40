@@ -6,7 +6,7 @@ import type { EnrollmentScheduleDto, PlannedWorkoutDto } from '@/application/dto
 import { Badge } from '@/components/shared/Badge';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatPlannedDateLabel } from '@/features/dashboard/dashboard-labels';
+import { formatPlannedDateLabel } from '@/lib/dates';
 import {
   programPathFromSlug,
   sessionPathFromRoute,

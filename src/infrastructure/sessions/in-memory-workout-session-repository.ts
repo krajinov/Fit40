@@ -18,6 +18,7 @@ import {
   SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
   SessionStaleVersionError,
+  type CompletedOccurrenceActivity,
   type WorkoutSessionRepository,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -137,6 +138,35 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
           (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
       )
       .map((session) => session.scheduledWorkoutId);
+  }
+
+  async listCompletedOccurrenceActivity(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedOccurrenceActivity>> {
+    // Mirrors the SQL read exactly: exact enrollment match (a detached null
+    // never equals a non-null enrollment id, so detached and other enrollments
+    // are excluded structurally), completed only, ordered by the port's total
+    // ladder — (completedAt, startedAt, session id) ascending. save() already
+    // enforces one session per occurrence, so each occurrence appears at most
+    // once and nothing is deduplicated. Each item carries its own Date instance,
+    // like the SQL projection's rows, so a returned value can never mutate
+    // stored state.
+    const completed = [...this.sessionsById.values()]
+      .filter(
+        (session): session is CompletedWorkoutSession =>
+          session.enrollmentId === enrollmentId && session.completedAt !== null,
+      )
+      .sort(
+        (a, b) =>
+          a.completedAt.getTime() - b.completedAt.getTime() ||
+          a.startedAt.getTime() - b.startedAt.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+
+    return completed.map((session) => ({
+      scheduledWorkoutId: session.scheduledWorkoutId,
+      completedAt: new Date(session.completedAt.getTime()),
+    }));
   }
 
   async listCompletedByEnrollment(

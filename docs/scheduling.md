@@ -186,6 +186,12 @@ focus, "today" or eligibility.
 - Presentation/actions never import scheduling repositories; the only
   repository import on the schedule feature is its `services.ts` composition
   root.
+- **M16 consumes the same rows read-only:** `GetEnrollmentFollowThroughUseCase`
+  issues the same bounded shape as the schedule read (enrollment lookup, planned
+  rows, session-derived occurrence facts — completed activity plus in-progress
+  ids) and reports how the CURRENT plan held up. See
+  [Plan Follow-Through](follow-through.md) for the shared limitations (no
+  historical plan, no schedule mutation).
 
 ## Write concurrency (parent-first lock)
 

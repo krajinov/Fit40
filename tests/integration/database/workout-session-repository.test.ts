@@ -1046,6 +1046,261 @@ describe('DrizzleWorkoutSessionRepository', () => {
       }
     });
   });
+
+  describe('listCompletedOccurrenceActivity()', () => {
+    /** Completes a session at an explicit instant. */
+    function completedAt(session: WorkoutSession, completedAtIso: string): WorkoutSession {
+      const done = completeWorkoutSession(withOneRepSet(session), new Date(completedAtIso));
+      if (!done.ok) throw new Error(done.error.message);
+      return done.data;
+    }
+
+    /** One completed occurrence, defaulting to `enrollment-test-a`. */
+    function completedOccurrence(options: {
+      readonly id: string;
+      readonly scheduledWorkoutId: string;
+      readonly workoutId: string;
+      readonly completedAt: string;
+      readonly startedAt?: string;
+      readonly enrollmentId?: string | null;
+    }): WorkoutSession {
+      return completedAt(
+        makeSession(options.id, {
+          enrollmentId: options.enrollmentId,
+          scheduledWorkoutId: options.scheduledWorkoutId,
+          workoutId: options.workoutId,
+          startedAt: options.startedAt,
+        }),
+        options.completedAt,
+      );
+    }
+
+    /** The requested enrollment's occurrence activity, as plain ids. */
+    async function activityIds(target: string): Promise<ReadonlyArray<string>> {
+      const activity = await workoutSessionRepository.listCompletedOccurrenceActivity(
+        enrollmentId(target),
+      );
+      return activity.map((item) => item.scheduledWorkoutId);
+    }
+
+    it('returns the completed occurrence identity and instant for the run', async () => {
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-single',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          completedAt: '2026-03-01T11:00:00Z',
+        }),
+      );
+
+      const activity = await workoutSessionRepository.listCompletedOccurrenceActivity(
+        enrollmentId('enrollment-test-a'),
+      );
+
+      expect(activity).toHaveLength(1);
+      expect(activity[0]?.scheduledWorkoutId).toBe('fit40-beginner-strength-w1-1');
+      expect(activity[0]?.completedAt.toISOString()).toBe('2026-03-01T11:00:00.000Z');
+    });
+
+    it('excludes in-progress sessions', async () => {
+      await workoutSessionRepository.save(
+        makeSession('activity-in-progress', { startedAt: '2026-03-01T09:00:00Z' }),
+      );
+
+      expect(await activityIds('enrollment-test-a')).toEqual([]);
+    });
+
+    it('excludes completed sessions of another enrollment', async () => {
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-other-run',
+          enrollmentId: 'enrollment-test-b',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          completedAt: '2026-03-01T11:00:00Z',
+        }),
+      );
+
+      expect(await activityIds('enrollment-test-a')).toEqual([]);
+      expect(await activityIds('enrollment-test-b')).toEqual(['fit40-beginner-strength-w1-1']);
+    });
+
+    it('excludes detached (null-enrollment) completed sessions', async () => {
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-detached',
+          enrollmentId: null,
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          completedAt: '2026-03-01T11:00:00Z',
+        }),
+      );
+
+      expect(await activityIds('enrollment-test-a')).toEqual([]);
+    });
+
+    it('returns each completed occurrence exactly once', async () => {
+      // Saved out of chronological order on purpose: the order under test is
+      // the query's, never the insertion order.
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-multi-b',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+          startedAt: '2026-03-02T08:00:00Z',
+          completedAt: '2026-03-02T10:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-multi-c',
+          scheduledWorkoutId: 'fit40-beginner-strength-w2-1',
+          workoutId: 'wo-beginner-strength-a',
+          startedAt: '2026-03-04T08:00:00Z',
+          completedAt: '2026-03-04T13:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-multi-a',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          startedAt: '2026-03-01T08:00:00Z',
+          completedAt: '2026-03-01T09:00:00Z',
+        }),
+      );
+
+      const occurrences = await activityIds('enrollment-test-a');
+
+      expect(occurrences).toEqual([
+        'fit40-beginner-strength-w1-1',
+        'fit40-beginner-strength-w1-2',
+        'fit40-beginner-strength-w2-1',
+      ]);
+      // One item per occurrence: the (enrollment, occurrence) constraint admits
+      // exactly one session, so nothing is repeated and nothing is merged.
+      expect(new Set(occurrences).size).toBe(3);
+    });
+
+    it('orders by completedAt, then startedAt, then session id', async () => {
+      // Saved newest-first so the assertion cannot pass on insertion order.
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-late',
+          scheduledWorkoutId: 'fit40-beginner-strength-w2-1',
+          workoutId: 'wo-beginner-strength-a',
+          startedAt: '2026-03-01T07:00:00Z',
+          completedAt: '2026-03-01T11:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-tie-c',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
+          workoutId: 'wo-beginner-strength-c',
+          startedAt: '2026-03-01T08:30:00Z',
+          completedAt: '2026-03-01T10:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-tie-z',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+          startedAt: '2026-03-01T08:00:00Z',
+          completedAt: '2026-03-01T10:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-tie-a',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          startedAt: '2026-03-01T08:00:00Z',
+          completedAt: '2026-03-01T10:00:00Z',
+        }),
+      );
+
+      // w1-1 and w1-2 tie on both instants, so the session id decides
+      // ('activity-tie-a' < 'activity-tie-z'); w1-3 follows them on the later
+      // start; w2-1 is last on the later completion.
+      expect(await activityIds('enrollment-test-a')).toEqual([
+        'fit40-beginner-strength-w1-1',
+        'fit40-beginner-strength-w1-2',
+        'fit40-beginner-strength-w1-3',
+        'fit40-beginner-strength-w2-1',
+      ]);
+    });
+
+    it('reads with exactly one fan-out-free statement and no write', async () => {
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-query-1',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
+          workoutId: 'wo-beginner-strength-a',
+          completedAt: '2026-03-01T11:00:00Z',
+        }),
+      );
+      await workoutSessionRepository.save(
+        completedOccurrence({
+          id: 'activity-query-2',
+          scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
+          workoutId: 'wo-beginner-strength-b',
+          completedAt: '2026-03-02T11:00:00Z',
+        }),
+      );
+
+      // A dedicated logging client: postgres.js' debug hook fires once per
+      // executed statement, so the read's statement count and SQL shape are
+      // observable without reimplementing Drizzle's SQL builder here.
+      const queries: string[] = [];
+      const loggingClient = postgres(getTestDatabaseUrl(), {
+        max: 1,
+        debug: (_connection: number, query: string) => {
+          queries.push(query.trim().toLowerCase());
+        },
+      });
+
+      try {
+        const loggingRepository = new DrizzleWorkoutSessionRepository(
+          drizzle(loggingClient, { schema }),
+        );
+
+        // Warm the connection first: a fresh postgres.js client runs a one-time
+        // pg_catalog type-introspection statement on its very first query —
+        // connection initialization, not part of the read.
+        await loggingRepository.listCompletedOccurrenceActivity(
+          enrollmentId('enrollment-test-a'),
+        );
+        queries.length = 0;
+
+        const activity = await loggingRepository.listCompletedOccurrenceActivity(
+          enrollmentId('enrollment-test-a'),
+        );
+
+        expect(activity).toHaveLength(2);
+        // Exactly one statement for N sessions: no hydration queries, no N+1.
+        expect(queries).toHaveLength(1);
+
+        const statement = queries[0];
+        expect(statement?.startsWith('select')).toBe(true);
+        expect(statement).toContain('from "workout_sessions"');
+        // A direct projection from one table: one session per occurrence is a
+        // database guarantee, so this read must never be capable of multiplying
+        // one session into several rows.
+        expect(statement).not.toContain(' join');
+        expect(statement).not.toContain('union');
+        expect(statement).not.toContain('distinct');
+        expect(statement).not.toContain('group by');
+        // Calendar intent is never consulted by this read.
+        expect(statement).not.toContain('planned_workouts');
+        // Pure read: no insert/update/delete is issued.
+        expect(queries.filter((query) => /^(insert|update|delete)/.test(query))).toEqual([]);
+      } finally {
+        await loggingClient.end();
+      }
+    });
+  });
 });
 
 afterAll(async () => {

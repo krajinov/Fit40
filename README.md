@@ -49,6 +49,12 @@ history.
   workouts. Planning is calendar intent only — completion, history and
   progression still read completed sessions (see
   [`docs/scheduling.md`](docs/scheduling.md)).
+- **Plan follow-through** — on program detail, directly below the weekly
+  calendar: how the current run's calendar held up over the last 8 UTC weeks
+  ("This plan so far"), reporting factual weekly counts (planned, done,
+  completed early/late, started, past due) for the *current* plan only. It is
+  read-only and never a percentage, streak or verdict, and no historical plan is
+  reconstructed (see [`docs/follow-through.md`](docs/follow-through.md)).
 
 ## Progressive Overload
 
@@ -242,7 +248,9 @@ workout sessions, progressive-overload recommendations, training history with
 Personal Records, the dashboard's weekly training insights, and an
 enrollment-scoped workout training calendar (choose training days, get a
 deterministic planned-date schedule with Set/Change training days and a manual
-Move) are implemented. Program generation via AI, richer progress charts, OAuth, and
+Move) are implemented. So is plan follow-through on program detail: a
+read-only report of how the current run's calendar held up over the last 8
+UTC weeks. Program generation via AI, richer progress charts, OAuth, and
 email verification are listed as planned work in the docs. No deployment or
 Docker setup is included yet.
 

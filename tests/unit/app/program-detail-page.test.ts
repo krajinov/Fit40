@@ -24,6 +24,7 @@ const {
   programExecute,
   resolveNextExecute,
   scheduleExecute,
+  followThroughExecute,
 } = vi.hoisted(() => {
   const notFound = vi.fn(() => {
     const error = new Error('NEXT_NOT_FOUND');
@@ -37,6 +38,7 @@ const {
     programExecute: vi.fn(),
     resolveNextExecute: vi.fn(),
     scheduleExecute: vi.fn(),
+    followThroughExecute: vi.fn(),
   };
 });
 
@@ -58,7 +60,16 @@ vi.mock('@/features/sessions/services', () => ({
 
 vi.mock('@/features/schedule/services', () => ({
   getEnrollmentScheduleUseCase: { execute: scheduleExecute },
+  getEnrollmentFollowThroughUseCase: { execute: followThroughExecute },
 }));
+
+// M16 Slice 5: presentation reaches the database only through the composed use
+// cases above. The page and its sections import no repository module today; if
+// one ever did, it would load this module and the factory fails loudly instead
+// of quietly connecting to a database during a unit test.
+vi.mock('@/infrastructure/database/repositories', () => {
+  throw new Error('presentation must not import database repositories directly');
+});
 
 // The enrollment leaves AND the Slice 7 scheduling leaves post to Server
 // Actions that pull the DB composition root; stubbed at the module boundary
@@ -182,6 +193,40 @@ async function renderPage(): Promise<string> {
   return renderToStaticMarkup(element);
 }
 
+/** The M16 follow-through DTO: one open week with one past-due occurrence. */
+function followThroughDto(configured = true) {
+  if (!configured) {
+    return { programSlug: SLUG, today: '2026-09-23', configured: false as const };
+  }
+
+  return {
+    programSlug: SLUG,
+    today: '2026-09-23',
+    configured: true as const,
+    weeks: [
+      {
+        weekStart: '2026-09-21T00:00:00.000Z',
+        weekEnd: '2026-09-28T00:00:00.000Z',
+        closed: false,
+        planned: 3,
+        completed: 2,
+        completedEarly: 0,
+        completedLate: 1,
+        started: 0,
+        pastDue: 1,
+      },
+    ],
+    totals: {
+      planned: 3,
+      completed: 2,
+      completedEarly: 0,
+      completedLate: 1,
+      started: 0,
+      pastDue: 1,
+    },
+  };
+}
+
 describe('/programs/[programSlug] page (M15 Slice 6)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -193,6 +238,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     enrollmentExecute.mockResolvedValue({ ok: true, data: ENROLLED_INCOMPLETE });
     resolveNextExecute.mockResolvedValue(NEXT_DTO);
     scheduleExecute.mockResolvedValue({ ok: true, data: scheduleDto() });
+    followThroughExecute.mockResolvedValue({ ok: true, data: followThroughDto() });
   });
 
   it('never reads or renders a schedule for anonymous visitors', async () => {
@@ -201,7 +247,9 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     const markup = await renderPage();
 
     expect(scheduleExecute).not.toHaveBeenCalled();
+    expect(followThroughExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
+    expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Weekly schedule');
     expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
   });
@@ -212,7 +260,9 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     const markup = await renderPage();
 
     expect(scheduleExecute).not.toHaveBeenCalled();
+    expect(followThroughExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
+    expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Join this program');
   });
 
@@ -259,8 +309,10 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     const markup = await renderPage();
 
     expect(scheduleExecute).not.toHaveBeenCalled();
+    expect(followThroughExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('id="training-schedule"');
+    expect(markup).not.toContain('This plan so far');
     // The M14 lifecycle surface stays: summary, restart and leave.
     expect(markup).toContain('View completion summary');
     expect(markup).toContain('Start program again');
@@ -337,5 +389,118 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).not.toContain('enr-');
     expect(markup).not.toContain(USER_ID);
     expect(markup).toContain('Upper Body A');
+  });
+
+  it('renders the follow-through section directly below the M15 week calendar, from one aggregate and one clock', async () => {
+    const markup = await renderPage();
+
+    // The read goes through the composed use case, with the authenticated user,
+    // the SAME aggregate this page already hydrated, and a server-owned clock.
+    expect(followThroughExecute).toHaveBeenCalledTimes(1);
+    const input = followThroughExecute.mock.calls[0]?.[0];
+    expect(input).toMatchObject({ userId: USER_ID });
+    expect(input?.program).toBe(PROGRAM_AGGREGATE);
+    expect(input?.now).toBeInstanceOf(Date);
+    // No second catalog lookup, and both section reads share that clock.
+    expect(programExecute).toHaveBeenCalledTimes(1);
+    expect(scheduleExecute.mock.calls[0]?.[0]?.now).toBe(input?.now);
+
+    expect(markup).toContain('This plan so far');
+    expect(markup).toContain('last 8 weeks');
+    expect(markup).toContain('Sep 21–27');
+    expect(markup).toContain('2 of 3 done');
+    expect(markup).toContain('1 past due');
+    expect(markup).toContain('3 planned · 2 done · 1 completed late · 1 past due');
+    expect(markup).toContain(
+      'This describes the dates currently on your calendar. Changing your training days replaces them.',
+    );
+
+    // Placement: after the M15 calendar section, before the authored weeks.
+    const calendarIndex = markup.indexOf('id="training-schedule"');
+    const followThroughIndex = markup.indexOf('This plan so far');
+    const authoredWeeksIndex = markup.indexOf('Weekly schedule');
+    expect(calendarIndex).toBeGreaterThan(-1);
+    expect(followThroughIndex).toBeGreaterThan(calendarIndex);
+    expect(authoredWeeksIndex).toBeGreaterThan(followThroughIndex);
+    // The M15 week calendar is unchanged alongside it.
+    expect(markup).toContain('aria-label="Training schedule"');
+    expect(markup).toContain('Weeks run Monday–Sunday (UTC).');
+    expect(markup).toContain('UP NEXT');
+  });
+
+  it('reads an unconfigured run but renders nothing for it (M15 owns setup)', async () => {
+    scheduleExecute.mockResolvedValue({ ok: true, data: scheduleDto(false) });
+    followThroughExecute.mockResolvedValue({ ok: true, data: followThroughDto(false) });
+
+    const markup = await renderPage();
+
+    // The read happened — absence of a calendar is data, not a failure.
+    expect(followThroughExecute).toHaveBeenCalledTimes(1);
+    expect(markup).not.toContain('This plan so far');
+    expect(markup).not.toContain('No planned dates');
+    // The M15 setup surface is the only thing offered for that state.
+    expect(markup).toContain('No training days set yet.');
+    expect(markup).toContain('Set training days');
+    expect(markup).toContain('Weekly schedule');
+  });
+
+  it('degrades a failed follow-through read to no section (logged), never to fake data', async () => {
+    followThroughExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'bad id', field: 'userId' },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const markup = await renderPage();
+
+      expect(consoleError).toHaveBeenCalled();
+      expect(markup).not.toContain('This plan so far');
+      // Never a fabricated report: no zero totals and no empty-horizon line.
+      expect(markup).not.toContain('0 planned');
+      expect(markup).not.toContain('No planned dates');
+      // The rest of program detail — including the M15 calendar — keeps rendering.
+      expect(markup).toContain('aria-label="Training schedule"');
+      expect(markup).toContain('Weekly schedule');
+      expect(markup).toContain('UP NEXT');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('degrades a thrown follow-through read the same way (logged, section only)', async () => {
+    followThroughExecute.mockRejectedValue(new Error('activity store unavailable'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const markup = await renderPage();
+
+      expect(consoleError).toHaveBeenCalled();
+      expect(markup).not.toContain('This plan so far');
+      expect(markup).toContain('aria-label="Training schedule"');
+      expect(markup).toContain('Weekly schedule');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('never renders follow-through rows for another run or from raw repository data', async () => {
+    // The page's only follow-through source is the composed use case: with it
+    // mocked to claim "not enrolled" the section disappears even though the
+    // page-level enrollment says otherwise (a concurrent-leave read), and no
+    // repository import is reachable from presentation (module guard above).
+    followThroughExecute.mockResolvedValue({ ok: true, data: null });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const markup = await renderPage();
+
+      expect(consoleError).toHaveBeenCalled();
+      expect(markup).not.toContain('This plan so far');
+      expect(markup).not.toContain('2 of 3 done');
+      expect(markup).toContain('Weekly schedule');
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

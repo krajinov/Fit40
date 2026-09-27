@@ -160,6 +160,7 @@ function makeSessionRepo(
       Promise.resolve(completedByEnrollment[enrollmentId] ?? []),
     ),
     listInProgressScheduledWorkoutIds: vi.fn(async () => []),
+    listCompletedOccurrenceActivity: vi.fn(async () => []),
     listCompletedByEnrollment: vi.fn(),
   } satisfies WorkoutSessionRepository;
 }

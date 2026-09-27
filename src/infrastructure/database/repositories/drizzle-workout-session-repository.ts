@@ -6,6 +6,7 @@ import {
   SessionEnrollmentChangedError,
   SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
+  type CompletedOccurrenceActivity,
   type WorkoutSessionRepository,
   SessionOccurrenceKeyConflictError,
 } from '@/application/ports/workout-session-repository';
@@ -148,6 +149,57 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     // id is valid by schema constraint (database records are trusted at the
     // repository boundary).
     return rows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId);
+  }
+
+  async listCompletedOccurrenceActivity(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedOccurrenceActivity>> {
+    // A single projected statement over `workout_sessions` — no JOIN, no UNION,
+    // no aggregation, no DISTINCT: one session per (enrollment, occurrence) is a
+    // database guarantee (`workout_sessions_enrollment_occurrence_unique`), so
+    // this read is a projection and never a reconciliation.
+    // `enrollment_id = ?` never matches a detached (NULL) row — SQL NULL
+    // equality — so detached, other-enrollment, and (via enrollment identity)
+    // other users' sessions are excluded structurally; `completed_at IS NOT
+    // NULL` narrows to completed sessions, and `scheduled_workout_id` is NOT
+    // NULL by column constraint, so every row carries a real occurrence
+    // identity. Ordering mirrors the port's total completed ladder.
+    const rows = await this.db
+      .select({
+        scheduledWorkoutId: workoutSessions.scheduledWorkoutId,
+        completedAt: workoutSessions.completedAt,
+      })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          isNotNull(workoutSessions.completedAt),
+        ),
+      )
+      .orderBy(
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+      );
+
+    return rows.map((row) => {
+      // Non-null narrowing for a completed-only read, the `completedAtOf`
+      // convention: a null surviving the filter is corrupt data — thrown as an
+      // unexpected error, never a business outcome.
+      if (row.completedAt === null) {
+        throw new Error(
+          `Corrupt data in workout_sessions (scheduled_workout_id=${row.scheduledWorkoutId}): completed_at is null despite the completed-only filter`,
+        );
+      }
+
+      // Trusted DB value: the column is a FK into scheduled_workouts, so the id
+      // is valid by schema constraint (database records are trusted at the
+      // repository boundary).
+      return {
+        scheduledWorkoutId: row.scheduledWorkoutId as ScheduledWorkoutId,
+        completedAt: row.completedAt,
+      };
+    });
   }
 
   async listCompletedByEnrollment(

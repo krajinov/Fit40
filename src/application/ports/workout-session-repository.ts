@@ -92,6 +92,20 @@ export class SessionOccurrenceKeyConflictError extends Error {
   }
 }
 
+/**
+ * One completed occurrence of a run, as the follow-through read consumes it:
+ * which authored occurrence the run actually completed, and when.
+ *
+ * Deliberately minimal — no session id, no exercise/set logs, no plan data. The
+ * occurrence identity plus the completion instant are exactly what reconciling
+ * calendar intent with session truth requires; a caller that needs the full
+ * aggregate uses `listCompletedByEnrollment`.
+ */
+export interface CompletedOccurrenceActivity {
+  readonly scheduledWorkoutId: ScheduledWorkoutId;
+  readonly completedAt: Date;
+}
+
 export interface WorkoutSessionRepository {
   /**
    * Finds a session by its unique ID, or null if not found.
@@ -150,6 +164,34 @@ export interface WorkoutSessionRepository {
   listCompletedScheduledWorkoutIds(
     enrollmentId: EnrollmentId,
   ): Promise<ReadonlyArray<ScheduledWorkoutId>>;
+
+  /**
+   * Returns the enrollment's COMPLETED occurrences as occurrence activity,
+   * ordered deterministically ascending by completion instant (see the total
+   * ordering below).
+   *
+   * This is the follow-through read (M16): which of the run's occurrences were
+   * actually completed, and when — enough to reconcile calendar intent with
+   * session truth without hydrating a single aggregate.
+   *
+   * Contract:
+   * - Enrollment-scoped: sessions of other enrollments are excluded by
+   *   enrollment identity, and detached sessions (enrollment_id nulled by a
+   *   leave) can never match a non-null enrollment id.
+   * - Completed occurrences only: an in-progress session never appears, so
+   *   every returned item carries a non-null `completedAt`.
+   * - At most one item per `scheduledWorkoutId` — the (enrollment, scheduled
+   *   workout) constraint admits one session per occurrence, so no
+   *   deduplication is needed and none is performed.
+   * - Ordered by `(completedAt, startedAt, session id)` ascending: a total order
+   *   even when instants tie. The order is for deterministic output only, never
+   *   an identity or a deduplication mechanism.
+   * - Bounded: one statement regardless of how many sessions the run holds.
+   * - Pure read: calendar intent is never consulted, and nothing is mutated.
+   */
+  listCompletedOccurrenceActivity(
+    enrollmentId: EnrollmentId,
+  ): Promise<ReadonlyArray<CompletedOccurrenceActivity>>;
 
   /**
    * Returns the IDs of the scheduled workouts the enrollment has IN-PROGRESS

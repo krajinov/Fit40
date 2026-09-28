@@ -57,6 +57,10 @@ export function PlanFollowThroughSection({
       )}
 
       <p className="mt-4 text-[13px] text-ink-3">{view.disclosure}</p>
+
+      {view.unplacedNotPerformedLabel !== null && (
+        <p className="mt-2 text-[13px] text-ink-3">{view.unplacedNotPerformedLabel}</p>
+      )}
     </SectionCard>
   );
 }
@@ -80,6 +84,9 @@ function FollowThroughRow({ week }: { readonly week: FollowThroughWeekRowView })
       )}
       {week.pastDueLabel !== null && (
         <span className="text-[13px] text-ink-3">{week.pastDueLabel}</span>
+      )}
+      {week.notPerformedLabel !== null && (
+        <span className="text-[13px] text-ink-3">{week.notPerformedLabel}</span>
       )}
       {week.isCurrent && (
         <span className="text-[13px] font-medium text-ink-2">{CURRENT_WEEK_LABEL}</span>

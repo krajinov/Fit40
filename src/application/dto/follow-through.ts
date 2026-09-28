@@ -22,7 +22,7 @@
 import type { FollowThroughSummary, FollowThroughWeek } from '@/domain/services/follow-through-week';
 import type { PlannedDate } from '@/domain/value-objects/planned-date';
 
-/** The six counts one week can report. Plain integers, never a judgement. */
+/** The counts one week can report. Plain integers, never a judgement. */
 export interface FollowThroughWeekCountsDto {
   /** Planned occurrences dated inside the week. */
   readonly planned: number;
@@ -36,6 +36,12 @@ export interface FollowThroughWeekCountsDto {
   readonly started: number;
   /** Occurrences with no session whose planned date has passed. */
   readonly pastDue: number;
+  /**
+   * Occurrences explicitly recorded as not performed (M17). A restatement of the
+   * recorded fact, never a judgement, and never a separate denominator: the
+   * occurrence still contributes `planned`.
+   */
+  readonly notPerformed: number;
 }
 
 /** One reported week: its UTC window, whether it is over, and its counts. */
@@ -48,7 +54,7 @@ export interface FollowThroughWeekDto extends FollowThroughWeekCountsDto {
   readonly closed: boolean;
 }
 
-/** The same six numbers summed over the reported weeks. */
+/** The same numbers summed over the reported weeks. */
 export type FollowThroughTotalsDto = FollowThroughWeekCountsDto;
 
 /** A run that has never been configured: there is no calendar to report on. */
@@ -65,6 +71,14 @@ export interface UnconfiguredFollowThroughDto {
  * `weeks` holds only the weeks with at least one planned occurrence, oldest
  * first: a window with nothing planned is omitted rather than rendered as a
  * fabricated zero week.
+ *
+ * `notPerformedUnplaced` is a COUNT, not a list: the run's recorded-not-performed
+ * occurrences that currently hold no planned row. It is deliberately outside
+ * `totals` (an occurrence with no row was never part of the reported calendar) and
+ * deliberately horizon-independent — the condition is the ABSENCE of a current
+ * row, never a date, so a recorded occurrence whose row sits outside the reported
+ * weeks is NOT unplaced. Labelled detail for these occurrences belongs to the M15
+ * calendar read, which owns dates and authored names.
  */
 export interface ConfiguredFollowThroughDto {
   readonly programSlug: string;
@@ -73,6 +87,8 @@ export interface ConfiguredFollowThroughDto {
   readonly configured: true;
   readonly weeks: ReadonlyArray<FollowThroughWeekDto>;
   readonly totals: FollowThroughTotalsDto;
+  /** Recorded occurrences of this run with no current planned row. */
+  readonly notPerformedUnplaced: number;
 }
 
 /** The outcome of a follow-through read for a run that exists. */
@@ -92,11 +108,16 @@ export function toUnconfiguredFollowThroughDto(
  * A pure projection: each count is copied as the Domain reported it. Nothing is
  * recomputed, re-derived or normalized here — not a week count, not a total, not
  * a `closed` flag — so the report the Domain decided is the report the view sees.
+ *
+ * `notPerformedUnplaced` arrives as its own argument because it is NOT part of
+ * the summarized weeks: the caller counts the run's recorded facts whose
+ * occurrence holds no current planned row, independently of the reported horizon.
  */
 export function toConfiguredFollowThroughDto(
   programSlug: string,
   today: PlannedDate,
   summary: FollowThroughSummary,
+  notPerformedUnplaced: number,
 ): ConfiguredFollowThroughDto {
   return {
     programSlug,
@@ -110,7 +131,9 @@ export function toConfiguredFollowThroughDto(
       completedLate: summary.totals.completedLate,
       started: summary.totals.started,
       pastDue: summary.totals.pastDue,
+      notPerformed: summary.totals.notPerformed,
     },
+    notPerformedUnplaced,
   };
 }
 
@@ -126,5 +149,6 @@ function toFollowThroughWeekDto(week: FollowThroughWeek): FollowThroughWeekDto {
     completedLate: week.completedLate,
     started: week.started,
     pastDue: week.pastDue,
+    notPerformed: week.notPerformed,
   };
 }

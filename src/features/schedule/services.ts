@@ -48,6 +48,7 @@ export const getEnrollmentFollowThroughUseCase = new GetEnrollmentFollowThroughU
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
+  notPerformedOccurrenceRepository,
 );
 
 /** Sets or changes the run's training days, regenerating its calendar. */

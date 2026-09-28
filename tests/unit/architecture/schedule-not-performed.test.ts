@@ -23,6 +23,7 @@ const DETAIL_READ = 'src/application/use-cases/get-workout-session.ts';
 const SCHEDULE_DTO = 'src/application/dto/schedule.ts';
 const FOLLOW_THROUGH_READ = 'src/application/use-cases/get-enrollment-follow-through.ts';
 const FOLLOW_THROUGH_DTO = 'src/application/dto/follow-through.ts';
+const FOLLOW_THROUGH_VIEW = 'src/features/schedule/follow-through-view.ts';
 
 /** Every M15 path that may legitimately read the not-performed facts. */
 const M15_READERS = [SCHEDULE_READ, CONFIGURE, RESCHEDULE, DETAIL_READ];
@@ -113,19 +114,110 @@ describe('M17 Slice 8 — the M15 calendar only READS the not-performed facts', 
   });
 });
 
-describe('M17 Slice 8 — no M16 wiring and no presentation work', () => {
-  it('leaves the M16 follow-through read and DTO untouched', () => {
-    // Slice 9 owns M16 semantics: neither the application read nor its DTO may
-    // mention the fact yet, even though the domain taxonomy already can.
-    for (const file of [FOLLOW_THROUGH_READ, FOLLOW_THROUGH_DTO]) {
-      expect(codeOf(file), `${file} already carries M16 fact wiring`).not.toMatch(/otPerformed/);
+describe('M17 Slice 9 — the M16 report READS the facts and never writes them', () => {
+  it('reads the run facts once, through the read-only port', () => {
+    const code = codeOf(FOLLOW_THROUGH_READ);
+
+    // Exactly two reads: the planned rows, then the fact projection.
+    expect(code.match(/listByEnrollment\(/g)).toHaveLength(2);
+    expect(code).toContain('notPerformedRepository.listByEnrollment(');
+    // Never the mutation authority, and never one of its writes.
+    expect(code).not.toContain('RunOccurrenceWriteRepository');
+    expect(code).not.toContain('runOccurrenceWrites');
+    expect(code).not.toContain('recordNotPerformed');
+    expect(code).not.toContain('undoNotPerformed');
+    expect(code).not.toContain('createSessionForOccurrence');
+    // No persistence, no SQL, no transaction: the report is a read.
+    expect(code).not.toContain('drizzle');
+    expect(code).not.toContain('insert(');
+    expect(code).not.toContain('delete(');
+    expect(code).not.toContain('transaction(');
+  });
+
+  it('holds the 8-week horizon constant and never widens it for a fact', () => {
+    const code = codeOf(FOLLOW_THROUGH_READ);
+
+    expect(code).toContain('export const FOLLOW_THROUGH_WEEK_COUNT = 8;');
+    expect(code).toContain(
+      'listRecentTrainingWeekWindows(input.now, FOLLOW_THROUGH_WEEK_COUNT)',
+    );
+    // The only window construction, with no literal span of its own.
+    expect(code).not.toMatch(/listRecentTrainingWeekWindows\([^)]*\d/);
+  });
+
+  it('appends no occurrence for a rowless fact: the spine is the planned rows', () => {
+    const code = codeOf(FOLLOW_THROUGH_READ);
+    const assemble = code.slice(code.indexOf('function assembleOccurrences'));
+
+    // Exactly one returned occurrence array, built by mapping the rows — the
+    // facts only build a lookup Set and never contribute an entry of their own.
+    const returns = assemble.match(/return [^;]+;/g);
+    expect(returns).toHaveLength(1);
+    expect(returns?.[0]).toContain('plannedRows.map(');
+    expect(assemble).toContain('const recorded = new Set<ScheduledWorkoutId>(');
+    expect(assemble).not.toContain('push(');
+    expect(assemble).not.toContain('concat');
+    // The facts only mark the rows that exist.
+    expect(assemble).toContain(
+      'hasNotPerformedRecord: recorded.has(plannedWorkout.scheduledWorkoutId)',
+    );
+  });
+
+  it('derives notPerformedUnplaced from facts MINUS current planned rows, before summarizing', () => {
+    const code = codeOf(FOLLOW_THROUGH_READ);
+    const derived = code.indexOf('countUnplacedFacts(');
+    const summarized = code.indexOf('summarizeFollowThrough(');
+    const windowed = code.indexOf('listRecentTrainingWeekWindows(');
+
+    expect(derived).toBeGreaterThan(0);
+    expect(summarized).toBeGreaterThan(0);
+    // Independent of the report: counted before any window or summary exists.
+    expect(derived).toBeLessThan(summarized);
+    expect(derived).toBeLessThan(windowed);
+
+    const helper = code.slice(code.indexOf('function countUnplacedFacts'));
+    const helperBody = helper.slice(0, helper.indexOf('\n}\n') + 3);
+    expect(helperBody).toContain('plannedRows.map((row) => row.scheduledWorkoutId)');
+    expect(helperBody).toContain('!occurrenceIdsWithRows.has(fact.scheduledWorkoutId)');
+    // A row difference only: no date, no week, no horizon can enter the count.
+    expect(helperBody).not.toContain('plannedDate');
+    expect(helperBody).not.toContain('weekStart');
+    expect(helperBody).not.toContain('Window');
+  });
+
+  it('carries a count, not a second labelled list, in the report DTO', () => {
+    const dto = codeOf(FOLLOW_THROUGH_DTO);
+
+    expect(dto).toContain('readonly notPerformed: number;');
+    expect(dto).toContain('readonly notPerformedUnplaced: number;');
+    // The labelled collection belongs to the M15 calendar read, not here.
+    expect(dto).not.toContain('NotPerformedWorkoutDto');
+    expect(dto).not.toContain('scheduledWorkoutId');
+    expect(dto).not.toContain('recordedAtIso');
+  });
+
+  it('keeps the record action, its undo and run closure out of the report', () => {
+    for (const file of [FOLLOW_THROUGH_READ, FOLLOW_THROUGH_DTO, FOLLOW_THROUGH_VIEW]) {
+      const code = codeOf(file);
+      expect(code).not.toContain('RecordNotPerformedUseCase');
+      expect(code).not.toContain('UndoNotPerformedUseCase');
+      // Slice 10 owns run closure; no earlier slice may imply it.
+      expect(code).not.toContain('isRunConcluded');
+      expect(code).not.toContain('restartProgram');
     }
   });
 
-  it('adds no record/undo copy or control', () => {
+  it('adds no record/undo copy or control anywhere yet', () => {
     // The locked action copy and undo subtext belong to the presentation slice;
-    // no M15 application module may carry them yet.
-    for (const file of [SCHEDULE_DTO, SCHEDULE_READ, CONFIGURE, RESCHEDULE, DETAIL_READ]) {
+    // no application module or follow-through view may carry them yet.
+    for (const file of [
+      SCHEDULE_DTO,
+      SCHEDULE_READ,
+      CONFIGURE,
+      RESCHEDULE,
+      DETAIL_READ,
+      FOLLOW_THROUGH_VIEW,
+    ]) {
       expect(read(file), `${file} carries action copy`).not.toContain("Didn't train");
       expect(read(file), `${file} carries undo copy`).not.toContain('goes back to not started');
     }

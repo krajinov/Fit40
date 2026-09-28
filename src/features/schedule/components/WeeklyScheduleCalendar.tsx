@@ -22,6 +22,7 @@ const STATUS_VARIANT: Record<PlannedWorkoutStatus, 'neutral' | 'accent' | 'done'
   planned: 'neutral',
   'in-progress': 'accent',
   completed: 'done',
+  'not-performed': 'neutral',
   'past-due': 'neutral',
 };
 

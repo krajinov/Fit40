@@ -5,7 +5,8 @@
  * early / on-plan / late, and its single `planned` becomes today / upcoming.
  * Everything else must agree exactly, so for one shared fixture of planned
  * occurrences plus session facts the two taxonomies are compared with M16's
- * refinement normalized away.
+ * refinement normalized away. M17 adds the explicit not-performed fact, which
+ * MUST normalize to itself in both.
  *
  * This test calls the REAL M15 domain logic (`resolvePlannedWorkoutStatus` from
  * `schedule-focus.ts`) and reimplements none of it. Its purpose is that a
@@ -48,6 +49,8 @@ interface OccurrenceInput {
   readonly plannedDate: string;
   readonly completedAt?: string;
   readonly active?: boolean;
+  /** The explicit M17 not-performed fact, supplied to BOTH taxonomies. */
+  readonly notPerformed?: boolean;
 }
 
 interface Scenario extends OccurrenceInput {
@@ -124,6 +127,24 @@ const SCENARIOS: ReadonlyArray<Scenario> = [
     plannedDate: '2026-10-05',
     m16: FollowThroughOutcome.Upcoming,
   },
+  {
+    name: 'is recorded as not performed on an already past planned date',
+    plannedDate: '2026-09-27',
+    notPerformed: true,
+    m16: FollowThroughOutcome.NotPerformed,
+  },
+  {
+    name: 'is recorded as not performed on today',
+    plannedDate: TODAY,
+    notPerformed: true,
+    m16: FollowThroughOutcome.NotPerformed,
+  },
+  {
+    name: 'is recorded as not performed on a future planned date',
+    plannedDate: '2026-10-05',
+    notPerformed: true,
+    m16: FollowThroughOutcome.NotPerformed,
+  },
 ];
 
 /** The same occurrence as M15's fact shape consumes it. */
@@ -139,6 +160,7 @@ function m15Facts(input: OccurrenceInput): PlannedWorkoutFacts {
     plannedWorkout: planned.data,
     hasCompletedSession: input.completedAt !== undefined,
     hasActiveSession: input.active ?? false,
+    hasNotPerformedRecord: input.notPerformed ?? false,
   };
 }
 
@@ -149,6 +171,7 @@ function m16Facts(input: OccurrenceInput): PlannedOccurrenceFacts {
     plannedDate: date(input.plannedDate),
     completedAt: input.completedAt === undefined ? null : new Date(input.completedAt),
     hasActiveSession: input.active ?? false,
+    hasNotPerformedRecord: input.notPerformed ?? false,
   };
 }
 
@@ -164,7 +187,7 @@ function evaluate(input: OccurrenceInput): {
 }
 
 /**
- * M16's outcome expressed on M15's four statuses: the three completed variants
+ * M16's outcome expressed on M15's statuses: the three completed variants
  * collapse back to `completed`, and `today`/`upcoming` collapse back to
  * `planned` (M15 does not distinguish today from a future date).
  */
@@ -178,6 +201,9 @@ function toPlannedWorkoutStatus(outcome: FollowThroughOutcome): PlannedWorkoutSt
   }
   if (outcome === FollowThroughOutcome.Started) {
     return PlannedWorkoutStatus.InProgress;
+  }
+  if (outcome === FollowThroughOutcome.NotPerformed) {
+    return PlannedWorkoutStatus.NotPerformed;
   }
   if (outcome === FollowThroughOutcome.PastDue) {
     return PlannedWorkoutStatus.PastDue;
@@ -212,9 +238,28 @@ describe('M16 follow-through vs M15 planned-workout status', () => {
     );
   });
 
-  it('covers all seven outcomes, so no refinement escapes the guard', () => {
+  it('covers all eight outcomes, so no refinement escapes the guard', () => {
     const covered = new Set(SCENARIOS.map((scenario) => evaluate(scenario).m16));
 
     expect(covered).toEqual(new Set(Object.values(FollowThroughOutcome)));
+  });
+
+  it('maps not-performed from the record alone, never from a date', () => {
+    const recorded = SCENARIOS.filter((scenario) => scenario.notPerformed === true);
+    const withoutRecord = SCENARIOS.filter((scenario) => scenario.notPerformed !== true);
+
+    // Every date shape the fixture covers is represented with the fact, so the
+    // guard would fail if either taxonomy started deriving it from a date.
+    expect(recorded).not.toHaveLength(0);
+    for (const scenario of withoutRecord) {
+      expect(evaluate(scenario).m15).not.toBe(PlannedWorkoutStatus.NotPerformed);
+      expect(evaluate(scenario).m16).not.toBe(FollowThroughOutcome.NotPerformed);
+    }
+    for (const scenario of recorded) {
+      expect(evaluate(scenario)).toEqual({
+        m15: PlannedWorkoutStatus.NotPerformed,
+        m16: FollowThroughOutcome.NotPerformed,
+      });
+    }
   });
 });

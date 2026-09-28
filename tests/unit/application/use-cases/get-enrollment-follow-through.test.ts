@@ -468,6 +468,7 @@ describe('GetEnrollmentFollowThroughUseCase', () => {
           completedLate: 0,
           started: 0,
           pastDue: 2,
+          notPerformed: 0,
         },
       ],
       totals: {
@@ -477,6 +478,7 @@ describe('GetEnrollmentFollowThroughUseCase', () => {
         completedLate: 9,
         started: 9,
         pastDue: 9,
+        notPerformed: 0,
       },
     };
 
@@ -493,6 +495,17 @@ describe('GetEnrollmentFollowThroughUseCase', () => {
       started: 0,
       pastDue: 2,
     });
-    expect(dto.totals).toEqual(summary.totals);
+    // The six counters this DTO carries are copied verbatim (the deliberately
+    // inconsistent 9s must survive). The Domain's M17 `notPerformed` counter is
+    // mapped by the M17 follow-through read slice, so it is not part of this
+    // DTO's shape yet.
+    expect(dto.totals).toEqual({
+      planned: 9,
+      completed: 9,
+      completedEarly: 9,
+      completedLate: 9,
+      started: 9,
+      pastDue: 9,
+    });
   });
 });

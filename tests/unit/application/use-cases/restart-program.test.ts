@@ -155,7 +155,6 @@ function makeSessionRepo(
   return {
     findById: vi.fn(),
     findByEnrollmentAndScheduledWorkout: vi.fn(),
-    create: vi.fn(),
     save: vi.fn(),
     listCompletedScheduledWorkoutIds: vi.fn((enrollmentId: EnrollmentId) =>
       Promise.resolve(completedByEnrollment[enrollmentId] ?? []),

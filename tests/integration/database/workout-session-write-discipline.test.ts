@@ -1,11 +1,18 @@
 /**
  * M17 Slice 4 — workout-session write discipline on real PostgreSQL.
  *
- * Persistence is two operations and neither is an upsert: `create` INSERTs and
- * refuses to overwrite an existing session, `save` UPDATEs and refuses to
- * resurrect one. This is what makes a future hard deletion of an abandoned
- * session safe — before this slice a stale aggregate could recreate a row the
- * run no longer had, so the first production DELETE would have been unsound.
+ * `save` UPDATEs and refuses to resurrect: an aggregate whose row no longer
+ * exists cannot recreate it, it fails as stale. This is what makes the
+ * settlement transaction's hard deletion of an abandoned session safe — before
+ * Slice 4 a stale aggregate could recreate a row the run no longer had, so the
+ * first production DELETE would have been unsound.
+ *
+ * Slice 6 removed the repository's INSERT entirely (creation is owned by
+ * `DrizzleRunOccurrenceWrites.createSessionForOccurrence`), so sessions are
+ * seeded here through the shared `insertSession` fixture. What remains under
+ * test is the CONTENT discipline of the update path: version monotonicity, the
+ * optimistic-concurrency predicate, the enrollment-identity predicate, and the
+ * structural fact that this repository can only UPDATE.
  *
  * The load-bearing scenario is "save() cannot resurrect a session whose row was
  * hard-deleted": it FAILS against the pre-Slice-4 upsert behaviour.
@@ -32,9 +39,7 @@ import {
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
 import {
-  SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
-  SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
 } from '@/application/ports/workout-session-repository';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
@@ -49,14 +54,13 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { insertSession } from './session-fixtures';
 
 const OWNER = 'write-discipline-user';
 const PROGRAM_SLUG = 'fit40-beginner-strength';
 /** The authored occurrence and its template from the seeded program. */
 const OCCURRENCE = 'fit40-beginner-strength-w1-1';
 const WORKOUT = 'wo-beginner-strength-a';
-const OTHER_OCCURRENCE = 'fit40-beginner-strength-w1-2';
-const OTHER_WORKOUT = 'wo-beginner-strength-b';
 
 function enrollmentIdValue(value: string): EnrollmentId {
   const result = createEnrollmentId(value);
@@ -178,7 +182,7 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
 
   it('save() cannot resurrect a session whose row was hard-deleted', async () => {
     const stale = makeSession('session-resurrect');
-    expect((await workoutSessionRepository.create(stale)).version).toBe(stale.version);
+    expect((await insertSession(stale)).version).toBe(stale.version);
 
     // The row is hard-deleted behind a live request that still holds the
     // aggregate — the situation M17's settlement transaction creates.
@@ -196,65 +200,21 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
     expect(await countRows('exercise_logs')).toBe(0);
   });
 
-  it('create() inserts a brand-new aggregate with its children and its own version', async () => {
-    const session = makeSession('session-create');
+  it('has no INSERT path left: the repository cannot create a session at all', async () => {
+    const session = makeSession('session-no-create');
 
-    const created = await workoutSessionRepository.create(session);
+    // Structural: creation belongs to the enrollment-serialized authority, so
+    // this repository exposes no create operation to seed through — even the
+    // seeding fixture has to go to the shared INSERT statements directly.
+    expect('create' in workoutSessionRepository).toBe(false);
 
-    expect(created.version).toBe(session.version);
-    expect(await countRows('workout_sessions')).toBe(1);
-    expect(await countRows('exercise_logs')).toBe(1);
     const loaded = await workoutSessionRepository.findById(session.id);
-    expect(loaded?.exerciseLogs).toHaveLength(1);
-    expect(loaded?.enrollmentId).toBe(RUN);
-  });
-
-  it('create() refuses a second session for the same occurrence instead of overwriting', async () => {
-    const first = makeSession('session-first');
-    await workoutSessionRepository.create(first);
-
-    const duplicate = makeSession('session-duplicate');
-    await expect(workoutSessionRepository.create(duplicate)).rejects.toBeInstanceOf(
-      SessionAlreadyExistsError,
-    );
-
-    // The first session is untouched: same row, same version, one child log.
-    expect(await countRows('workout_sessions')).toBe(1);
-    expect(await countRows('exercise_logs')).toBe(1);
-    const stored = await workoutSessionRepository.findById(first.id);
-    expect(stored?.version).toBe(first.version);
-    expect(stored?.startedAt.toISOString()).toBe(first.startedAt.toISOString());
-    expect(await workoutSessionRepository.findById(duplicate.id)).toBeNull();
-  });
-
-  it('create() refuses a taken session id for another occurrence', async () => {
-    await workoutSessionRepository.create(makeSession('session-id-taken'));
-
-    await expect(
-      workoutSessionRepository.create(
-        makeSession('session-id-taken', {
-          scheduledWorkoutId: OTHER_OCCURRENCE,
-          workoutId: OTHER_WORKOUT,
-        }),
-      ),
-    ).rejects.toBeInstanceOf(SessionAlreadyExistsError);
-
-    expect(await countRows('workout_sessions')).toBe(1);
-  });
-
-  it('create() maps a deleted enrollment to SessionEnrollmentNotFoundError', async () => {
-    const orphan = makeSession('session-orphan', {
-      enrollmentId: 'enrollment-that-does-not-exist',
-    });
-
-    await expect(workoutSessionRepository.create(orphan)).rejects.toBeInstanceOf(
-      SessionEnrollmentNotFoundError,
-    );
+    expect(loaded).toBeNull();
     expect(await countRows('workout_sessions')).toBe(0);
   });
 
   it('save() updates an existing aggregate and bumps the version by one', async () => {
-    const created = await workoutSessionRepository.create(makeSession('session-update'));
+    const created = await insertSession(makeSession('session-update'));
 
     const saved = await workoutSessionRepository.save(withOneSet(created));
 
@@ -266,8 +226,8 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
     expect(await countRows('workout_sessions')).toBe(1);
   });
 
-  it('keeps the version monotonic across create and repeated saves', async () => {
-    const created = await workoutSessionRepository.create(makeSession('session-version'));
+  it('keeps the version monotonic across seeding and repeated saves', async () => {
+    const created = await insertSession(makeSession('session-version'));
     const firstSave = await workoutSessionRepository.save(withOneSet(created));
     const secondSave = await workoutSessionRepository.save(withOneSet(firstSave));
 
@@ -279,7 +239,7 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
   });
 
   it('save() rejects a stale snapshot without changing the stored row', async () => {
-    const created = await workoutSessionRepository.create(makeSession('session-stale'));
+    const created = await insertSession(makeSession('session-stale'));
     const firstSave = await workoutSessionRepository.save(withOneSet(created));
 
     await expect(workoutSessionRepository.save(withOneSet(created))).rejects.toBeInstanceOf(
@@ -292,7 +252,7 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
   });
 
   it('save() keeps the enrollment predicate: a detached row refuses the mutation', async () => {
-    const created = await workoutSessionRepository.create(makeSession('session-detached'));
+    const created = await insertSession(makeSession('session-detached'));
 
     // A concurrent leave detaches the row (ON DELETE SET NULL).
     await client`UPDATE workout_sessions SET enrollment_id = NULL WHERE id = ${created.id}`;
@@ -307,8 +267,10 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
     expect(stored?.exerciseLogs[0]?.sets).toHaveLength(0);
   });
 
-  it('issues an INSERT for create and an UPDATE for save, never both', async () => {
+  it('issues an UPDATE for save and never an INSERT into workout_sessions', async () => {
     const session = makeSession('session-statements');
+    await insertSession(session);
+
     const queries: string[] = [];
     const countingClient = postgres(getTestDatabaseUrl(), {
       max: 1,
@@ -325,18 +287,8 @@ describe('DrizzleWorkoutSessionRepository — create vs save', () => {
         drizzle(countingClient, { schema }),
       );
 
-      await repo.create(session);
-      const createStatements = [...queries];
-
-      queries.length = 0;
       await repo.save(withOneSet(session));
       const saveStatements = [...queries];
-
-      // create: exactly one parent INSERT and no session UPDATE at all.
-      expect(createStatements.some((q) => q.startsWith('insert into "workout_sessions"'))).toBe(
-        true,
-      );
-      expect(createStatements.some((q) => q.startsWith('update "workout_sessions"'))).toBe(false);
 
       // save: exactly one parent UPDATE and no session INSERT at all — the
       // structural reason a deleted row cannot come back. (Child rows are

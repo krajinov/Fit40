@@ -57,6 +57,7 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { insertSession } from './session-fixtures';
 
 const PROGRAM_SLUG = 'fit40-beginner-strength';
 const OTHER_PROGRAM_SLUG = 'strong-at-home';
@@ -183,13 +184,13 @@ async function saveSession(input: {
   if (!logged.ok) throw new Error(logged.error.message);
 
   if (input.completedAt === undefined) {
-    await workoutSessionRepository.create(logged.data);
+    await insertSession(logged.data);
     return logged.data;
   }
 
   const completed = completeWorkoutSession(logged.data, new Date(input.completedAt));
   if (!completed.ok) throw new Error(completed.error.message);
-  await workoutSessionRepository.create(completed.data);
+  await insertSession(completed.data);
   return completed.data;
 }
 

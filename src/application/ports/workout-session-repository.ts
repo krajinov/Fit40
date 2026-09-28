@@ -4,19 +4,25 @@
  * Defines the contract that the in-memory and Drizzle repositories must
  * satisfy. The application layer depends only on this port.
  *
- * Persistence is split into two explicit operations, and neither is an upsert:
- * - {@link WorkoutSessionRepository.create} INSERTs a brand-new aggregate and
- *   can never update an existing session;
+ * This port owns session CONTENT persistence and reading:
  * - {@link WorkoutSessionRepository.save} UPDATEs an existing aggregate and can
- *   never insert one.
+ *   never insert one — a snapshot whose row no longer exists cannot resurrect
+ *   it, it fails as stale.
  *
- * The split exists because at most one of the two is ever intended, and a single
- * upsert made "recreate a row that no longer exists" an accidental outcome of a
- * stale write. Creation and mutation are choosing, not bookkeeping: `create`
- * refuses to overwrite, and `save` refuses to resurrect.
+ * Creation is deliberately NOT here (M17 Slice 6). A brand-new session is
+ * written by the enrollment-serialized mutation authority
+ * (`RunOccurrenceWriteRepository.createSessionForOccurrence`), because creating
+ * a session must serialize on the run's enrollment row with recording a
+ * not-performed settlement. There is exactly one production INSERT path into
+ * `workout_sessions`, and it is that authority — this port exposes no way to
+ * write a new row, so no caller can bypass the lock by accident.
  *
- * Both operations reject concurrent conflicts with the typed errors below so use
- * cases can map them to business outcomes without seeing database details.
+ * The typed errors below are the session write VOCABULARY: use cases map them
+ * to business outcomes without seeing database details. `save` raises
+ * `SessionStaleVersionError`, `SessionEnrollmentChangedError` and
+ * `SessionOccurrenceKeyConflictError`; the creation authority raises
+ * `SessionAlreadyExistsError`, `SessionEnrollmentNotFoundError` and
+ * `SessionOccurrenceKeyConflictError`.
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -28,9 +34,11 @@ import type {
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 
 /**
- * Thrown by `create` when a session for the same enrollment and scheduled
- * workout already exists (the database's one-session-per-occurrence-per-
- * enrollment constraint), or when the session id is already taken. The caller
+ * Thrown when a session for the same enrollment and scheduled workout already
+ * exists (the database's one-session-per-occurrence-per-enrollment
+ * constraint), or when the session id is already taken. Raised by the
+ * enrollment-serialized creation authority
+ * (`RunOccurrenceWriteRepository.createSessionForOccurrence`). The caller
  * should map this to the `SESSION_ALREADY_EXISTS` business outcome.
  */
 export class SessionAlreadyExistsError extends Error {
@@ -41,10 +49,12 @@ export class SessionAlreadyExistsError extends Error {
 }
 
 /**
- * Thrown by `create` when the session's enrollment no longer exists: a
- * concurrent leave deleted the enrollment between the caller's enrollment
- * check and the insert. The caller should re-check enrollment and map this
- * to the `NOT_ENROLLED` business outcome.
+ * Thrown when the session's enrollment does not exist: a concurrent leave
+ * deleted the enrollment before the write. Raised by the enrollment-serialized
+ * creation authority
+ * (`RunOccurrenceWriteRepository.createSessionForOccurrence`), whose locked
+ * enrollment-presence check makes it a defensive backstop. The caller should
+ * re-check enrollment and map this to the `NOT_ENROLLED` business outcome.
  */
 export class SessionEnrollmentNotFoundError extends Error {
   constructor(readonly enrollmentId: string) {
@@ -82,9 +92,10 @@ export class SessionEnrollmentChangedError extends Error {
 }
 
 /**
- * Thrown by `create` and `save` when PostgreSQL rejects the whole-aggregate
- * write on the partial unique index `exercise_logs_session_occurrence_key_unique` — the
- * database backstop for the domain's session-unique `occurrenceKey`
+ * Thrown by the session INSERT (the run-occurrence write authority) and by
+ * `save` when PostgreSQL rejects the whole-aggregate write on the partial
+ * unique index `exercise_logs_session_occurrence_key_unique` — the database
+ * backstop for the domain's session-unique `occurrenceKey`
  * invariant. Distinguished from the one-session-per-(enrollment, scheduled
  * workout) constraint BY CONSTRAINT NAME, so a colliding/corrupt snapshot is
  * a typed data-integrity failure instead of `SessionAlreadyExistsError`.
@@ -134,24 +145,6 @@ export interface WorkoutSessionRepository {
     enrollmentId: EnrollmentId,
     scheduledWorkoutId: ScheduledWorkoutId,
   ): Promise<WorkoutSession | null>;
-
-  /**
-   * Persists a BRAND-NEW session and returns the stored aggregate carrying the
-   * committed `version`.
-   *
-   * INSERT only: this must never update an existing session. A second creation
-   * for the same (enrollment, scheduled workout) pair — or for a session id
-   * already taken — is rejected with {@link SessionAlreadyExistsError} rather
-   * than overwriting the existing row.
-   *
-   * A first INSERT stores the snapshot's own version: a fresh session has never
-   * been written, so there is no prior version to advance.
-   *
-   * May throw {@link SessionAlreadyExistsError},
-   * {@link SessionEnrollmentNotFoundError}, or
-   * {@link SessionOccurrenceKeyConflictError}.
-   */
-  create(session: WorkoutSession): Promise<WorkoutSession>;
 
   /**
    * Updates an EXISTING session and returns the PERSISTED aggregate carrying

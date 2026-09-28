@@ -19,6 +19,7 @@ import {
 } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { exerciseLogs, users } from '@/infrastructure/database/schema';
+import { insertSession } from './session-fixtures';
 
 import {
   closeDatabase,
@@ -127,7 +128,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
 
   it('round-trips a normal session with authored == performed', async () => {
     const session = makeSession();
-    await workoutSessionRepository.create(session);
+    await insertSession(session);
 
     const rows = await loadLogRows(session.id);
     expect(rows).toHaveLength(2);
@@ -149,7 +150,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
     });
     expect(substituted.ok).toBe(true);
     if (!substituted.ok) return;
-    await workoutSessionRepository.create(substituted.data);
+    await insertSession(substituted.data);
 
     // The persisted row keeps the authored identity while the performed id
     // is the replacement: the two identities are stored separately.
@@ -171,7 +172,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
 
   it('hydrates a legacy row with NULL authored_exercise_id as authored == performed', async () => {
     const session = makeSession('session-subst-legacy');
-    await workoutSessionRepository.create(session);
+    await insertSession(session);
 
     // Simulate a pre-M9 row: authored_exercise_id was not written back then.
     await db
@@ -192,7 +193,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
 
   it('writes an explicit authored_exercise_id when saving a legacy-hydrated session', async () => {
     const session = makeSession('session-subst-legacy-write');
-    await workoutSessionRepository.create(session);
+    await insertSession(session);
     await db
       .update(exerciseLogs)
       .set({ authoredExerciseId: null })
@@ -244,7 +245,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
     });
     expect(substituted.ok).toBe(true);
     if (!substituted.ok) return;
-    await workoutSessionRepository.create(substituted.data);
+    await insertSession(substituted.data);
 
     const rows = await loadLogRows('session-subst-dup');
     expect(rows).toHaveLength(2);
@@ -265,7 +266,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
     // raw insert with a dangling authored id (unreachable through the
     // repository, whose ids come from the catalog) is rejected by the FK.
     const session = makeSession('session-subst-fk');
-    await workoutSessionRepository.create(session);
+    await insertSession(session);
 
     await expect(
       db.insert(exerciseLogs).values({
@@ -314,7 +315,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
     );
     expect(completedSession.ok).toBe(true);
     if (!completedSession.ok) return;
-    await workoutSessionRepository.create(completedSession.data);
+    await insertSession(completedSession.data);
 
     const completedIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -341,7 +342,7 @@ describe('DrizzleWorkoutSessionRepository authored/performed persistence', () =>
     });
     expect(withSet.ok).toBe(true);
     if (!withSet.ok) return;
-    await workoutSessionRepository.create(withSet.data);
+    await insertSession(withSet.data);
 
     const completedIds = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),

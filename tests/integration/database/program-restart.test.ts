@@ -53,6 +53,7 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { insertSession } from './session-fixtures';
 
 const RUNNER = 'restart-runner';
 const OTHER = 'restart-other';
@@ -198,7 +199,7 @@ async function seedCompletedRun(): Promise<CompletedRun> {
     const day = String(index + 1).padStart(2, '0');
     const exercise = exerciseIds[index % exerciseIds.length];
     if (exercise === undefined) throw new Error('unreachable: the catalog is non-empty');
-    await workoutSessionRepository.create(
+    await insertSession(
       buildSession({
         id,
         owner: RUNNER,

@@ -20,6 +20,7 @@ import {
   exerciseRepository,
   programEnrollmentRepository,
   programRepository,
+  runOccurrenceWrites,
   trainingHistoryRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
@@ -28,7 +29,7 @@ const idGenerator = new NodeIdGenerator();
 
 export const startWorkoutSessionUseCase = new StartWorkoutSessionUseCase(
   programRepository,
-  workoutSessionRepository,
+  runOccurrenceWrites,
   programEnrollmentRepository,
   idGenerator,
 );

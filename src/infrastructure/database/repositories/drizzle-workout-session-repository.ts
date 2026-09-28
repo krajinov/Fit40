@@ -2,13 +2,10 @@ import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 import {
-  SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
-  SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
   type CompletedOccurrenceActivity,
   type WorkoutSessionRepository,
-  SessionOccurrenceKeyConflictError,
 } from '@/application/ports/workout-session-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
 import type {
@@ -21,61 +18,10 @@ import type { Database } from '../client';
 import {
   mapExerciseLogToRow,
   mapSessionRows,
-  mapSessionToRow,
   mapSetToRow,
 } from '../mappers/session-mapper';
-import { isForeignKeyViolation, isUniqueViolation, pgConstraintName } from '../pg-error';
 import { exerciseLogs, setLogs, workoutSessions } from '../schema';
-
-/**
- * The workout_sessions enrollment FK created by migration 0004. Its
- * ON DELETE SET NULL behavior is the legitimate leave-detachment path; a
- * violation of this constraint on insert means the enrollment was deleted
- * between the use case's enrollment check and this write.
- */
-const ENROLLMENT_FK_CONSTRAINT = 'workout_sessions_enrollment_id_program_enrollments_id_fk';
-
-/**
- * The partial unique index `exercise_logs_session_occurrence_key_unique`
- * (migration 0011): (session_id, occurrence_key) is unique for non-null
- * occurrence keys. It is the database backstop for the domain's
- * session-unique occurrenceKey invariant; the name distinguishes its
- * violations from the one-session-per-(enrollment, occurrence) constraint so
- * the catch-all unique-violation mapping never misclassifies them.
- */
-const OCCURRENCE_KEY_UNIQUE_INDEX = 'exercise_logs_session_occurrence_key_unique';
-
-/**
- * Translates the constraint failures the port names into their typed errors, by
- * constraint name, or returns null when the error is not one of them (the
- * caller rethrows the original). Shared by `create` and `save` so both
- * operations report the same outcomes, and the only constraint that can mean
- * "this row is already taken" is the one-session-per-(enrollment, occurrence)
- * rule — the occurrence-key index is reported distinctly.
- */
-function mapWriteFailure(error: unknown, session: WorkoutSession): Error | null {
-  if (
-    isUniqueViolation(error) &&
-    pgConstraintName(error) === OCCURRENCE_KEY_UNIQUE_INDEX
-  ) {
-    return new SessionOccurrenceKeyConflictError(session.id);
-  }
-  if (isUniqueViolation(error)) {
-    return new SessionAlreadyExistsError(session.scheduledWorkoutId);
-  }
-  if (
-    isForeignKeyViolation(error) &&
-    pgConstraintName(error) === ENROLLMENT_FK_CONSTRAINT &&
-    session.enrollmentId !== null
-  ) {
-    // A concurrent leave deleted the enrollment after the use case's
-    // enrollment check; the caller re-checks and maps this to the NOT_ENROLLED
-    // business outcome. The FK can only be violated by a non-null enrollment
-    // id, so this narrowing cannot hide a case.
-    return new SessionEnrollmentNotFoundError(session.enrollmentId);
-  }
-  return null;
-}
+import { mapSessionWriteFailure } from './workout-session-writes';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
 type ExerciseLogRow = typeof exerciseLogs.$inferSelect;
@@ -84,19 +30,22 @@ type SetLogRow = typeof setLogs.$inferSelect;
 /**
  * Drizzle implementation of the WorkoutSessionRepository port.
  *
- * Persistence is two explicit operations, and neither is an upsert:
+ * This repository owns session CONTENT persistence: reading aggregates and
+ * UPDATEing an existing aggregate. It has NO insert path (M17 Slice 6): every
+ * new `workout_sessions` row is written by the enrollment-serialized mutation
+ * authority `DrizzleRunOccurrenceWrites.createSessionForOccurrence`, so there
+ * is exactly one production door into the table and the
+ * START-vs-RECORD-NOT-PERFORMED race cannot be won by a writer that never took
+ * the enrollment lock.
  *
- * - `create` INSERTs a brand-new aggregate and writes its children directly.
- *   It can never update an existing session, so a duplicate creation is
- *   rejected instead of overwriting.
- * - `save` UPDATEs an existing aggregate in one transaction using
- *   delete-and-reinsert for its children. The session row update is guarded by
- *   an optimistic-concurrency version check plus an enrollment-identity
- *   condition, so a stale snapshot is rejected instead of silently overwriting
- *   concurrent changes, and a session whose enrollment was detached or changed
- *   between load and write can never commit (detached history is read-only).
- *   Because the statement is an UPDATE, a snapshot whose row was hard-deleted
- *   can never recreate it: it fails as stale.
+ * `save` UPDATEs an existing aggregate in one transaction using
+ * delete-and-reinsert for its children. The session row update is guarded by
+ * an optimistic-concurrency version check plus an enrollment-identity
+ * condition, so a stale snapshot is rejected instead of silently overwriting
+ * concurrent changes, and a session whose enrollment was detached or changed
+ * between load and write can never commit (detached history is read-only).
+ * Because the statement is an UPDATE, a snapshot whose row was hard-deleted
+ * can never recreate it: it fails as stale.
  *
  * Unique-constraint races on the one-session-per-(enrollment, occurrence) rule
  * surface as `SessionAlreadyExistsError`; a violation of the partial unique
@@ -271,47 +220,6 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return rows.length === 0 ? [] : this.hydrateCompletedMany(rows);
   }
 
-  async create(session: WorkoutSession): Promise<WorkoutSession> {
-    try {
-      const committedVersion = await this.db.transaction(async (tx) => {
-        // INSERT only — no `ON CONFLICT`, no update branch: creation can never
-        // overwrite an existing session (the pre-Slice-4 upsert could).
-        const inserted = await tx
-          .insert(workoutSessions)
-          .values(mapSessionToRow(session))
-          // The committed version is READ BACK from the row: the mapper writes
-          // the snapshot's own version, and returning the database's value is
-          // what lets the port promise "the persisted aggregate".
-          .returning({ id: workoutSessions.id, version: workoutSessions.version });
-
-        const created = inserted[0];
-        if (created === undefined) {
-          throw new Error(`Workout session "${session.id}" was not inserted`);
-        }
-
-        // A brand-new session has no child rows yet, so its children are
-        // inserted directly — the update path's delete-and-reinsert dance is
-        // unnecessary here (and would be wrong to run).
-        for (const log of session.exerciseLogs) {
-          await tx.insert(exerciseLogs).values(mapExerciseLogToRow(session.id, log));
-          for (const set of log.sets) {
-            await tx.insert(setLogs).values(mapSetToRow(session.id, log.order, set));
-          }
-        }
-
-        return created.version;
-      });
-
-      return { ...session, version: committedVersion };
-    } catch (error) {
-      const mapped = mapWriteFailure(error, session);
-      if (mapped === null) {
-        throw error;
-      }
-      throw mapped;
-    }
-  }
-
   async save(session: WorkoutSession): Promise<WorkoutSession> {
     try {
       const committedVersion = await this.db.transaction(async (tx) => {
@@ -403,7 +311,7 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       // committed version attached.
       return { ...session, version: committedVersion };
     } catch (error) {
-      const mapped = mapWriteFailure(error, session);
+      const mapped = mapSessionWriteFailure(error, session);
       if (mapped === null) {
         throw error;
       }

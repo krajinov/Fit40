@@ -258,7 +258,6 @@ function makeSessionRepo(options: {
   return {
     findById: vi.fn(),
     findByEnrollmentAndScheduledWorkout: vi.fn(),
-    create: vi.fn(),
     save: vi.fn(),
     listCompletedScheduledWorkoutIds: vi.fn(async () => options.completedIds ?? []),
     listCompletedOccurrenceActivity: vi.fn(async () => []),

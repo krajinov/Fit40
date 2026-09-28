@@ -1,6 +1,8 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import type {
+  CreateSessionForOccurrenceInput,
+  CreateSessionForOccurrenceOutcome,
   RecordNotPerformedInput,
   RecordNotPerformedOutcome,
   RunOccurrenceWriteRepository,
@@ -17,6 +19,11 @@ import {
 
 import type { Database } from '../client';
 import { notPerformedWorkouts, programEnrollments, setLogs, workoutSessions } from '../schema';
+import {
+  insertWorkoutSessionRows,
+  mapSessionWriteFailure,
+  type Transaction,
+} from './workout-session-writes';
 
 /**
  * Internal control-flow signal: the Domain decision authorized a write, the
@@ -57,19 +64,23 @@ interface LockedSettlementFacts {
   readonly sessionId: string | null;
 }
 
-/** The transaction handle `db.transaction` hands to its callback. */
-type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
-
 /**
  * Drizzle implementation of the RunOccurrenceWriteRepository port: the single
- * mutation authority for enrollment-serialized run-occurrence writes.
+ * mutation authority for enrollment-serialized run-occurrence writes — the
+ * not-performed settlement (`recordNotPerformed` / `undoNotPerformed`) and the
+ * creation of the session that starts an occurrence
+ * (`createSessionForOccurrence`).
  *
  * Every call is ONE transaction that locks the parent enrollment row with
  * `FOR NO KEY UPDATE` FIRST (the M15/M14 convention: same strength, same order,
- * so no lock cycle is possible), then gathers the authoritative facts under that
- * lock, evaluates the pure Domain decision exactly once, and only then writes.
- * Nothing is read or written before the lock, no write happens before the
- * decision, and the decision is never re-evaluated.
+ * so no lock cycle is possible), then reads what it needs under that lock, and
+ * only then writes. Nothing is read or written before the lock, no write happens
+ * before the check that authorizes it, and the settlement decision is never
+ * re-evaluated.
+ *
+ * Sharing the lock makes START and RECORD mutually exclusive: the settlement
+ * refuses to touch a session it did not lock first, and session creation refuses
+ * to insert beside a committed not-performed fact it read under the same lock.
  *
  * The SQL predicates on the guarded DELETE and INSERT are SAFETY assertions, not
  * policy: they can only confirm what the decision already authorized, and a
@@ -244,6 +255,96 @@ export class DrizzleRunOccurrenceWrites implements RunOccurrenceWriteRepository 
       }
       throw error;
     }
+  }
+
+  /**
+   * Creates the session that starts an occurrence, in the SAME parent-first
+   * discipline as the settlement writes.
+   *
+   * The enrollment lock is taken FIRST and everything else follows from it:
+   * whether the run still exists, and whether this occurrence was already
+   * recorded as not performed. The not-performed check is an explicit read made
+   * under that lock — the coordination truth — so no constraint failure is ever
+   * interpreted as a settlement, and a recorded occurrence is refused with zero
+   * writes instead of a doomed insert.
+   *
+   * The aggregate itself arrives already built and validated by the Application;
+   * this method never constructs or re-validates a session.
+   */
+  async createSessionForOccurrence(
+    input: CreateSessionForOccurrenceInput,
+  ): Promise<CreateSessionForOccurrenceOutcome> {
+    assertSessionMatchesCoordinates(input);
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        // 1. Parent-first lock: the SAME serialization point the settlement
+        //    writes take, so START and RECORD can never both win.
+        const locked = await tx
+          .select({ id: programEnrollments.id })
+          .from(programEnrollments)
+          .where(eq(programEnrollments.id, input.enrollmentId))
+          .for('no key update');
+
+        if (locked.length === 0) {
+          // A concurrent leave/restart removed the run: nothing to attach to.
+          return { kind: 'run-vanished' };
+        }
+
+        // 2. Is this occurrence already settled? ONE bounded read, under the
+        //    lock, BEFORE any write. This is coordination truth, never a
+        //    post-hoc translation of a constraint failure.
+        const recorded = await tx
+          .select({ enrollmentId: notPerformedWorkouts.enrollmentId })
+          .from(notPerformedWorkouts)
+          .where(
+            and(
+              eq(notPerformedWorkouts.enrollmentId, input.enrollmentId),
+              eq(notPerformedWorkouts.scheduledWorkoutId, input.scheduledWorkoutId),
+            ),
+          )
+          .limit(1);
+
+        if (recorded.length > 0) {
+          return { kind: 'recorded-not-performed' };
+        }
+
+        // 3. INSERT the session row and its children. INSERT only — no upsert:
+        //    a duplicate is refused by the database rather than merged.
+        const committedVersion = await insertWorkoutSessionRows(tx, input.session);
+
+        return { kind: 'created', session: { ...input.session, version: committedVersion } };
+      });
+    } catch (error) {
+      // A duplicate session, a child occurrence-key conflict or a vanished
+      // enrollment keeps its ESTABLISHED typed meaning. Nothing here is ever
+      // translated into `recorded-not-performed`: the fact was checked above.
+      const mapped = mapSessionWriteFailure(error, input.session);
+      if (mapped === null) {
+        throw error;
+      }
+      throw mapped;
+    }
+  }
+}
+
+/**
+ * The aggregate written must belong to the very run and occurrence this call
+ * locked. Without this assertion a caller could hold one enrollment's lock and
+ * insert a session attached to another run — silently defeating the
+ * serialization it just paid for. It is a programming-error guard, not a
+ * business rule: the Application builds the aggregate from the occurrence it
+ * validated.
+ */
+function assertSessionMatchesCoordinates(input: CreateSessionForOccurrenceInput): void {
+  if (
+    input.session.enrollmentId !== input.enrollmentId ||
+    input.session.scheduledWorkoutId !== input.scheduledWorkoutId
+  ) {
+    throw new Error(
+      `Session "${input.session.id}" belongs to ${input.session.enrollmentId ?? 'no run'}/` +
+        `${input.session.scheduledWorkoutId}, not ${input.enrollmentId}/${input.scheduledWorkoutId}`,
+    );
   }
 }
 

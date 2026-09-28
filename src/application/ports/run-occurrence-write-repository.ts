@@ -4,16 +4,15 @@
  *
  * Ownership, locked:
  * - this port owns every write that touches the enrollment row's cross-table
- *   facts: recording and undoing a not-performed settlement;
+ *   facts: recording and undoing a not-performed settlement, and creating the
+ *   workout session that starts an occurrence;
  * - `NotPerformedOccurrenceRepository` stays READ ONLY (`listByEnrollment`) and
  *   must never grow a write method — a read model must not be able to change
  *   the fact it reports;
- * - `WorkoutSessionRepository` stays session-content persistence (`create` /
- *   `save` only); settlement deletion is not added there.
- *
- * Slice 6 will add `createSessionForOccurrence` to THIS same port, so the
- * guarded session creation shares this one parent-first lock discipline. It does
- * not exist yet.
+ * - `WorkoutSessionRepository` stays session CONTENT persistence (`save`,
+ *   update-only) and has NO insert: `createSessionForOccurrence` here is the
+ *   only production way a new `workout_sessions` row is written;
+ * - settlement deletion is not added to the session repository.
  *
  * Lock discipline (same strength and order as the M15 planning writes and the
  * M14 lifecycle writes): every call opens ONE transaction, locks the parent
@@ -23,12 +22,21 @@
  * session `version` CAS remains the separate mechanism for session CONTENT
  * writes and is never replaced by it.
  *
+ * That single serialization point is what makes START and RECORD mutually
+ * exclusive (M17 Slice 6): whichever of the two takes the enrollment lock first
+ * determines the final state, and the loser observes the winner's committed
+ * fact — a session starts where nothing was recorded as not performed, and a
+ * recorded occurrence can never end up with a live session beside it.
+ *
  * Decision execution (locked): the pure Domain decision
  * (`decideRecordNotPerformed` / `decideUndoNotPerformed`) is evaluated inside
  * the transaction, exactly once, AFTER the lock and AFTER the facts have been
  * read under it. Infrastructure gathers locked facts and executes that decision;
  * it never authorizes a write by its own rule, never re-evaluates the decision,
- * and never lets SQL choose a business outcome.
+ * and never lets SQL choose a business outcome. Session creation is not a
+ * Domain decision: the Application has already built and validated the
+ * aggregate, and this port only coordinates its persistence with the locked
+ * fact.
  *
  * Contract:
  * - a refusal writes NOTHING — no fact, no session, no child rows;
@@ -43,9 +51,14 @@
  *   deletion survives without its fact;
  * - the caller supplies `recordedAt` (the attestation instant). The repository
  *   persists exactly that instant — it never reads a clock, never derives the
- *   instant from a planned date or a session, and adds no other timestamp.
+ *   instant from a planned date or a session, and adds no other timestamp;
+ * - session creation checks the fact EXPLICITLY after the lock. A duplicate
+ *   session, a child occurrence-key conflict or a vanished enrollment keeps its
+ *   established typed meaning; no constraint failure is ever translated into the
+ *   not-performed outcome.
  */
 
+import type { WorkoutSession } from '@/domain/entities/workout-session';
 import {
   type RecordNotPerformedDecision,
   type UndoNotPerformedDecision,
@@ -87,6 +100,44 @@ export type UndoNotPerformedOutcome =
   | { readonly kind: 'run-vanished' }
   | { readonly kind: 'contract-violation' };
 
+export interface CreateSessionForOccurrenceInput {
+  /**
+   * The run the session belongs to: the enrollment row whose lock this call
+   * takes, and the enrollment the aggregate must be attached to.
+   */
+  readonly enrollmentId: EnrollmentId;
+  /** The authored occurrence inside that run the session starts. */
+  readonly scheduledWorkoutId: ScheduledWorkoutId;
+  /**
+   * The brand-new, Domain-validated aggregate to persist. The Application
+   * builds and validates it (session construction policy is never duplicated in
+   * Infrastructure); this call only persists it under the enrollment lock.
+   */
+  readonly session: WorkoutSession;
+}
+
+/**
+ * The creation outcome: the persisted aggregate, or one of the two
+ * coordination outcomes that are not business rules.
+ *
+ * A duplicate session for the occurrence, a child occurrence-key conflict and a
+ * vanished enrollment keep their ESTABLISHED typed meanings
+ * (`SessionAlreadyExistsError`, `SessionOccurrenceKeyConflictError`,
+ * `SessionEnrollmentNotFoundError`) — they are thrown, never folded into
+ * `recorded-not-performed`, so a constraint failure can never masquerade as a
+ * settlement fact.
+ */
+export type CreateSessionForOccurrenceOutcome =
+  /** The session was inserted; the aggregate carries the committed version. */
+  | { readonly kind: 'created'; readonly session: WorkoutSession }
+  /**
+   * The occurrence carries a not-performed fact: starting it would manufacture
+   * a live session beside a settlement. Nothing was written.
+   */
+  | { readonly kind: 'recorded-not-performed' }
+  /** The enrollment no longer exists: a concurrent leave or restart won. */
+  | { readonly kind: 'run-vanished' };
+
 export interface RunOccurrenceWriteRepository {
   /**
    * Records the occurrence as not performed, deleting an abandoned zero-work
@@ -100,4 +151,24 @@ export interface RunOccurrenceWriteRepository {
    * touches completed or detached session history.
    */
   undoNotPerformed(input: UndoNotPerformedInput): Promise<UndoNotPerformedOutcome>;
+
+  /**
+   * Creates the workout session that starts an occurrence, in the SAME
+   * parent-first transaction discipline as the settlement writes.
+   *
+   * Statement order (locked):
+   * 1. `SELECT id … FOR NO KEY UPDATE` on the expected enrollment row;
+   * 2. if it does not exist, return `run-vanished` with zero writes;
+   * 3. under that lock, check whether a `not_performed_workouts` fact exists for
+   *    `(enrollmentId, scheduledWorkoutId)`;
+   * 4. if the fact exists, return `recorded-not-performed` with ZERO writes;
+   * 5. otherwise INSERT the session row and its child rows.
+   *
+   * Nothing is read before the lock, nothing is written before the fact check,
+   * and the fact check is an explicit read — never a constraint failure
+   * translated after the fact.
+   */
+  createSessionForOccurrence(
+    input: CreateSessionForOccurrenceInput,
+  ): Promise<CreateSessionForOccurrenceOutcome>;
 }

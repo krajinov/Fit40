@@ -49,6 +49,7 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { insertSession } from './session-fixtures';
 
 const OWNER = 'settlement-owner';
 const OTHER_OWNER = 'settlement-other-owner';
@@ -192,7 +193,7 @@ describe('RunOccurrenceWrites.recordNotPerformed', () => {
   it('deletes an abandoned zero-work session and records the fact in one transaction', async () => {
     const [first] = occurrencesOf(run);
     const abandoned = buildSession(run, 'session-abandoned', first, RUN);
-    await workoutSessionRepository.create(abandoned);
+    await insertSession(abandoned);
     expect(await countRows('workout_sessions')).toBe(1);
     expect(await countRows('exercise_logs')).toBe(1);
 
@@ -225,11 +226,11 @@ describe('RunOccurrenceWrites.recordNotPerformed', () => {
       rpe: 8,
     });
     if (!logged.ok) throw new Error(logged.error.message);
-    await workoutSessionRepository.create(logged.data);
+    await insertSession(logged.data);
 
     // …and an abandoned one with no work at all.
     const abandoned = buildSession(run, 'session-guard-empty', second, RUN);
-    await workoutSessionRepository.create(abandoned);
+    await insertSession(abandoned);
 
     // The exact predicate the settlement DELETE carries, executed directly: it
     // is a safety assertion, so it must match the zero-work session and never
@@ -266,7 +267,7 @@ describe('RunOccurrenceWrites.recordNotPerformed', () => {
       rpe: 7,
     });
     if (!logged.ok) throw new Error(logged.error.message);
-    const persisted = await workoutSessionRepository.create(logged.data);
+    const persisted = await insertSession(logged.data);
 
     const outcome = await runOccurrenceWrites.recordNotPerformed({
       enrollmentId: RUN,
@@ -295,7 +296,7 @@ describe('RunOccurrenceWrites.recordNotPerformed', () => {
     if (!logged.ok) throw new Error(logged.error.message);
     const done = completeWorkoutSession(logged.data, new Date('2026-09-21T11:00:00Z'));
     if (!done.ok) throw new Error(done.error.message);
-    await workoutSessionRepository.create(done.data);
+    await insertSession(done.data);
 
     const outcome = await runOccurrenceWrites.recordNotPerformed({
       enrollmentId: RUN,
@@ -399,11 +400,11 @@ describe('RunOccurrenceWrites.recordNotPerformed', () => {
     if (!loggedCompleted.ok) throw new Error(loggedCompleted.error.message);
     const done = completeWorkoutSession(loggedCompleted.data, new Date('2026-09-21T11:00:00Z'));
     if (!done.ok) throw new Error(done.error.message);
-    await workoutSessionRepository.create(done.data);
+    await insertSession(done.data);
 
     // …and a detached one (a leftover of a leave) for another occurrence.
     const detached = buildSession(run, 'session-detached', second, RUN);
-    await workoutSessionRepository.create(detached);
+    await insertSession(detached);
     await client`UPDATE workout_sessions SET enrollment_id = NULL WHERE id = ${detached.id}`;
 
     const outcome = await runOccurrenceWrites.recordNotPerformed({
@@ -448,7 +449,7 @@ describe('RunOccurrenceWrites.undoNotPerformed', () => {
   it('does not resurrect a session that recording deleted', async () => {
     const [first] = occurrencesOf(run);
     const abandoned = buildSession(run, 'session-undo', first, RUN);
-    await workoutSessionRepository.create(abandoned);
+    await insertSession(abandoned);
     await runOccurrenceWrites.recordNotPerformed({
       enrollmentId: RUN,
       scheduledWorkoutId: scheduledWorkoutId(first),
@@ -607,7 +608,7 @@ describe('RunOccurrenceWrites — bounded statement shapes', () => {
 
   it('records an abandoned session with lock, diagnostic, guarded delete and insert', async () => {
     const [first] = occurrencesOf(run);
-    await workoutSessionRepository.create(buildSession(run, 'session-budget', first, RUN));
+    await insertSession(buildSession(run, 'session-budget', first, RUN));
 
     await withQueryLog(async (writes, queries) => {
       const outcome = await writes.recordNotPerformed({

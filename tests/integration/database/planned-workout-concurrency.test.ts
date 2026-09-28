@@ -60,9 +60,11 @@ import {
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
+  runOccurrenceWrites,
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { insertSession } from './session-fixtures';
 
 const OWNER = 'planned-concurrency-owner';
 /** 12 authored occurrences: every scenario replaces a whole set. */
@@ -813,7 +815,7 @@ describe('planned-workout concurrency — parent-first locking and lock compatib
     }
   });
 
-  it('lets a workout-session insert proceed while the enrollment lock is held', async () => {
+  it('lets a bare workout-session INSERT proceed while the enrollment lock is held', async () => {
     await resetAndSeed();
     const run = await seedEnrolledRun({
       owner: OWNER,
@@ -848,15 +850,73 @@ describe('planned-workout concurrency — parent-first locking and lock compatib
 
       const holder = await holdEnrollmentLock({ sql, enrollmentId: runId });
 
-      // The session INSERT's foreign-key check takes FOR KEY SHARE on the same
-      // enrollment row, which FOR NO KEY UPDATE does not conflict with. The
-      // claim is verified, not assumed: the save must complete while the lock
-      // is still held, because the holder is only released afterwards.
-      const saved = await settleWithin(workoutSessionRepository.create(created.data), 3000);
+      // A bare INSERT only takes FOR KEY SHARE on the parent row for its FK
+      // check, which FOR NO KEY UPDATE does not conflict with. The claim is
+      // verified, not assumed: the insert must complete while the lock is still
+      // held, because the holder is only released afterwards.
+      const saved = await settleWithin(insertSession(created.data), 3000);
       expect(saved).not.toBe(PENDING);
 
       await holder.release();
 
+      expect(
+        await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(runId, scheduledId),
+      ).not.toBeNull();
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it('queues the guarded session creation behind the enrollment lock', async () => {
+    await resetAndSeed();
+    const run = await seedEnrolledRun({
+      owner: OWNER,
+      programSlug: OTHER_PROGRAM_SLUG,
+      enrollmentId: 'enr-concurrency-guarded-session',
+    });
+    const sql = postgres(getTestDatabaseUrl(), { max: 1 });
+
+    try {
+      const runId = enrollmentIdValue(run.enrollmentId);
+      const occurrence = listOccurrences(run.program)[0];
+      if (occurrence === undefined) throw new Error('expected an authored occurrence');
+      const scheduledId = scheduledWorkoutIdValue(occurrence.id);
+
+      const created = createWorkoutSession({
+        id: 'session-behind-lock',
+        userId: OWNER_ID,
+        enrollmentId: runId,
+        scheduledWorkoutId: scheduledId,
+        workoutId: occurrence.workoutId,
+        startedAt: new Date('2026-10-01T09:00:00Z'),
+        exerciseLogs: [
+          {
+            authoredExerciseId: await firstCatalogExerciseId(),
+            order: 1,
+            prescription: reps(),
+            restSeconds: 60,
+          },
+        ],
+      });
+      if (!created.ok) throw new Error(created.error.message);
+
+      const holder = await holdEnrollmentLock({ sql, enrollmentId: runId });
+
+      // M17 Slice 6: creation JOINED the parent-lock discipline. It takes the
+      // same `FOR NO KEY UPDATE` lock itself — the mode intentionally conflicts
+      // with itself — so a planning write in flight makes the start path wait
+      // until it can read the occurrence's settlement truth under the lock.
+      const create = runOccurrenceWrites.createSessionForOccurrence({
+        enrollmentId: runId,
+        scheduledWorkoutId: scheduledId,
+        session: created.data,
+      });
+
+      expect(await settleWithin(create, 1500)).toBe(PENDING);
+
+      await holder.release();
+
+      expect(await create).toMatchObject({ kind: 'created' });
       expect(
         await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(runId, scheduledId),
       ).not.toBeNull();

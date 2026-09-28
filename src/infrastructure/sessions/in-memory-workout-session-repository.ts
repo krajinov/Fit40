@@ -4,13 +4,19 @@
  * Stores sessions in a private Map. Read and write operations use
  * structuredClone to prevent accidental state mutation.
  *
+ * This is a TEST DOUBLE. It implements the port's reads and `save`, and — like
+ * the database's own seeding fixtures — it additionally keeps a `create`
+ * operation so unit tests can put a session in store without going through a
+ * use case. That operation is deliberately NOT part of the port: the port no
+ * longer declares any insert (M17 Slice 6), because production session creation
+ * is owned by the enrollment-serialized mutation authority
+ * (`DrizzleRunOccurrenceWrites.createSessionForOccurrence`). No production code
+ * can reach this class, and its `create` writes to a Map, never to a database.
+ *
  * Persistence limitations:
  * - Sessions reset when the Node process restarts.
  * - During Next.js dev-server recompilation, HMR may reset the module state.
  * - Not suitable for serverless environments without a shared store.
- *
- * A future Drizzle implementation will replace this class without changing
- * domain or application code.
  */
 
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
@@ -51,6 +57,15 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return null;
   }
 
+  /**
+   * Seeds a session into the store (test-double seeding, not a port operation).
+   *
+   * INSERT-only semantics are preserved so the double stays faithful to the
+   * database's creation authority: a second seeding for the same session id or
+   * for the same (enrollment, occurrence) pair is rejected. Nothing is
+   * overwritten — the pre-Slice-4 upsert could replace an existing row here,
+   * which is exactly the property M17 removed.
+   */
   async create(session: WorkoutSession): Promise<WorkoutSession> {
     // INSERT only: a second creation for the same session id or for the same
     // (enrollment, occurrence) pair is rejected, mirroring the database's

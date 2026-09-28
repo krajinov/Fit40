@@ -12,11 +12,14 @@
 import { ConfigureTrainingDaysUseCase } from '@/application/use-cases/configure-training-days';
 import { GetEnrollmentFollowThroughUseCase } from '@/application/use-cases/get-enrollment-follow-through';
 import { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-enrollment-schedule';
+import { RecordNotPerformedUseCase } from '@/application/use-cases/record-not-performed';
 import { ReschedulePlannedWorkoutUseCase } from '@/application/use-cases/reschedule-planned-workout';
+import { UndoNotPerformedUseCase } from '@/application/use-cases/undo-not-performed';
 import {
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
+  runOccurrenceWrites,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
 
@@ -57,4 +60,22 @@ export const reschedulePlannedWorkoutUseCase = new ReschedulePlannedWorkoutUseCa
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
+);
+
+/**
+ * Records / undoes the run's not-performed settlement (M17). Both delegate to
+ * the SAME `DrizzleRunOccurrenceWrites` singleton that creates workout sessions,
+ * so record, undo and start serialize on one enrollment lock; constructing a
+ * second instance here would be a second mutation authority.
+ */
+export const recordNotPerformedUseCase = new RecordNotPerformedUseCase(
+  programRepository,
+  programEnrollmentRepository,
+  runOccurrenceWrites,
+);
+
+export const undoNotPerformedUseCase = new UndoNotPerformedUseCase(
+  programRepository,
+  programEnrollmentRepository,
+  runOccurrenceWrites,
 );

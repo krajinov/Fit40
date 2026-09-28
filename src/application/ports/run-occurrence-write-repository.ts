@@ -45,6 +45,10 @@
  *   database reports zero affected rows anyway, the transaction is rolled back
  *   and `contract-violation` is returned instead of being translated into a
  *   business outcome;
+ * - `contract-violation` is a coordination outcome only because the Application
+ *   layer has to observe it: it is thrown as
+ *   `NotPerformedWriteContractViolationError` and is never mapped into a
+ *   business Result;
  * - the not-performed primary key is the I1 backstop: a conflicting insert is
  *   classified by a bounded read (never by re-running the decision) and reported
  *   as `already-recorded`, with the transaction rolled back so no authorized
@@ -99,6 +103,30 @@ export type UndoNotPerformedOutcome =
   | UndoNotPerformedDecision
   | { readonly kind: 'run-vanished' }
   | { readonly kind: 'contract-violation' };
+
+/**
+ * Thrown by the Application when this authority reports an impossible invariant
+ * breach instead of an outcome: a `contract-violation` (the database refused a
+ * write the Domain decision had already authorized, and the transaction was
+ * rolled back), or a `run-vanished` result that contradicts the run the caller
+ * can still observe.
+ *
+ * It is deliberately an Error and never a Result: a settlement's caller must not
+ * receive a truthful-sounding business outcome for a bug, and the established
+ * precedent is the same (`PlannedWorkoutEnrollmentMismatchError` is thrown by
+ * the planned-workout repository and never mapped into a business outcome).
+ */
+export class NotPerformedWriteContractViolationError extends Error {
+  constructor(
+    /** Which settlement operation observed the breach. */
+    readonly operation: 'record' | 'undo',
+    /** What was observed, for the log — never rendered to the user. */
+    readonly detail: string,
+  ) {
+    super(`Not-performed ${operation} contract violated: ${detail}`);
+    this.name = 'NotPerformedWriteContractViolationError';
+  }
+}
 
 export interface CreateSessionForOccurrenceInput {
   /**

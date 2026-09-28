@@ -61,7 +61,8 @@ function configuredState(focus: Partial<ScheduleFocusDto>): DashboardScheduleSta
     configured: true,
     today: '2026-09-23',
     items: [],
-    focus: { today: null, next: null, pastDue: null, ...focus },
+    unplacedNotPerformedWorkouts: [],
+    focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0, ...focus },
   };
   return { status: 'loaded', schedule };
 }
@@ -74,7 +75,8 @@ function unconfiguredState(): DashboardScheduleState {
       configured: false,
       today: '2026-09-23',
       items: [],
-      focus: { today: null, next: null, pastDue: null },
+      unplacedNotPerformedWorkouts: [],
+      focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
     },
   };
 }

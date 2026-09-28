@@ -72,7 +72,8 @@ const SCHEDULE_DTO: EnrollmentScheduleDto = {
   configured: true,
   today: '2026-02-18',
   items: [],
-  focus: { today: null, next: null, pastDue: null },
+  unplacedNotPerformedWorkouts: [],
+  focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
 };
 enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: SCHEDULE_DTO });
 
@@ -690,6 +691,7 @@ describe('buildDashboardView / M15 schedule (Slice 5)', () => {
         },
         next: null,
         pastDue: { count: 1, earliest: { scheduledWorkoutId: 'sw-1', weekNumber: 1, workoutOrder: 1, workoutName: 'Push A', plannedDate: '2026-02-16', status: 'past-due' } satisfies PlannedWorkoutDto },
+        notPerformedRecorded: 0,
       },
     };
     enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: focused });

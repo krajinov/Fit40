@@ -114,10 +114,12 @@ function configuredState(): ScheduleReadState {
       configured: true,
       today: TODAY,
       items: [pastDueEarliest, mondayPastDue, todayInProgress, fridayPlanned, sundayCompleted],
+      unplacedNotPerformedWorkouts: [],
       focus: {
         today: todayInProgress,
         next: fridayPlanned,
         pastDue: { count: 2, earliest: pastDueEarliest },
+        notPerformedRecorded: 0,
       },
     },
   };
@@ -131,7 +133,8 @@ function unconfiguredState(): ScheduleReadState {
       configured: false,
       today: TODAY,
       items: [],
-      focus: { today: null, next: null, pastDue: null },
+      unplacedNotPerformedWorkouts: [],
+      focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
     },
   };
 }
@@ -378,4 +381,38 @@ describe('ProgramScheduleSection (M15 Slice 6)', () => {
     expect(container.querySelector('section')).toBeNull();
     expect(container.textContent).not.toContain('No training days set yet');
   });
+
+/**
+ * M17 Slice 8 — the recorded status reaches the calendar, and a recorded slot
+ * exposes NO move affordance (the existing status-based gating, now fed by the
+ * real fact). No new copy or control is introduced in this slice.
+ */
+describe('ProgramScheduleSection — recorded not-performed slots (M17 Slice 8)', () => {
+  it('labels a recorded slot and offers no Move affordance', async () => {
+    const recorded = item({
+      scheduledWorkoutId: 'sw-mon',
+      plannedDate: '2026-09-21',
+      status: 'not-performed',
+    });
+    const container = await renderSection({
+      status: 'loaded',
+      schedule: {
+        programSlug: SLUG,
+        configured: true,
+        today: TODAY,
+        items: [recorded],
+        unplacedNotPerformedWorkouts: [],
+        focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 1 },
+      },
+    });
+
+    const monday = [...container.querySelectorAll('ol li')][0];
+    expect(monday?.textContent).toContain('Not performed');
+    const moves = [...(monday?.querySelectorAll('summary') ?? [])].filter(
+      (node) => node.textContent === 'Move',
+    );
+    expect(moves).toHaveLength(0);
+  });
+});
+
 });

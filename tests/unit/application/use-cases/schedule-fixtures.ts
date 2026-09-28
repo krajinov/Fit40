@@ -9,6 +9,10 @@
 
 import { createPlannedWorkout, type PlannedWorkout } from '@/domain/entities/planned-workout';
 import {
+  createNotPerformedOccurrence,
+  type NotPerformedOccurrence,
+} from '@/domain/entities/not-performed-occurrence';
+import {
   createProgramEnrollment,
   type ProgramEnrollment,
 } from '@/domain/entities/program-enrollment';
@@ -36,6 +40,7 @@ import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { vi } from 'vitest';
 
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
@@ -334,3 +339,32 @@ export function makePlannedRepo(
     }),
   } satisfies PlannedWorkoutRepository;
 }
+
+/** A validated not-performed fact for the fixture program (M17 Slice 8). */
+export function notPerformedFact(
+  enrollment: string,
+  occurrence: string,
+  recordedAtIso = '2026-09-24T18:30:00.000Z',
+): NotPerformedOccurrence {
+  const result = createNotPerformedOccurrence({
+    enrollmentId: enrollment,
+    scheduledWorkoutId: occurrence,
+    recordedAt: new Date(recordedAtIso),
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+/**
+ * Read-only not-performed repository stub, scoped exactly like the port: it
+ * answers only for the requested enrollment, so a test can prove cross-run
+ * isolation through the use case rather than through the stub's convenience.
+ */
+export function makeNotPerformedRepo(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
+  return {
+    listByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) =>
+      facts.filter((fact) => fact.enrollmentId === enrollmentId),
+    ),
+  } satisfies NotPerformedOccurrenceRepository;
+}
+

@@ -16,6 +16,7 @@ import { RecordNotPerformedUseCase } from '@/application/use-cases/record-not-pe
 import { ReschedulePlannedWorkoutUseCase } from '@/application/use-cases/reschedule-planned-workout';
 import { UndoNotPerformedUseCase } from '@/application/use-cases/undo-not-performed';
 import {
+  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
@@ -26,12 +27,15 @@ import {
 /**
  * The run's training calendar (planned dates, statuses and focus). Read-only:
  * the caller passes the program aggregate it already loaded, so one request
- * hydrates the program exactly once.
+ * hydrates the program exactly once. The recorded-not-performed facts are read
+ * through the read-only `NotPerformedOccurrenceRepository` — this read never
+ * touches the write authority.
  */
 export const getEnrollmentScheduleUseCase = new GetEnrollmentScheduleUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
+  notPerformedOccurrenceRepository,
 );
 
 /**
@@ -52,6 +56,7 @@ export const configureTrainingDaysUseCase = new ConfigureTrainingDaysUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
+  notPerformedOccurrenceRepository,
 );
 
 /** Moves one future planned workout of the run to another calendar date. */
@@ -60,6 +65,7 @@ export const reschedulePlannedWorkoutUseCase = new ReschedulePlannedWorkoutUseCa
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
+  notPerformedOccurrenceRepository,
 );
 
 /**

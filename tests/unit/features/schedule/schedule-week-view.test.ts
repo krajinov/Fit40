@@ -27,7 +27,8 @@ function schedule(overrides: Partial<EnrollmentScheduleDto> = {}): EnrollmentSch
     configured: true,
     today: TODAY_MIDWEEK,
     items: [],
-    focus: { today: null, next: null, pastDue: null },
+    unplacedNotPerformedWorkouts: [],
+    focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
     ...overrides,
   };
 }

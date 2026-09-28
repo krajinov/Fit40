@@ -18,6 +18,7 @@ import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import { getScheduledWorkoutUseCase } from '@/features/programs/services';
 import {
   exerciseRepository,
+  notPerformedOccurrenceRepository,
   programEnrollmentRepository,
   programRepository,
   runOccurrenceWrites,
@@ -38,6 +39,7 @@ export const getWorkoutSessionUseCase = new GetWorkoutSessionUseCase(
   programRepository,
   workoutSessionRepository,
   programEnrollmentRepository,
+  notPerformedOccurrenceRepository,
 );
 
 export const logSessionSetUseCase = new LogSessionSetUseCase(workoutSessionRepository);

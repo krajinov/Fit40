@@ -8,6 +8,8 @@ import { GetProgramBySlugUseCase } from '@/application/use-cases/get-program-by-
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { GetScheduledWorkoutUseCase } from '@/application/use-cases/get-scheduled-workout';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
+
+import { makeNotPerformedRepo } from './schedule-fixtures';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
@@ -41,7 +43,8 @@ function okSchedule(programSlug: string): { ok: true; data: EnrollmentScheduleDt
       configured: true,
       today: '2026-02-18',
       items: [],
-      focus: { today: null, next: null, pastDue: null },
+      unplacedNotPerformedWorkouts: [],
+      focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
     },
   };
 }
@@ -195,7 +198,7 @@ function makeUseCase(
     new GetProgramEnrollmentUseCase(enrollmentRepo, sessionRepo),
     new ResolveNextWorkoutUseCase(
       new GetScheduledWorkoutUseCase(programRepo, exerciseRepo),
-      new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo),
+      new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, makeNotPerformedRepo()),
     ),
     scheduleUseCase,
   );

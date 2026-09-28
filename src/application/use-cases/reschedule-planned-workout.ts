@@ -35,6 +35,7 @@
  * session-derived status, and no truth is mutated.
  */
 
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import {
   PlannedDateConflictError,
   type PlannedWorkoutRepository,
@@ -92,6 +93,16 @@ export type ReschedulePlannedWorkoutError =
       readonly message: string;
     }
   | {
+      /**
+       * The occurrence is recorded as not performed (M17): it is settled
+       * execution truth, so it is never movable as ordinary future intent.
+       */
+      readonly code: 'OCCURRENCE_RECORDED_NOT_PERFORMED';
+      readonly programSlug: string;
+      readonly scheduledWorkoutId: string;
+      readonly message: string;
+    }
+  | {
       readonly code: 'DATE_ALREADY_PLANNED';
       readonly programSlug: string;
       readonly date: string;
@@ -117,6 +128,7 @@ export class ReschedulePlannedWorkoutUseCase {
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
   ) {}
 
   async execute(
@@ -181,10 +193,13 @@ export class ReschedulePlannedWorkoutUseCase {
       });
     }
 
-    const [currentPlan, completedIds, inProgressIds] = await Promise.all([
+    const [currentPlan, completedIds, inProgressIds, notPerformedFacts] = await Promise.all([
       this.plannedWorkoutRepository.listByEnrollment(enrollment.id),
       this.sessionRepository.listCompletedScheduledWorkoutIds(enrollment.id),
       this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
+      // ONE bounded, enrollment-scoped settlement read (M17): a recorded
+      // occurrence is settled, so it is never movable as ordinary future intent.
+      this.notPerformedRepository.listByEnrollment(enrollment.id),
     ]);
 
     if (currentPlan.length === 0) {
@@ -206,6 +221,12 @@ export class ReschedulePlannedWorkoutUseCase {
     }
     if (inProgressIds.includes(scheduledWorkoutId)) {
       return err(sessionInProgress(program.slug, scheduledWorkoutId));
+    }
+    if (notPerformedFacts.some((fact) => fact.scheduledWorkoutId === scheduledWorkoutId)) {
+      // Recorded as not performed: the occurrence is settled execution truth, not
+      // ordinary future intent, so it is never movable. The fact lives in the
+      // mutation authority; this is only M15's move-eligibility boundary.
+      return err(occurrenceRecordedNotPerformed(program.slug, scheduledWorkoutId));
     }
 
     if (plannedDatesEqual(currentPlanned.plannedDate, targetDate)) {
@@ -308,6 +329,18 @@ function sessionInProgress(
     programSlug,
     scheduledWorkoutId,
     message: 'This workout has a session in progress and cannot be rescheduled.',
+  };
+}
+
+function occurrenceRecordedNotPerformed(
+  programSlug: string,
+  scheduledWorkoutId: string,
+): ReschedulePlannedWorkoutError {
+  return {
+    code: 'OCCURRENCE_RECORDED_NOT_PERFORMED',
+    programSlug,
+    scheduledWorkoutId,
+    message: 'This workout is recorded as not performed and cannot be moved.',
   };
 }
 

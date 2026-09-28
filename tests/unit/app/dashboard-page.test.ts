@@ -141,7 +141,8 @@ function configuredSchedule(): DashboardScheduleState {
       configured: true,
       today: '2026-02-18',
       items: [item],
-      focus: { today: item, next: null, pastDue: null },
+      unplacedNotPerformedWorkouts: [],
+      focus: { today: item, next: null, pastDue: null, notPerformedRecorded: 0 },
     },
   };
 }
@@ -212,7 +213,8 @@ describe('/dashboard page (M15 Slice 5)', () => {
         configured: false,
         today: '2026-02-18',
         items: [],
-        focus: { today: null, next: null, pastDue: null },
+        unplacedNotPerformedWorkouts: [],
+        focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
       },
     };
     const markup = await renderPage(activeProgram(unconfigured));

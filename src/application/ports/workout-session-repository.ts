@@ -1,12 +1,22 @@
 /**
  * WorkoutSession repository port.
  *
- * Defines the contract that the in-memory (and future Drizzle) repository
- * must satisfy. The application layer depends only on this port.
+ * Defines the contract that the in-memory and Drizzle repositories must
+ * satisfy. The application layer depends only on this port.
  *
- * `save` is an upsert by session ID, supporting both insert and update.
- * It rejects concurrent conflicts with the typed errors below so use cases
- * can map them to business outcomes without seeing database details.
+ * Persistence is split into two explicit operations, and neither is an upsert:
+ * - {@link WorkoutSessionRepository.create} INSERTs a brand-new aggregate and
+ *   can never update an existing session;
+ * - {@link WorkoutSessionRepository.save} UPDATEs an existing aggregate and can
+ *   never insert one.
+ *
+ * The split exists because at most one of the two is ever intended, and a single
+ * upsert made "recreate a row that no longer exists" an accidental outcome of a
+ * stale write. Creation and mutation are choosing, not bookkeeping: `create`
+ * refuses to overwrite, and `save` refuses to resurrect.
+ *
+ * Both operations reject concurrent conflicts with the typed errors below so use
+ * cases can map them to business outcomes without seeing database details.
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -18,10 +28,10 @@ import type {
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 
 /**
- * Thrown by `save` when a second session for the same enrollment and
- * scheduled workout races the database's one-session-per-occurrence-per-
- * enrollment constraint. The caller should map this to the
- * `SESSION_ALREADY_EXISTS` business outcome.
+ * Thrown by `create` when a session for the same enrollment and scheduled
+ * workout already exists (the database's one-session-per-occurrence-per-
+ * enrollment constraint), or when the session id is already taken. The caller
+ * should map this to the `SESSION_ALREADY_EXISTS` business outcome.
  */
 export class SessionAlreadyExistsError extends Error {
   constructor(readonly scheduledWorkoutId: string) {
@@ -31,7 +41,7 @@ export class SessionAlreadyExistsError extends Error {
 }
 
 /**
- * Thrown by `save` when the session's enrollment no longer exists: a
+ * Thrown by `create` when the session's enrollment no longer exists: a
  * concurrent leave deleted the enrollment between the caller's enrollment
  * check and the insert. The caller should re-check enrollment and map this
  * to the `NOT_ENROLLED` business outcome.
@@ -72,8 +82,8 @@ export class SessionEnrollmentChangedError extends Error {
 }
 
 /**
- * Thrown by `save` when PostgreSQL rejects the whole-aggregate write on the
- * partial unique index `exercise_logs_session_occurrence_key_unique` — the
+ * Thrown by `create` and `save` when PostgreSQL rejects the whole-aggregate
+ * write on the partial unique index `exercise_logs_session_occurrence_key_unique` — the
  * database backstop for the domain's session-unique `occurrenceKey`
  * invariant. Distinguished from the one-session-per-(enrollment, scheduled
  * workout) constraint BY CONSTRAINT NAME, so a colliding/corrupt snapshot is
@@ -126,8 +136,32 @@ export interface WorkoutSessionRepository {
   ): Promise<WorkoutSession | null>;
 
   /**
-   * Saves a session (insert or update by session ID) and returns the
-   * PERSISTED aggregate carrying the committed `version`.
+   * Persists a BRAND-NEW session and returns the stored aggregate carrying the
+   * committed `version`.
+   *
+   * INSERT only: this must never update an existing session. A second creation
+   * for the same (enrollment, scheduled workout) pair — or for a session id
+   * already taken — is rejected with {@link SessionAlreadyExistsError} rather
+   * than overwriting the existing row.
+   *
+   * A first INSERT stores the snapshot's own version: a fresh session has never
+   * been written, so there is no prior version to advance.
+   *
+   * May throw {@link SessionAlreadyExistsError},
+   * {@link SessionEnrollmentNotFoundError}, or
+   * {@link SessionOccurrenceKeyConflictError}.
+   */
+  create(session: WorkoutSession): Promise<WorkoutSession>;
+
+  /**
+   * Updates an EXISTING session and returns the PERSISTED aggregate carrying
+   * the committed `version`.
+   *
+   * UPDATE only: this must never insert. An aggregate whose row no longer
+   * exists can therefore not recreate it — a hard-deleted session stays
+   * deleted, and the stale writer sees {@link SessionStaleVersionError} (the
+   * same outcome as any other stale snapshot) instead of silently restoring a
+   * session the run no longer has.
    *
    * Updates of enrollment-owned sessions are conditional on the snapshot's
    * version AND its enrollment identity, so a leave (or any enrollment
@@ -135,16 +169,14 @@ export interface WorkoutSessionRepository {
    * mutating detached history.
    *
    * The versioning policy belongs to the repository, not to its callers: an
-   * UPDATE commits `version + 1` while a first INSERT stores the snapshot's
-   * own version. A caller that builds a DTO from a successful save MUST use
-   * this return value and never the pre-save snapshot — otherwise the DTO
-   * carries a version the database never held, and the caller's next
-   * occurrence mutation would send that stale token as
+   * UPDATE commits `version + 1`. A caller that builds a DTO from a successful
+   * save MUST use this return value and never the pre-save snapshot —
+   * otherwise the DTO carries a version the database never held, and the
+   * caller's next occurrence mutation would send that stale token as
    * `expectedSessionVersion` and be rejected with `SESSION_MODIFIED` despite
    * the preceding write having succeeded.
    *
-   * May throw {@link SessionAlreadyExistsError},
-   * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
+   * May throw {@link SessionStaleVersionError},
    * {@link SessionEnrollmentChangedError}, or
    * {@link SessionOccurrenceKeyConflictError}.
    */

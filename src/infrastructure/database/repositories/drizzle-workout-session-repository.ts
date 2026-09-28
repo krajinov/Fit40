@@ -45,6 +45,38 @@ const ENROLLMENT_FK_CONSTRAINT = 'workout_sessions_enrollment_id_program_enrollm
  */
 const OCCURRENCE_KEY_UNIQUE_INDEX = 'exercise_logs_session_occurrence_key_unique';
 
+/**
+ * Translates the constraint failures the port names into their typed errors, by
+ * constraint name, or returns null when the error is not one of them (the
+ * caller rethrows the original). Shared by `create` and `save` so both
+ * operations report the same outcomes, and the only constraint that can mean
+ * "this row is already taken" is the one-session-per-(enrollment, occurrence)
+ * rule — the occurrence-key index is reported distinctly.
+ */
+function mapWriteFailure(error: unknown, session: WorkoutSession): Error | null {
+  if (
+    isUniqueViolation(error) &&
+    pgConstraintName(error) === OCCURRENCE_KEY_UNIQUE_INDEX
+  ) {
+    return new SessionOccurrenceKeyConflictError(session.id);
+  }
+  if (isUniqueViolation(error)) {
+    return new SessionAlreadyExistsError(session.scheduledWorkoutId);
+  }
+  if (
+    isForeignKeyViolation(error) &&
+    pgConstraintName(error) === ENROLLMENT_FK_CONSTRAINT &&
+    session.enrollmentId !== null
+  ) {
+    // A concurrent leave deleted the enrollment after the use case's
+    // enrollment check; the caller re-checks and maps this to the NOT_ENROLLED
+    // business outcome. The FK can only be violated by a non-null enrollment
+    // id, so this narrowing cannot hide a case.
+    return new SessionEnrollmentNotFoundError(session.enrollmentId);
+  }
+  return null;
+}
+
 type SessionRow = typeof workoutSessions.$inferSelect;
 type ExerciseLogRow = typeof exerciseLogs.$inferSelect;
 type SetLogRow = typeof setLogs.$inferSelect;
@@ -52,20 +84,28 @@ type SetLogRow = typeof setLogs.$inferSelect;
 /**
  * Drizzle implementation of the WorkoutSessionRepository port.
  *
- * `save` persists the whole aggregate in one transaction using delete-and-
- * reinsert for children. The session row upsert is guarded by an optimistic-
- * concurrency version check plus an enrollment-identity condition, so a stale
- * snapshot is rejected instead of silently overwriting concurrent changes,
-  * and a session whose enrollment was detached or changed between load and
-  * write can never commit (detached history is read-only). Unique-constraint
-  * races on the one-session-per-(enrollment, occurrence) rule surface as
-  * `SessionAlreadyExistsError`; a violation of the partial unique index on
-  * (session_id, occurrence_key) — the database backstop for the domain's
-  * session-unique occurrenceKey invariant — surfaces as the distinct
-  * `SessionOccurrenceKeyConflictError` (never misclassified as a duplicate
-  * session); a concurrently deleted enrollment (a leave racing the insert)
-  * surfaces as `SessionEnrollmentNotFoundError`. Any other constraint
-  * violation propagates untouched.
+ * Persistence is two explicit operations, and neither is an upsert:
+ *
+ * - `create` INSERTs a brand-new aggregate and writes its children directly.
+ *   It can never update an existing session, so a duplicate creation is
+ *   rejected instead of overwriting.
+ * - `save` UPDATEs an existing aggregate in one transaction using
+ *   delete-and-reinsert for its children. The session row update is guarded by
+ *   an optimistic-concurrency version check plus an enrollment-identity
+ *   condition, so a stale snapshot is rejected instead of silently overwriting
+ *   concurrent changes, and a session whose enrollment was detached or changed
+ *   between load and write can never commit (detached history is read-only).
+ *   Because the statement is an UPDATE, a snapshot whose row was hard-deleted
+ *   can never recreate it: it fails as stale.
+ *
+ * Unique-constraint races on the one-session-per-(enrollment, occurrence) rule
+ * surface as `SessionAlreadyExistsError`; a violation of the partial unique
+ * index on (session_id, occurrence_key) — the database backstop for the
+ * domain's session-unique occurrenceKey invariant — surfaces as the distinct
+ * `SessionOccurrenceKeyConflictError` (never misclassified as a duplicate
+ * session); a concurrently deleted enrollment (a leave racing the insert)
+ * surfaces as `SessionEnrollmentNotFoundError`. Any other constraint violation
+ * propagates untouched.
  */
 export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository {
   constructor(private readonly db: Database) {}
@@ -231,52 +271,98 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
     return rows.length === 0 ? [] : this.hydrateCompletedMany(rows);
   }
 
+  async create(session: WorkoutSession): Promise<WorkoutSession> {
+    try {
+      const committedVersion = await this.db.transaction(async (tx) => {
+        // INSERT only — no `ON CONFLICT`, no update branch: creation can never
+        // overwrite an existing session (the pre-Slice-4 upsert could).
+        const inserted = await tx
+          .insert(workoutSessions)
+          .values(mapSessionToRow(session))
+          // The committed version is READ BACK from the row: the mapper writes
+          // the snapshot's own version, and returning the database's value is
+          // what lets the port promise "the persisted aggregate".
+          .returning({ id: workoutSessions.id, version: workoutSessions.version });
+
+        const created = inserted[0];
+        if (created === undefined) {
+          throw new Error(`Workout session "${session.id}" was not inserted`);
+        }
+
+        // A brand-new session has no child rows yet, so its children are
+        // inserted directly — the update path's delete-and-reinsert dance is
+        // unnecessary here (and would be wrong to run).
+        for (const log of session.exerciseLogs) {
+          await tx.insert(exerciseLogs).values(mapExerciseLogToRow(session.id, log));
+          for (const set of log.sets) {
+            await tx.insert(setLogs).values(mapSetToRow(session.id, log.order, set));
+          }
+        }
+
+        return created.version;
+      });
+
+      return { ...session, version: committedVersion };
+    } catch (error) {
+      const mapped = mapWriteFailure(error, session);
+      if (mapped === null) {
+        throw error;
+      }
+      throw mapped;
+    }
+  }
+
   async save(session: WorkoutSession): Promise<WorkoutSession> {
     try {
       const committedVersion = await this.db.transaction(async (tx) => {
+        // UPDATE only — never an upsert. A snapshot whose row was hard-deleted
+        // cannot recreate it here (M17 Slice 4): the statement then matches no
+        // row and the write fails as stale, so a deleted session stays deleted
+        // instead of being silently restored by a stale writer.
+        //
+        // The update must match BOTH the snapshot's version (optimistic
+        // concurrency) and its enrollment identity: if a concurrent leave
+        // detached the row (ON DELETE SET NULL) or re-pointed it, the predicate
+        // misses and the mutation does not commit — detached history stays
+        // read-only. Detached snapshots (null enrollment) keep the version-only
+        // predicate; no production flow writes them.
         const affected = await tx
-          .insert(workoutSessions)
-          .values(mapSessionToRow(session))
-          .onConflictDoUpdate({
-            target: workoutSessions.id,
-            set: {
-              scheduledWorkoutId: session.scheduledWorkoutId,
-              workoutId: session.workoutId,
-              startedAt: session.startedAt,
-              completedAt: session.completedAt,
-              version: session.version + 1,
-              // The occurrence-key high-water mark is session-row state and
-              // must ride every whole-aggregate update (M11).
-              nextOccurrenceKey: session.nextOccurrenceKey,
-            },
-            // The write must match BOTH the snapshot's version (optimistic
-            // concurrency) and its enrollment identity: if a concurrent leave
-            // detached the row (ON DELETE SET NULL) or re-pointed it, the
-            // predicate misses and the mutation does not commit — detached
-            // history stays read-only. Detached snapshots (null enrollment)
-            // keep the version-only predicate; no production flow writes them.
-            where:
-              session.enrollmentId !== null
-                ? and(
-                    eq(workoutSessions.version, session.version),
-                    eq(workoutSessions.enrollmentId, session.enrollmentId),
-                  )
-                : eq(workoutSessions.version, session.version),
+          .update(workoutSessions)
+          .set({
+            scheduledWorkoutId: session.scheduledWorkoutId,
+            workoutId: session.workoutId,
+            startedAt: session.startedAt,
+            completedAt: session.completedAt,
+            version: session.version + 1,
+            // The occurrence-key high-water mark is session-row state and
+            // must ride every whole-aggregate update (M11).
+            nextOccurrenceKey: session.nextOccurrenceKey,
           })
+          .where(
+            session.enrollmentId !== null
+              ? and(
+                  eq(workoutSessions.id, session.id),
+                  eq(workoutSessions.version, session.version),
+                  eq(workoutSessions.enrollmentId, session.enrollmentId),
+                )
+              : and(
+                  eq(workoutSessions.id, session.id),
+                  eq(workoutSessions.version, session.version),
+                ),
+          )
           // The committed version is READ BACK from the row, never recomputed
-          // here: the upsert's INSERT branch stores the snapshot's own version
-          // while its UPDATE branch stores version + 1, and only PostgreSQL
-          // knows which branch ran. Returning the database's own value is what
-          // lets the port promise "the persisted aggregate".
+          // here: only PostgreSQL knows the stored value, and returning the
+          // database's own value is what lets the port promise "the persisted
+          // aggregate".
           .returning({ id: workoutSessions.id, version: workoutSessions.version });
 
         const committed = affected[0];
         if (committed === undefined) {
           // Failure-path classification only (never a pre-save recheck): a
-          // version mismatch is the existing optimistic-concurrency outcome;
-          // a version match with a changed/NULL enrollment is the detached-
-          // history conflict. A missing row cannot occur (sessions are never
-          // hard-deleted) and conservatively reports stale.
+          // version mismatch — INCLUDING a row that no longer exists at all —
+          // is the existing stale-session outcome; a version match with a
+          // changed/NULL enrollment is the detached-history conflict. Row
+          // absence is never converted into a write.
           const rows = await tx
             .select({
               version: workoutSessions.version,
@@ -297,6 +383,8 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
           throw new SessionStaleVersionError(session.id);
         }
 
+        // The aggregate owns its children, so the update persists exactly this
+        // snapshot's children: out with the old, in with the new.
         await tx.delete(setLogs).where(eq(setLogs.sessionId, session.id));
         await tx.delete(exerciseLogs).where(eq(exerciseLogs.sessionId, session.id));
 
@@ -315,28 +403,11 @@ export class DrizzleWorkoutSessionRepository implements WorkoutSessionRepository
       // committed version attached.
       return { ...session, version: committedVersion };
     } catch (error) {
-      if (
-        isUniqueViolation(error) &&
-        pgConstraintName(error) === OCCURRENCE_KEY_UNIQUE_INDEX
-      ) {
-        throw new SessionOccurrenceKeyConflictError(session.id);
+      const mapped = mapWriteFailure(error, session);
+      if (mapped === null) {
+        throw error;
       }
-      if (isUniqueViolation(error)) {
-        throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
-      }
-      if (
-        isForeignKeyViolation(error) &&
-        pgConstraintName(error) === ENROLLMENT_FK_CONSTRAINT
-      ) {
-        // A concurrent leave deleted the enrollment after the use case's
-        // enrollment check; the caller re-checks and maps this to the
-        // NOT_ENROLLED business outcome. The FK can only be violated by a
-        // non-null enrollment id, so the narrowing below cannot hide a case.
-        if (session.enrollmentId !== null) {
-          throw new SessionEnrollmentNotFoundError(session.enrollmentId);
-        }
-      }
-      throw error;
+      throw mapped;
     }
   }
 

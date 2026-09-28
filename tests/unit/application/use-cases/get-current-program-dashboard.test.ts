@@ -155,7 +155,7 @@ function seedSession(
     exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!r.ok) throw Error(r.error.message);
-  return repo.save(r.data);
+  return repo.create(r.data);
 }
 
 /**

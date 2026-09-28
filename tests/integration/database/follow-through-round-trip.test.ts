@@ -183,13 +183,13 @@ async function saveSession(input: {
   if (!logged.ok) throw new Error(logged.error.message);
 
   if (input.completedAt === undefined) {
-    await workoutSessionRepository.save(logged.data);
+    await workoutSessionRepository.create(logged.data);
     return logged.data;
   }
 
   const completed = completeWorkoutSession(logged.data, new Date(input.completedAt));
   if (!completed.ok) throw new Error(completed.error.message);
-  await workoutSessionRepository.save(completed.data);
+  await workoutSessionRepository.create(completed.data);
   return completed.data;
 }
 

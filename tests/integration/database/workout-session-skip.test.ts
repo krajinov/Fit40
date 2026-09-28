@@ -132,7 +132,7 @@ describe('DrizzleWorkoutSessionRepository skip persistence (M10 Slice 2)', () =>
 
   it('round-trips isSkipped while leaving the occurrence contract untouched', async () => {
     const session = makeSession();
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const loaded = await workoutSessionRepository.findById(sessionId(session.id));
     if (!loaded) throw new Error('session not found');
@@ -207,7 +207,7 @@ describe('DrizzleWorkoutSessionRepository skip persistence (M10 Slice 2)', () =>
     // Start from a fully unskipped aggregate (false).
     const unskipped = unskipSessionExercise(base, { exerciseOrder: 2 });
     if (!unskipped.ok) throw new Error(unskipped.error.message);
-    await workoutSessionRepository.save(unskipped.data);
+    await workoutSessionRepository.create(unskipped.data);
     expect((await loadLogRows('session-skip-flip')).map((row) => row.isSkipped)).toEqual([
       false,
       false,

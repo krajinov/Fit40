@@ -242,7 +242,7 @@ async function saveAll(...sessions: WorkoutSession[]): Promise<void> {
 /** Saving via the write port exercises the real write path. */
 async function workoutSessionRepositorySave(session: WorkoutSession): Promise<void> {
   const { workoutSessionRepository } = await import('./setup');
-  await workoutSessionRepository.save(session);
+  await workoutSessionRepository.create(session);
 }
 
 describe('training history — listing', () => {

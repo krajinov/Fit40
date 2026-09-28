@@ -270,7 +270,7 @@ async function seedPipelineHistory(): Promise<PipelineHistory> {
   const detachedOccurrence = requireOccurrence(priorOccurrences, 1);
 
   // Prior history, before the run: one session attached to the earlier program...
-  await workoutSessionRepository.save(
+  await workoutSessionRepository.create(
     buildSession({
       id: 'prior-attached',
       owner: RUNNER,
@@ -282,7 +282,7 @@ async function seedPipelineHistory(): Promise<PipelineHistory> {
     }),
   );
   // ...and one detached (leftover of a leave): the user's training past counts.
-  await workoutSessionRepository.save(
+  await workoutSessionRepository.create(
     buildSession({
       id: 'prior-detached',
       owner: RUNNER,
@@ -294,7 +294,7 @@ async function seedPipelineHistory(): Promise<PipelineHistory> {
     }),
   );
   // Another user, far heavier: must never reach this user's reads.
-  await workoutSessionRepository.save(
+  await workoutSessionRepository.create(
     buildSession({
       id: 'other-heavier',
       owner: OTHER,
@@ -333,7 +333,7 @@ async function seedPipelineHistory(): Promise<PipelineHistory> {
   for (const [index, occurrence] of runOccurrences.entries()) {
     const id = `run-${index + 1}`;
     const day = String(index + 1).padStart(2, '0');
-    await workoutSessionRepository.save(
+    await workoutSessionRepository.create(
       buildSession({
         id,
         owner: RUNNER,
@@ -348,7 +348,7 @@ async function seedPipelineHistory(): Promise<PipelineHistory> {
   }
 
   // The other user's run: only its first scheduled workout completed.
-  await workoutSessionRepository.save(
+  await workoutSessionRepository.create(
     buildSession({
       id: 'other-run-1',
       owner: OTHER,

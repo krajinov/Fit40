@@ -198,7 +198,7 @@ async function seedCompletedRun(): Promise<CompletedRun> {
     const day = String(index + 1).padStart(2, '0');
     const exercise = exerciseIds[index % exerciseIds.length];
     if (exercise === undefined) throw new Error('unreachable: the catalog is non-empty');
-    await workoutSessionRepository.save(
+    await workoutSessionRepository.create(
       buildSession({
         id,
         owner: RUNNER,

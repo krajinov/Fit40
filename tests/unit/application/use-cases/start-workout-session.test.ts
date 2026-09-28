@@ -147,11 +147,11 @@ describe('StartWorkoutSessionUseCase', () => {
     expect(first.data.sessionId).not.toBe(second.data.sessionId);
   });
 
-  it('maps a save-level unique race to SESSION_ALREADY_EXISTS', async () => {
+  it('maps a create-level unique race to SESSION_ALREADY_EXISTS', async () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
     const sessionRepo = new InMemoryWorkoutSessionRepository();
-    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionAlreadyExistsError('sched-w1'));
+    vi.spyOn(sessionRepo, 'create').mockRejectedValue(new SessionAlreadyExistsError('sched-w1'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
     await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
     const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
@@ -169,7 +169,7 @@ describe('StartWorkoutSessionUseCase', () => {
     const sessionRepo = new InMemoryWorkoutSessionRepository();
     // The repository's enrollment FK translation: the enrollment existed at
     // preflight but a concurrent leave deleted it before the insert.
-    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    vi.spyOn(sessionRepo, 'create').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
     const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
 
@@ -184,10 +184,10 @@ describe('StartWorkoutSessionUseCase', () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
     const sessionRepo = new InMemoryWorkoutSessionRepository();
-    // The first save races a concurrent leave: the enrollment existed at
+    // The first insert races a concurrent leave: the enrollment existed at
     // preflight (enr-a) but was deleted before the insert.
-    const saveSpy = vi
-      .spyOn(sessionRepo, 'save')
+    const createSpy = vi
+      .spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
     // The user rejoined before the FK-failure recovery ran, creating a new
@@ -198,8 +198,8 @@ describe('StartWorkoutSessionUseCase', () => {
     const result = await useCase.execute({ ...START_INPUT, userId: OWNER_A });
 
     expect(result.ok).toBe(true);
-    expect(saveSpy).toHaveBeenCalledTimes(2);
-    expect(saveSpy.mock.calls[1]?.[0]).toMatchObject({
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(createSpy.mock.calls[1]?.[0]).toMatchObject({
       userId: OWNER_A,
       enrollmentId: 'enr-b',
       scheduledWorkoutId: 'sched-w1',
@@ -215,9 +215,9 @@ describe('StartWorkoutSessionUseCase', () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
     const sessionRepo = new InMemoryWorkoutSessionRepository();
-    // The first save races the leave; the retry hits a session the user
+    // The first insert races the leave; the retry hits a session the user
     // already started under the replacement enrollment.
-    vi.spyOn(sessionRepo, 'save')
+    vi.spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
       .mockRejectedValueOnce(new SessionAlreadyExistsError('sched-w1'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
@@ -231,11 +231,11 @@ describe('StartWorkoutSessionUseCase', () => {
     expect(result.error.code).toBe('SESSION_ALREADY_EXISTS');
   });
 
-  it('rethrows a save-level enrollment error when the enrollment is actually present', async () => {
+  it('rethrows a create-level enrollment error when the enrollment is actually present', async () => {
     const programRepo = createMockRepo();
     vi.mocked(programRepo.findBySlug).mockResolvedValue(makeProgram());
     const sessionRepo = new InMemoryWorkoutSessionRepository();
-    vi.spyOn(sessionRepo, 'save').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
+    vi.spyOn(sessionRepo, 'create').mockRejectedValue(new SessionEnrollmentNotFoundError('enr-a'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
     await enroll(enrollmentRepo, 'enr-a', OWNER_A, 'prog-test');
     const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
@@ -253,7 +253,7 @@ describe('StartWorkoutSessionUseCase', () => {
     const sessionRepo = new InMemoryWorkoutSessionRepository();
     // Preflight sees enr-a, the first save races its leave, the recovery
     // finds replacement enr-b, but enr-b is deleted before the retry insert.
-    vi.spyOn(sessionRepo, 'save')
+    vi.spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
@@ -276,7 +276,7 @@ describe('StartWorkoutSessionUseCase', () => {
     const sessionRepo = new InMemoryWorkoutSessionRepository();
     // The retry against enr-b fails its FK, yet the re-check still shows
     // enr-b: the error contradicts observable state and must propagate.
-    vi.spyOn(sessionRepo, 'save')
+    vi.spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
@@ -298,8 +298,8 @@ describe('StartWorkoutSessionUseCase', () => {
     // The retry against enr-b fails its FK too, and the re-check shows the
     // enrollment churned yet again (enr-c): recovery must stop after the
     // single bounded retry and surface the race as a typed conflict.
-    const saveSpy = vi
-      .spyOn(sessionRepo, 'save')
+    const createSpy = vi
+      .spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-b'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
@@ -314,7 +314,7 @@ describe('StartWorkoutSessionUseCase', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('ENROLLMENT_CHANGED');
-    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(createSpy).toHaveBeenCalledTimes(2);
   });
 
   it('propagates unrelated retry errors instead of recovering', async () => {
@@ -323,8 +323,8 @@ describe('StartWorkoutSessionUseCase', () => {
     const sessionRepo = new InMemoryWorkoutSessionRepository();
     // A retry failure that is not an enrollment or duplicate error is
     // unexpected and must propagate untouched.
-    const saveSpy = vi
-      .spyOn(sessionRepo, 'save')
+    const createSpy = vi
+      .spyOn(sessionRepo, 'create')
       .mockRejectedValueOnce(new SessionEnrollmentNotFoundError('enr-a'))
       .mockRejectedValueOnce(new Error('connection lost'));
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
@@ -334,6 +334,6 @@ describe('StartWorkoutSessionUseCase', () => {
     const useCase = new StartWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, new FakeIdGenerator());
 
     await expect(useCase.execute({ ...START_INPUT, userId: OWNER_A })).rejects.toThrow('connection lost');
-    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(createSpy).toHaveBeenCalledTimes(2);
   });
 });

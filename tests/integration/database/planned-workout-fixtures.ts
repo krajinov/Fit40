@@ -185,7 +185,7 @@ export async function seedCompletedRun(input: {
     const done = completeWorkoutSession(logged.data, new Date(`2026-09-${day}T10:00:00Z`));
     if (!done.ok) throw new Error(done.error.message);
 
-    await workoutSessionRepository.save(done.data);
+    await workoutSessionRepository.create(done.data);
     sessionIds.push(id);
   }
 

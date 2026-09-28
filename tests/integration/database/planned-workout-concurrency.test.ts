@@ -852,7 +852,7 @@ describe('planned-workout concurrency — parent-first locking and lock compatib
       // enrollment row, which FOR NO KEY UPDATE does not conflict with. The
       // claim is verified, not assumed: the save must complete while the lock
       // is still held, because the holder is only released afterwards.
-      const saved = await settleWithin(workoutSessionRepository.save(created.data), 3000);
+      const saved = await settleWithin(workoutSessionRepository.create(created.data), 3000);
       expect(saved).not.toBe(PENDING);
 
       await holder.release();

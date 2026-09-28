@@ -165,7 +165,7 @@ describe('user-added occurrence removal persistence (M11 Slice 4)', () => {
     const session = makeThreeOccurrenceSession();
     // Keys 1 (template), 2 (ex-015), 3 (ex-010); mark 4.
     expect(session.exerciseLogs.map((log) => log.occurrenceKey)).toEqual([1, 2, 3]);
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const removed = removeSessionExercise(session, { exerciseOrder: 2 });
     if (!removed.ok) throw new Error(removed.error.message);
@@ -190,7 +190,7 @@ describe('user-added occurrence removal persistence (M11 Slice 4)', () => {
 
   it('never reuses a removed occurrence key: the next Add takes the high-water key', async () => {
     const session = makeThreeOccurrenceSession('session-removal-key');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const removed = removeSessionExercise(session, { exerciseOrder: 3 });
     if (!removed.ok) throw new Error(removed.error.message);
@@ -221,7 +221,7 @@ describe('user-added occurrence removal persistence (M11 Slice 4)', () => {
 
   it('enforces logged-set protection BEFORE persistence, leaving stored rows untouched', async () => {
     const session = makeThreeOccurrenceSession('session-removal-logged');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // A set is logged on the ex-015 occurrence (order 2).
     const logged = logSessionSet(session, {
@@ -247,7 +247,7 @@ describe('user-added occurrence removal persistence (M11 Slice 4)', () => {
 
   it('keeps the persisted aggregate valid under the occurrenceKey unique index after a removal', async () => {
     const session = makeThreeOccurrenceSession('session-removal-valid');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const removed = removeSessionExercise(session, { exerciseOrder: 2 });
     if (!removed.ok) throw new Error(removed.error.message);

@@ -158,7 +158,7 @@ describe('occurrence provenance persistence (M11 Slice 1)', () => {
 
   it('persists and hydrates source for template and user_added occurrences', async () => {
     const session = makeSession();
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const logRows = await loadLogRows(session.id);
     expect(logRows.map((row) => row.source)).toEqual(['template', 'user_added']);
@@ -206,7 +206,7 @@ describe('occurrence provenance persistence (M11 Slice 1)', () => {
 
   it('keeps provenance attached to the occurrence through a reorder save', async () => {
     const session = makeSession('session-provenance-reorder');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const loaded = await workoutSessionRepository.findById(sessionId('session-provenance-reorder'));
     if (!loaded) throw new Error('session not found');
@@ -232,7 +232,7 @@ describe('occurrence-key high-water mark persistence (M11 Slice 1)', () => {
     const session = makeSession('session-mark-default');
     expect(session.nextOccurrenceKey).toBe(3);
 
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     expect((await loadSessionRow('session-mark-default'))?.nextOccurrenceKey).toBe(3);
     const reloaded = await workoutSessionRepository.findById(sessionId('session-mark-default'));
@@ -242,7 +242,7 @@ describe('occurrence-key high-water mark persistence (M11 Slice 1)', () => {
   it('round-trips an explicit high-water mark above the existing keys', async () => {
     const session = makeSession('session-mark-explicit', 9);
 
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     expect((await loadSessionRow('session-mark-explicit'))?.nextOccurrenceKey).toBe(9);
     const reloaded = await workoutSessionRepository.findById(sessionId('session-mark-explicit'));
@@ -251,7 +251,7 @@ describe('occurrence-key high-water mark persistence (M11 Slice 1)', () => {
 
   it('hydrates a legacy NULL mark through the max+1 fallback and self-heals on save', async () => {
     const session = makeSession('session-mark-legacy');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // Simulate a row written before the column existed.
     await db
@@ -271,7 +271,7 @@ describe('occurrence-key high-water mark persistence (M11 Slice 1)', () => {
 
   it('advances the persisted mark on every whole-aggregate save', async () => {
     const session = makeSession('session-mark-advance');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const loaded = await workoutSessionRepository.findById(sessionId('session-mark-advance'));
     if (!loaded) throw new Error('session not found');

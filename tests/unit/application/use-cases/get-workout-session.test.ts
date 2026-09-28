@@ -41,7 +41,7 @@ function seedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, 
   const { swId, workoutId } = seedProgram();
   const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
-  return repo.save(sr.data);
+  return repo.create(sr.data);
 }
 
 function makeUseCase() {

@@ -166,7 +166,7 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
     // to order 3 AND re-parent both set_log rows to (session, 3) — the
     // set_logs composite FK would reject any other arrangement.
     const session = makeSession();
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     const loaded = await workoutSessionRepository.findById(session.id);
     if (!loaded) throw new Error('session not found');
@@ -214,7 +214,7 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
 
   it('round-trips an up move and its reversing down move', async () => {
     const session = makeSession('session-reorder-up');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // Move the logged-set occurrence UP: ex-015 to order 1, ex-002 to 2, and
     // the two sets re-parent from order 2 to order 1.
@@ -255,7 +255,7 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
 
   it('rejects a stale-version move save instead of overwriting a concurrent reorder', async () => {
     const session = makeSession('session-reorder-stale');
-    await workoutSessionRepository.save(session); // version 0
+    await workoutSessionRepository.create(session); // version 0
 
     // A concurrent tab moves the logged-set occurrence down and saves
     // (version 0 → 1), re-parenting its sets to order 3.
@@ -284,7 +284,7 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
 
   it('persists occurrence keys and reorders them with their occurrences (PR #13 Finding 1)', async () => {
     const session = makeSession('session-reorder-keys');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // The insert persisted a distinct token per occurrence, in creation order.
     let logRows = await loadLogRows('session-reorder-keys');
@@ -309,7 +309,7 @@ describe('DrizzleWorkoutSessionRepository reorder persistence (M10 Slice 5)', ()
 
   it('hydrates legacy NULL occurrence_key rows via the order fallback and self-heals on the next save (PR #13 Finding 1)', async () => {
     const session = makeSession('session-legacy-keys');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // Simulate pre-fix legacy rows: NULL tokens, exercised orders intact.
     await db.update(exerciseLogs).set({ occurrenceKey: null }).where(
@@ -349,7 +349,7 @@ describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
 
   it('maps a duplicate-occurrence-key save to the typed conflict error, never session-exists', async () => {
     const session = makeSession('session-key-dupes');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // A snapshot whose tokens collide (order 1 stamped with order 2's key)
     // is one the domain factory would never build — the repository trusts
@@ -379,7 +379,7 @@ describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
 
   it('rejects the duplicate at the database level, not only through hydration', async () => {
     const session = makeSession('session-key-db-reject');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
 
     // Prove the PARTIAL index itself fires: two non-null equal keys in one
     // session violate `exercise_logs_session_occurrence_key_unique`. The
@@ -406,8 +406,8 @@ describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
       scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
       workoutId: 'wo-beginner-strength-b',
     });
-    await workoutSessionRepository.save(first);
-    await workoutSessionRepository.save(second);
+    await workoutSessionRepository.create(first);
+    await workoutSessionRepository.create(second);
 
     // Both sessions legitimately carry the tokens 1, 2, 3 — uniqueness is
     // scoped to the session, not global.
@@ -419,7 +419,7 @@ describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
 
   it('keeps allowing multiple NULL legacy occurrence_key rows in one session', async () => {
     const session = makeSession('session-keys-null-legacy');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
     await db
       .update(exerciseLogs)
       .set({ occurrenceKey: null })
@@ -437,7 +437,7 @@ describe('exercise_logs occurrence_key uniqueness (PR #13 Finding 2)', () => {
     // self-conflicting (e.g. rows reinserted in an order that collides with
     // not-yet-deleted siblings), this exact M10 flow would break.
     const session = makeSession('session-keys-reorder');
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
     await db
       .update(exerciseLogs)
       .set({ occurrenceKey: null })

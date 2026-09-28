@@ -15,7 +15,7 @@
  * SessionEnrollmentNotFoundError, which is re-checked here against current
  * state: a missing enrollment resolves to the typed NOT_ENROLLED outcome, a
  * replacement enrollment (leave followed by a rejoin) gets the session
- * re-pointed and saved exactly once, and an unchanged enrollment means the
+ * re-pointed and created exactly once, and an unchanged enrollment means the
  * error contradicts observable state and is rethrown rather than swallowed.
  * If the retry itself loses its enrollment, current state is re-checked once
  * more without saving again: a missing enrollment resolves to NOT_ENROLLED, a
@@ -180,7 +180,10 @@ export class StartWorkoutSessionUseCase {
     // pre-save snapshot (PR #13 Finding 5).
     let persisted: WorkoutSession;
     try {
-      persisted = await this.sessionRepository.save(session);
+      // Creation is INSERT only: a session that already exists is never
+      // overwritten by a start (the pre-Slice-4 upsert could), and re-starting
+      // an occurrence is refused by the database rather than merged.
+      persisted = await this.sessionRepository.create(session);
     } catch (error) {
       if (error instanceof SessionAlreadyExistsError) {
         return err(sessionAlreadyExists(occurrence.scheduled.id));
@@ -228,7 +231,7 @@ export class StartWorkoutSessionUseCase {
     const replacement: WorkoutSession = { ...session, enrollmentId: replacementEnrollmentId };
     let persisted: WorkoutSession;
     try {
-      persisted = await this.sessionRepository.save(replacement);
+      persisted = await this.sessionRepository.create(replacement);
     } catch (retryError) {
       if (retryError instanceof SessionAlreadyExistsError) {
         // The occurrence was already started under the replacement
@@ -247,7 +250,7 @@ export class StartWorkoutSessionUseCase {
           return err(notEnrolled(program.slug));
         }
         if (rechecked.id !== retryError.enrollmentId) {
-          // The enrollment churned yet again. Saving once more would make the
+          // The enrollment churned yet again. Creating once more would make the
           // recovery unbounded, so surface the race as a typed conflict.
           return err(enrollmentChanged(program.slug));
         }

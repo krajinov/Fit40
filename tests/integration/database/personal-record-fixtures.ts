@@ -223,7 +223,7 @@ export function prSession(spec: PrSessionSpec): WorkoutSession {
 /** Persists sessions through the real write port (whole-aggregate saves). */
 export async function savePrSessions(...sessions: ReadonlyArray<WorkoutSession>): Promise<void> {
   for (const session of sessions) {
-    await workoutSessionRepository.save(session);
+    await workoutSessionRepository.create(session);
   }
 }
 

@@ -258,7 +258,7 @@ export async function saveInProgressSession(
   repo: InMemoryWorkoutSessionRepository,
   options: SessionFixtureOptions,
 ): Promise<void> {
-  await repo.save(buildSession(options));
+  await repo.create(buildSession(options));
 }
 
 /** Saves a completed session — the completion/history fact. */
@@ -281,7 +281,7 @@ export async function saveCompletedSession(
   );
   if (!done.ok) throw new Error(done.error.message);
 
-  await repo.save(done.data);
+  await repo.create(done.data);
 }
 
 /** Catalog stub answering `findBySlug` with the supplied program. */

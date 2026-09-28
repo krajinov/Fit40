@@ -206,11 +206,31 @@ describe('resolveRunClosure', () => {
     expect(state.openInProgramOrder).toEqual([]);
   });
 
-  it('counts a duplicated fact id once', () => {
+  it('accepts each valid fact arrangement: completed-only, not-performed-only, mixed distinct', () => {
+    expect(closure({ completed: ['sched-w1-1'] }).completedWorkouts).toBe(1);
+    expect(closure({ notPerformed: ['sched-w1-1'] }).notPerformedWorkouts).toBe(1);
+
+    const mixed = closure({ completed: ['sched-w1-1'], notPerformed: ['sched-w1-2'] });
+
+    expect(mixed.completedWorkouts).toBe(1);
+    expect(mixed.notPerformedWorkouts).toBe(1);
+    expect(mixed.settledWorkouts).toBe(2);
+    expect(mixed.openWorkouts).toBe(2);
+  });
+
+  it('counts a duplicated completed id once', () => {
     const state = closure({ completed: ['sched-w1-1', 'sched-w1-1', 'sched-w1-2'] });
 
     expect(state.completedWorkouts).toBe(2);
     expect(state.settledWorkouts).toBe(2);
+  });
+
+  it('counts a duplicated not-performed id once', () => {
+    const state = closure({ notPerformed: ['sched-w1-1', 'sched-w1-1'] });
+
+    expect(state.notPerformedWorkouts).toBe(1);
+    expect(state.settledWorkouts).toBe(1);
+    expect(state.openWorkouts).toBe(3);
   });
 
   it('ignores fact ids outside the authored program and reports them', () => {
@@ -225,23 +245,50 @@ describe('resolveRunClosure', () => {
     expect(state.isConcluded).toBe(false);
   });
 
-  it('settles an occurrence listed in both fact lists exactly once', () => {
-    const state = closure({
-      program: makeProgram(1, 1),
-      completed: ['sched-w1-1'],
-      notPerformed: ['sched-w1-1'],
+  it('fails loudly when an authored occurrence is settled by both facts (I1)', () => {
+    const program = makeProgram();
+
+    // Contradictory authoritative execution facts: no winner rule is invented
+    // and neither fact is discarded — the impossible state is made visible (the
+    // `Follow-through contract violated: …` convention), because any precedence
+    // rule would report counts matching neither fact.
+    expect(() =>
+      resolveRunClosure(program, {
+        completedIds: ids(['sched-w1-1']),
+        notPerformedIds: ids(['sched-w1-1']),
+      }),
+    ).toThrow(
+      'Run closure contract violated: occurrence "sched-w1-1" is both completed and recorded as not performed',
+    );
+  });
+
+  it('fails loudly through isRunConcluded as well', () => {
+    const program = makeProgram();
+
+    expect(() =>
+      isRunConcluded(program, {
+        completedIds: ids(['sched-w1-1', 'sched-w1-2']),
+        notPerformedIds: ids(['sched-w1-2']),
+      }),
+    ).toThrow('Run closure contract violated');
+  });
+
+  it('keeps an unknown id in both fact lists a foreign id, never a settlement', () => {
+    const program = makeProgram();
+
+    // The contradiction rule is scoped to AUTHORED occurrences: an id the
+    // program does not define can settle nothing, so it follows the established
+    // foreign-id contract — reported once, counted nowhere, no throw.
+    const state = resolveRunClosure(program, {
+      completedIds: ids(['unknown-1']),
+      notPerformedIds: ids(['unknown-1']),
     });
 
-    // No winner rule is invented: the two counts restate the two facts, while
-    // the run's settled/open arithmetic counts the occurrence once.
-    expect(state).toMatchObject({
-      totalWorkouts: 1,
-      completedWorkouts: 1,
-      notPerformedWorkouts: 1,
-      settledWorkouts: 1,
-      openWorkouts: 0,
-      isConcluded: true,
-    });
+    expect(state.unrecognizedIds).toEqual(ids(['unknown-1']));
+    expect(state.completedWorkouts).toBe(0);
+    expect(state.notPerformedWorkouts).toBe(0);
+    expect(state.settledWorkouts).toBe(0);
+    expect(state.isConcluded).toBe(false);
   });
 
   it('keeps the open occurrences in authored program order', () => {

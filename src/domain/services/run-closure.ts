@@ -27,13 +27,19 @@
  *   occurrence, today's occurrence and a past-due occurrence are all simply
  *   open until the user settles them. Conclusion is never a date consequence.
  * - Duplicates inside one fact list count once (the `calculateProgramProgress`
- *   contract) and unknown ids are ignored in the counts while being reported in
- *   `unrecognizedIds`, so bad input is detectable and never silently absorbed.
- * - One occurrence appearing in BOTH lists settles once: it can neither open the
- *   run nor double-settle it. No winner rule is invented — the two counts
- *   simply restate the two facts, and `settledWorkouts` counts the occurrence
- *   once. (In a healthy run this cannot happen: recording requires the absence
- *   of a completed session, and completing a recorded occurrence is refused.)
+ *   convention) and unknown ids are ignored in the counts while being reported
+ *   in `unrecognizedIds`, so bad input is detectable and never silently
+ *   absorbed.
+ * - An authored occurrence present in BOTH lists is contradictory execution
+ *   truth — M17 invariant I1 is "one settlement per occurrence" — and it FAILS
+ *   LOUDLY. No precedence rule (`completed` outranking `not-performed`, or
+ *   either fact being dropped) is invented, because both facts are
+ *   authoritative and any winner rule would report a state matching neither.
+ *   Valid writes cannot produce it (recording requires no completed session;
+ *   completing a recorded occurrence is refused), so reaching it means
+ *   corrupted data, a repository bug or a query regression. The check is scoped
+ *   to AUTHORED occurrences: overlap on an id the program does not define stays
+ *   a foreign-id report in `unrecognizedIds`.
  *
  * Pure: no I/O, no framework, no clock.
  */
@@ -78,6 +84,8 @@ export function resolveRunClosure(program: TrainingProgram, facts: RunClosureFac
   const authoredIds = new Set<ScheduledWorkoutId>(authored.map((occurrence) => occurrence.id));
   const completed = new Set<ScheduledWorkoutId>(facts.completedIds);
   const notPerformed = new Set<ScheduledWorkoutId>(facts.notPerformedIds);
+
+  assertNoContradictorySettlements(authored, completed, notPerformed);
 
   const openInProgramOrder = authored.filter(
     (occurrence) => !completed.has(occurrence.id) && !notPerformed.has(occurrence.id),
@@ -138,4 +146,35 @@ function unrecognizedFactIds(
 ): ReadonlyArray<ScheduledWorkoutId> {
   const unique = new Set<ScheduledWorkoutId>([...facts.completedIds, ...facts.notPerformedIds]);
   return [...unique].filter((id) => !authoredIds.has(id));
+}
+
+/**
+ * Enforces M17 I1 (one settlement per occurrence) on the AUTHORED schedule: an
+ * occurrence that is both completed and explicitly recorded as not performed is
+ * contradictory authoritative execution truth.
+ *
+ * Throws rather than reconciling (the `follow-through-week.ts` /
+ * `'… contract violated: …'` convention): both facts are authoritative, so any
+ * precedence rule would invent a policy and report a run state matching neither
+ * fact. The first contradiction in authored program order is reported, so the
+ * failure is deterministic regardless of fact-list order.
+ *
+ * Scoped to authored occurrences on purpose: an id the program does not define
+ * can never settle anything, so it keeps the established foreign-id contract
+ * (`unrecognizedIds`) instead of becoming a settlement or an error.
+ */
+function assertNoContradictorySettlements(
+  authored: ReadonlyArray<ScheduledWorkout>,
+  completed: ReadonlySet<ScheduledWorkoutId>,
+  notPerformed: ReadonlySet<ScheduledWorkoutId>,
+): void {
+  const contradictory = authored.find(
+    (occurrence) => completed.has(occurrence.id) && notPerformed.has(occurrence.id),
+  );
+
+  if (contradictory !== undefined) {
+    throw new Error(
+      `Run closure contract violated: occurrence "${contradictory.id}" is both completed and recorded as not performed`,
+    );
+  }
 }

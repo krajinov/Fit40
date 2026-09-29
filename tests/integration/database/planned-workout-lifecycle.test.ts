@@ -35,6 +35,7 @@ import {
 import {
   closeDatabase,
   db,
+  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
@@ -57,6 +58,7 @@ function restartUseCase(): RestartProgramUseCase {
     programRepository,
     programEnrollmentRepository,
     workoutSessionRepository,
+    notPerformedOccurrenceRepository,
     new NodeIdGenerator(),
   );
 }

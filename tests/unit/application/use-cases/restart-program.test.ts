@@ -16,6 +16,7 @@ import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
+import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import { createTrainingProgram, type TrainingProgram } from '@/domain/entities/training-program';
 import { createWorkout } from '@/domain/entities/workout';
 import { Difficulty } from '@/domain/types/exercise';
@@ -33,6 +34,8 @@ import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 
 import { FakeIdGenerator } from '../../helpers/fake-crypto';
+
+import { makeNotPerformedRepo, notPerformedFact } from './schedule-fixtures';
 
 const PROGRAM_ID = 'p1';
 const PROGRAM_SLUG = 'program-one';
@@ -170,6 +173,8 @@ async function makeHarness(
     readonly program?: TrainingProgram | null;
     readonly enrolled?: boolean;
     readonly completedByEnrollment?: Record<string, ReadonlyArray<ScheduledWorkoutId>>;
+    /** Recorded not-performed facts of the CURRENT (old) run. */
+    readonly notPerformedFacts?: ReadonlyArray<NotPerformedOccurrence>;
   } = {},
 ) {
   const programRepo = makeProgramRepo(
@@ -187,17 +192,20 @@ async function makeHarness(
     await enrollmentRepo.create(created.data);
   }
   const sessionRepo = makeSessionRepo(options.completedByEnrollment ?? {});
+  const notPerformed = makeNotPerformedRepo(options.notPerformedFacts ?? []);
 
   return {
     useCase: new RestartProgramUseCase(
       programRepo,
       enrollmentRepo,
       sessionRepo,
+      notPerformed,
       new FakeIdGenerator(),
     ),
     programRepo,
     enrollmentRepo,
     sessionRepo,
+    notPerformed,
   };
 }
 
@@ -497,6 +505,164 @@ describe('RestartProgramUseCase — the replacement', () => {
     expect(replaceSpy).toHaveBeenCalledTimes(1);
     expect(createSpy).not.toHaveBeenCalled();
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * M17 Slice 10 — the gate widens from "complete" to "complete OR concluded".
+ *
+ * The Domain decides both (`isRunConcluded` over the authored program,
+ * `isRunRestartable` over the two verdicts); these tests pin the Application
+ * contract around it: WHICH settled runs may restart, that the eligibility
+ * read is enrollment-scoped, that no date or calendar enters the gate, and
+ * that the write path — one compare-and-replace — is untouched.
+ */
+describe('RestartProgramUseCase — M17 Slice 10 restartability', () => {
+  it('restarts a concluded-but-incomplete run exactly once (no second write)', async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      notPerformedFacts: [notPerformedFact(OLD_ENROLLMENT, SCHED_B)],
+    });
+    const replaceSpy = vi.spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew');
+    const createSpy = vi.spyOn(harness.enrollmentRepo, 'create');
+    const deleteSpy = vi.spyOn(harness.enrollmentRepo, 'delete');
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    // Restarted although the program is NOT complete: the record settles the
+    // second authored occurrence, so the run is concluded.
+    expect(result.ok).toBe(true);
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
+    expect(replaceSpy.mock.calls[0]?.[0]).toBe(OLD_ENROLLMENT);
+    // The write discipline is byte-identical to M14: one CAS, no composition.
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    const owned = await harness.enrollmentRepo.findByUserAndProgram(uid('user-a'), pid(PROGRAM_ID));
+    expect(owned?.id).toBe('fake-id-1');
+  });
+
+  it('restarts a run settled ENTIRELY by recorded facts (no completed session)', async () => {
+    // Rowless by construction: this use case has no planned-workout port at
+    // all, so the records settle their occurrences with no calendar row and no
+    // date anywhere in the eligibility read.
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [] },
+      notPerformedFacts: [
+        notPerformedFact(OLD_ENROLLMENT, SCHED_A),
+        notPerformedFact(OLD_ENROLLMENT, SCHED_B),
+      ],
+    });
+    const replaceSpy = vi.spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew');
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(true);
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('never consults a date: a record attested in the future still settles its occurrence', async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      // The attestation instant is deliberately beyond any plausible horizon —
+      // the gate reads no clock, no planned row and no date, so conclusion
+      // (and therefore restartability) cannot be a date consequence.
+      notPerformedFacts: [notPerformedFact(OLD_ENROLLMENT, SCHED_B, '2027-06-01T00:00:00.000Z')],
+    });
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('reads execution truth through the two read-only ports, together', async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      notPerformedFacts: [notPerformedFact(OLD_ENROLLMENT, SCHED_B)],
+    });
+
+    await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(harness.sessionRepo.listCompletedScheduledWorkoutIds).toHaveBeenCalledTimes(1);
+    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledTimes(1);
+    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledWith(enid(OLD_ENROLLMENT));
+    // No session aggregate, no hydration, no planning read.
+    expect(harness.sessionRepo.listCompletedByEnrollment).not.toHaveBeenCalled();
+    expect(harness.sessionRepo.listCompletedOccurrenceActivity).not.toHaveBeenCalled();
+  });
+
+  it('refuses an open run with PROGRAM_NOT_COMPLETE and writes nothing', async () => {
+    const harness = await makeHarness({
+      // SCHED_B is open: one completed plus one open is neither complete nor
+      // concluded, so the existing error stays reachable.
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+    });
+    const replaceSpy = vi.spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew');
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+    expect(replaceSpy).not.toHaveBeenCalled();
+    // The gate still reads the facts — it needs them to know the run is open.
+    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores another run's recorded facts: the gate is enrollment-scoped", async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      notPerformedFacts: [notPerformedFact('enr-other', SCHED_B)],
+    });
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+  });
+
+  it('reads no execution truth for a visitor without a run', async () => {
+    const harness = await makeHarness({ enrolled: false });
+
+    await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(harness.notPerformed.listByEnrollment).not.toHaveBeenCalled();
+    expect(harness.sessionRepo.listCompletedScheduledWorkoutIds).not.toHaveBeenCalled();
+  });
+
+  it('maps a stale CAS that finds a concluded-but-incomplete replacement to ENROLLMENT_CHANGED', async () => {
+    const completed: Record<string, ReadonlyArray<ScheduledWorkoutId>> = {
+      [OLD_ENROLLMENT]: [scheduledId(SCHED_A)],
+    };
+    const harness = await makeHarness({
+      completedByEnrollment: completed,
+      notPerformedFacts: [
+        notPerformedFact(OLD_ENROLLMENT, SCHED_B),
+        // The replacement run is itself concluded-but-incomplete, so the
+        // read-only re-check must reach ENROLLMENT_CHANGED through the SAME
+        // widened rule — never PROGRAM_NOT_COMPLETE for a settled run.
+        notPerformedFact('enr-fresh-again', SCHED_B),
+      ],
+    });
+    const replaceSpy = vi
+      .spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew')
+      .mockImplementation(async () => {
+        await seedReplacementEnrollment(
+          harness.enrollmentRepo,
+          completed,
+          'enr-fresh-again',
+          [scheduledId(SCHED_A)],
+        );
+        return false;
+      });
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('ENROLLMENT_CHANGED');
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
   });
 });
 

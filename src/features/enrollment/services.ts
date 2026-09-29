@@ -9,12 +9,14 @@
 import { EnrollInProgramUseCase } from '@/application/use-cases/enroll-in-program';
 import { GetProgramCompletionSummaryUseCase } from '@/application/use-cases/get-program-completion-summary';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
+import { GetRunClosureSummaryUseCase } from '@/application/use-cases/get-run-closure-summary';
 import { LeaveProgramUseCase } from '@/application/use-cases/leave-program';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
 import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import {
   exerciseRepository,
+  notPerformedOccurrenceRepository,
   personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
@@ -59,13 +61,29 @@ export const getProgramCompletionSummaryUseCase = new GetProgramCompletionSummar
 );
 
 /**
- * The M14 restart of a completed program run (Slice 5). ONE write — Slice 3's
- * atomic compare-and-replace — so a failed restart can never leave the user
- * unenrolled, and the completed run's sessions survive as detached history.
+ * The M17 run-closure summary of the current run (Slice 10). Composed beside
+ * the enrollment read use cases: it resolves ownership the same way, reads the
+ * run's own completed occurrence ids and recorded not-performed facts through
+ * read-only ports, and derives every verdict from the Domain — no persistence
+ * of its own, and no influence on the M14 completion summary above.
+ */
+export const getRunClosureSummaryUseCase = new GetRunClosureSummaryUseCase(
+  programEnrollmentRepository,
+  workoutSessionRepository,
+  notPerformedOccurrenceRepository,
+);
+
+/**
+ * The M14 restart of a finished program run (Slice 5, widened by M17 Slice 10).
+ * ONE write — Slice 3's atomic compare-and-replace — so a failed restart can
+ * never leave the user unenrolled; the completed run's sessions survive as
+ * detached history and its not-performed facts cascade with the old
+ * enrollment. The eligibility gate is the Domain's `isRunRestartable`.
  */
 export const restartProgramUseCase = new RestartProgramUseCase(
   programRepository,
   programEnrollmentRepository,
   workoutSessionRepository,
+  notPerformedOccurrenceRepository,
   idGenerator,
 );

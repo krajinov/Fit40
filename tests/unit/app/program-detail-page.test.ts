@@ -21,6 +21,7 @@ const {
   notFoundMock,
   getCurrentUserMock,
   enrollmentExecute,
+  closureExecute,
   programExecute,
   resolveNextExecute,
   scheduleExecute,
@@ -35,6 +36,7 @@ const {
     notFoundMock: notFound,
     getCurrentUserMock: vi.fn(),
     enrollmentExecute: vi.fn(),
+    closureExecute: vi.fn(),
     programExecute: vi.fn(),
     resolveNextExecute: vi.fn(),
     scheduleExecute: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@/features/auth/current-user', () => ({ getCurrentUser: getCurrentUserM
 
 vi.mock('@/features/enrollment/services', () => ({
   getProgramEnrollmentUseCase: { execute: enrollmentExecute },
+  getRunClosureSummaryUseCase: { execute: closureExecute },
 }));
 
 vi.mock('@/features/programs/services', () => ({
@@ -227,6 +230,28 @@ function followThroughDto(configured = true) {
   };
 }
 
+/**
+ * The M17 Slice 10 run-closure DTO: six authored occurrences, four completed,
+ * one recorded, one still open — concluded false, so the page merely carries it.
+ */
+function runClosureDto(overrides: Record<string, unknown> = {}) {
+  return {
+    programSlug: SLUG,
+    totalWorkouts: 6,
+    completedWorkouts: 4,
+    notPerformedWorkouts: 1,
+    openWorkouts: 1,
+    hasOpenWorkout: true,
+    openInProgramOrder: [
+      { scheduledWorkoutId: 'sw-6', weekNumber: 2, workoutOrder: 3, workoutName: 'Cardio' },
+    ],
+    isConcluded: false,
+    isProgramComplete: false,
+    restartAvailable: false,
+    ...overrides,
+  };
+}
+
 describe('/programs/[programSlug] page (M15 Slice 6)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -239,6 +264,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     resolveNextExecute.mockResolvedValue(NEXT_DTO);
     scheduleExecute.mockResolvedValue({ ok: true, data: scheduleDto() });
     followThroughExecute.mockResolvedValue({ ok: true, data: followThroughDto() });
+    closureExecute.mockResolvedValue({ ok: true, data: runClosureDto() });
   });
 
   it('never reads or renders a schedule for anonymous visitors', async () => {
@@ -248,6 +274,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    expect(closureExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Weekly schedule');
@@ -261,6 +288,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    expect(closureExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Join this program');
@@ -277,6 +305,15 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(input).toMatchObject({ userId: USER_ID });
     expect(input?.program).toBe(PROGRAM_AGGREGATE);
     expect(input?.now).toBeInstanceOf(Date);
+
+    // M17 Slice 10: the closure summary rides the composed read with the SAME
+    // aggregate — and deliberately carries no request clock, because
+    // conclusion is not a date consequence.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    const closureInput = closureExecute.mock.calls[0]?.[0];
+    expect(closureInput).toMatchObject({ userId: USER_ID });
+    expect(closureInput?.program).toBe(PROGRAM_AGGREGATE);
+    expect(closureInput?.now).toBeUndefined();
 
     expect(markup).toContain('aria-label="Training schedule"');
     expect(markup).toContain('aria-label="This week"');
@@ -305,11 +342,20 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
   it('keeps the M14 completed state authoritative: no schedule read, no section, restart/leave intact', async () => {
     enrollmentExecute.mockResolvedValue({ ok: true, data: ENROLLED_COMPLETE });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: runClosureDto({ isConcluded: true, isProgramComplete: true, restartAvailable: true }),
+    });
 
     const markup = await renderPage();
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    // The closure summary IS loaded for a complete run — it is factual state —
+    // but Slice 10 draws no lifecycle conclusion from it: the M14 surface
+    // above stays the only state rendered, and none of the DTO's labels leak.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    expect(markup).not.toContain('Cardio');
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('id="training-schedule"');
     expect(markup).not.toContain('This plan so far');
@@ -318,6 +364,43 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('Start program again');
     expect(markup).toContain('Leave plan');
     expect(markup).toContain('Program completed — every workout is done.');
+  });
+
+  it('exposes the closure summary to the detail view without rendering any of it (Slice 11 owns the states)', async () => {
+    const markup = await renderPage();
+
+    // Loaded once, for the enrolled run, through the composed use case.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    // Nothing of the DTO reaches the markup: no counts, no open occurrence
+    // labels, no verdict copy — this slice only wires the read.
+    expect(markup).not.toContain('Cardio');
+    expect(markup).not.toContain('4 completed');
+    expect(markup).not.toContain('concluded');
+    // Every existing surface is unchanged.
+    expect(markup).toContain('Weekly schedule');
+    expect(markup).toContain('aria-label="Training schedule"');
+    expect(markup).toContain('This plan so far');
+  });
+
+  it('degrades a failed run-closure read to a null DTO (logged), never to fabricated counts', async () => {
+    closureExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'bad id', field: 'userId' },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const markup = await renderPage();
+
+      expect(consoleError).toHaveBeenCalled();
+      expect(markup).toContain('Weekly schedule');
+      expect(markup).toContain('aria-label="Training schedule"');
+      // Still the incomplete M14 surface: a failed closure read never becomes
+      // a completion claim.
+      expect(markup).not.toContain('View completion summary');
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('degrades a failed schedule read to no section (logged), never to unconfigured', async () => {

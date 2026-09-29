@@ -35,6 +35,7 @@ import {
 } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
+import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
@@ -45,6 +46,7 @@ import { seedUser } from './personal-record-fixtures';
 import {
   closeDatabase,
   db,
+  notPerformedOccurrenceRepository,
   personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
@@ -53,6 +55,7 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { countFacts, insertFact } from './not-performed-fixtures';
 import { insertSession } from './session-fixtures';
 
 const RUNNER = 'restart-runner';
@@ -217,12 +220,85 @@ async function seedCompletedRun(): Promise<CompletedRun> {
   return { program, enrollmentId: FIRST_ENROLLMENT, sessionIds, exerciseIds };
 }
 
+/**
+ * A MIXED run: the first `completed` authored occurrences get real completed
+ * sessions, the next `recorded` get explicit not-performed records, and
+ * whatever remains stays open. `completed + recorded === authored` is therefore
+ * a CONCLUDED run that is not complete — the M17 Slice 10 restart case.
+ */
+async function seedMixedRun(options: {
+  readonly completed: number;
+  readonly recorded: number;
+}): Promise<CompletedRun> {
+  await seedUser(RUNNER);
+  await seedUser(OTHER);
+
+  const program = await programRepository.findBySlug(PROGRAM_SLUG);
+  if (program === null) throw new Error('seed program missing');
+
+  const catalog = await db
+    .select({ id: exercises.id })
+    .from(exercises)
+    .orderBy(asc(exercises.id))
+    .limit(3);
+  const exerciseIds = catalog.map((row) => exerciseId(row.id));
+  if (exerciseIds.length === 0) throw new Error('seed catalog is empty');
+
+  await enroll(FIRST_ENROLLMENT, RUNNER, program.id);
+
+  const occurrences = listOccurrences(program);
+  const sessionIds: string[] = [];
+
+  for (let index = 0; index < options.completed; index += 1) {
+    const occurrence = requireOccurrence(occurrences, index);
+    const exercise = exerciseIds[index % exerciseIds.length];
+    if (exercise === undefined) throw new Error('unreachable: the catalog is non-empty');
+    const day = String(index + 1).padStart(2, '0');
+    const id = `mix-${index + 1}`;
+    await insertSession(
+      buildSession({
+        id,
+        owner: RUNNER,
+        enrollmentId: FIRST_ENROLLMENT,
+        occurrence,
+        startedAt: `2026-03-${day}T09:00:00Z`,
+        completedAt: `2026-03-${day}T10:00:00Z`,
+        exerciseId: exercise,
+        weightKg: 30 + index,
+      }),
+    );
+    sessionIds.push(id);
+  }
+
+  for (
+    let index = options.completed;
+    index < options.completed + options.recorded;
+    index += 1
+  ) {
+    const occurrence = requireOccurrence(occurrences, index);
+    await insertFact({
+      enrollmentId: FIRST_ENROLLMENT,
+      scheduledWorkoutId: occurrence.id,
+      recordedAt: `2026-03-25T12:00:${String(index).padStart(2, '0')}Z`,
+    });
+  }
+
+  return { program, enrollmentId: FIRST_ENROLLMENT, sessionIds, exerciseIds };
+}
+
 function restartUseCase(
   enrollmentRepo = programEnrollmentRepository,
   sessionRepo = workoutSessionRepository,
   programRepo = programRepository,
+  notPerformedRepo = notPerformedOccurrenceRepository,
 ) {
-  return new RestartProgramUseCase(programRepo, enrollmentRepo, sessionRepo, new NodeIdGenerator());
+  return new RestartProgramUseCase(
+    programRepo,
+    enrollmentRepo,
+    sessionRepo,
+    notPerformedRepo,
+    new NodeIdGenerator(),
+  );
 }
 
 /** The runner's enrollment rows for the program, read straight from the table. */
@@ -364,6 +440,7 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
         new DrizzleProgramEnrollmentRepository(concurrentDb),
         new DrizzleWorkoutSessionRepository(concurrentDb),
         new DrizzleProgramRepository(concurrentDb),
+        new DrizzleNotPerformedOccurrenceRepository(concurrentDb),
       );
 
       const outcomes = await Promise.all([
@@ -449,6 +526,84 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
 
     // The other user never gained an enrollment.
     expect(await enrollmentRowsFor(run.program.id, OTHER)).toEqual([]);
+  });
+
+  it('F. restarts a CONCLUDED-but-incomplete run: facts cascade, sessions survive detached', async () => {
+    // The shared fixture seeds a fully completed run; this scenario needs a
+    // mixed one, so the database is reset and re-seeded here.
+    await resetAndSeed();
+    const mixed = await seedMixedRun({ completed: 9, recorded: 3 });
+
+    // Settled everywhere (9 sessions + 3 records over 12 authored occurrences)
+    // but NOT complete — the case M14 could never restart.
+    const completedBefore = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentIdValue(mixed.enrollmentId),
+    );
+    expect(completedBefore).toHaveLength(9);
+    expect(await countFacts(mixed.enrollmentId)).toBe(3);
+
+    const result = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(true);
+
+    // Exactly one fresh enrollment for the pair.
+    const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(rows).toHaveLength(1);
+    const fresh = rows[0];
+    if (fresh === undefined) throw new Error('expected exactly one enrollment row');
+    expect(fresh.id).not.toBe(mixed.enrollmentId);
+
+    // The old run's not-performed facts cascade away with it; the fresh run
+    // inherits none of them.
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
+    expect(await countFacts(fresh.id)).toBe(0);
+    expect(
+      await notPerformedOccurrenceRepository.listByEnrollment(enrollmentIdValue(fresh.id)),
+    ).toEqual([]);
+
+    // The completed sessions survive, detached — exactly M14's behavior.
+    const sessions = await sessionRowsFor(mixed.sessionIds);
+    expect(sessions.map((session) => session.id)).toEqual([...mixed.sessionIds].sort());
+    expect(sessions.every((session) => session.enrollmentId === null)).toBe(true);
+    expect(sessions.some((session) => session.enrollmentId === fresh.id)).toBe(false);
+    expect(await historyLines(userIdValue(RUNNER))).toHaveLength(mixed.sessionIds.length);
+
+    // The fresh run is OPEN: no completions, so nothing was inherited.
+    const freshCompleted = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentIdValue(fresh.id),
+    );
+    expect(freshCompleted).toEqual([]);
+  });
+
+  it('G. refuses an OPEN run with PROGRAM_NOT_COMPLETE and changes nothing', async () => {
+    await resetAndSeed();
+    // 11 of 12 completed, no records: one occurrence is still open, so the run
+    // is neither complete nor concluded.
+    const mixed = await seedMixedRun({ completed: 11, recorded: 0 });
+
+    const rowsBefore = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
+
+    const result = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+
+    // Enrollment, sessions and facts are untouched by the refusal.
+    const rowsAfter = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(rowsAfter).toHaveLength(1);
+    expect(rowsAfter[0]?.id).toBe(rowsBefore[0]?.id);
+    expect(rowsAfter[0]?.enrolledAt.toISOString()).toBe(rowsBefore[0]?.enrolledAt.toISOString());
+
+    const sessions = await sessionRowsFor(mixed.sessionIds);
+    expect(sessions.every((session) => session.enrollmentId === mixed.enrollmentId)).toBe(true);
+    expect(
+      await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+        enrollmentIdValue(mixed.enrollmentId),
+      ),
+    ).toHaveLength(11);
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
   });
 });
 

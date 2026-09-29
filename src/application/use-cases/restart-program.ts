@@ -14,11 +14,16 @@
  * client value could address another run's enrollment, so restart authority is
  * always the row the current state resolves to.
  *
- * Completion gate: the Domain's `isProgramComplete` over the enrollment's
- * completed scheduled-workout ids — the single authoritative rule (which also
- * reports a zero-schedule program as not complete). Preview state, dashboard
- * state, persisted status, the completion-summary DTO and client input are
- * never consulted.
+ * Restartability gate: the Domain's `isRunRestartable` over the enrollment's
+ * own execution truth — completed scheduled-workout ids (M14) and recorded
+ * not-performed facts (M17). It is the single authoritative rule: complete OR
+ * concluded, so a run whose every authored occurrence is settled (completed or
+ * explicitly recorded as not performed) may start over even though it is NOT
+ * complete, while an open run never can (a zero-schedule program is neither, so
+ * it stays not restartable). Preview state, dashboard state, persisted status,
+ * the completion-summary DTO and client input are never consulted, and no
+ * `complete || concluded` expression is ever written here — the verdict belongs
+ * to the Domain.
  *
  * Fresh run: a new `EnrollmentId` from the `IdGenerator`, the same user and
  * program, and the current instant as `enrolledAt` (the repository's use-case
@@ -29,6 +34,7 @@
  */
 
 import type { IdGenerator } from '@/application/ports/id-generator';
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import {
   EnrollmentAlreadyExistsError,
   type ProgramEnrollmentRepository,
@@ -38,6 +44,7 @@ import type { WorkoutSessionRepository } from '@/application/ports/workout-sessi
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { isProgramComplete } from '@/domain/services/program-progress';
+import { isRunConcluded, isRunRestartable } from '@/domain/services/run-closure';
 import { createUserId, type EnrollmentId, type UserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -59,6 +66,7 @@ export class RestartProgramUseCase {
     private readonly programRepository: ProgramRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
     private readonly idGenerator: IdGenerator,
   ) {}
 
@@ -87,9 +95,10 @@ export class RestartProgramUseCase {
       return err(notEnrolled(program.slug));
     }
 
-    // The authoritative completion gate: nothing is written when the run is
-    // not complete (a zero-schedule program is never complete).
-    if (!(await this.isEnrollmentComplete(program, enrollment.id))) {
+    // The authoritative restartability gate: nothing is written when the run
+    // is still open (a zero-schedule program is neither complete nor
+    // concluded, so it can never be restarted).
+    if (!(await this.isEnrollmentRestartable(program, enrollment.id))) {
       return err(programNotComplete(program.slug));
     }
 
@@ -133,27 +142,46 @@ export class RestartProgramUseCase {
     return err(await this.mapStaleOutcome(program, userId));
   }
 
-  /** Slice 1's rule over the enrollment's own completed occurrence ids. */
-  private async isEnrollmentComplete(
+  /**
+   * The Domain's restartability rule over the enrollment's own execution
+   * truth: completed occurrence ids (M14) and recorded not-performed facts
+   * (M17), read together because neither decides whether the other happens —
+   * two bounded, enrollment-scoped projections, never session aggregates.
+   *
+   * The verdict itself is `isRunRestartable` composing `isProgramComplete` and
+   * `isRunConcluded`; this method never writes a `complete || concluded`
+   * expression of its own, so Application cannot grow a second restartability
+   * policy beside the Domain's.
+   */
+  private async isEnrollmentRestartable(
     program: TrainingProgram,
     enrollmentId: EnrollmentId,
   ): Promise<boolean> {
-    const completedIds = await this.sessionRepository.listCompletedScheduledWorkoutIds(
-      enrollmentId,
-    );
-    return isProgramComplete(program, completedIds);
+    const [completedIds, notPerformedFacts] = await Promise.all([
+      this.sessionRepository.listCompletedScheduledWorkoutIds(enrollmentId),
+      this.notPerformedRepository.listByEnrollment(enrollmentId),
+    ]);
+
+    return isRunRestartable({
+      programComplete: isProgramComplete(program, completedIds),
+      runConcluded: isRunConcluded(program, {
+        completedIds,
+        notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
+      }),
+    });
   }
 
   /**
    * Truthful mapping of a stale CAS (it returned false), from ONE read-only
    * re-check of the user's current enrollment for this program:
    * - none → NOT_ENROLLED (a concurrent leave won);
-   * - a current enrollment that is not complete → PROGRAM_NOT_COMPLETE (a
+   * - a current enrollment that is NOT restartable → PROGRAM_NOT_COMPLETE (a
    *   concurrent restart already produced a fresh, unstarted run);
-   * - a current enrollment that IS complete → ENROLLMENT_CHANGED (the state
-   *   moved again; restarting again from fresh state is legitimate).
-   * Completeness is decided by the same authoritative rule — never inferred
-   * from the enrollment's age or identity.
+   * - a current enrollment that IS restartable → ENROLLMENT_CHANGED (the state
+   *   moved again; restarting again from settled state is legitimate).
+   * Restartability is decided by the same authoritative rule — never inferred
+   * from the enrollment's age or identity — so the widening is identical at
+   * both evaluation points.
    */
   private async mapStaleOutcome(
     program: TrainingProgram,
@@ -164,7 +192,7 @@ export class RestartProgramUseCase {
       return notEnrolled(program.slug);
     }
 
-    return (await this.isEnrollmentComplete(program, current.id))
+    return (await this.isEnrollmentRestartable(program, current.id))
       ? enrollmentChanged(program.slug)
       : programNotComplete(program.slug);
   }

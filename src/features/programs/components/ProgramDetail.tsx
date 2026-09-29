@@ -1,6 +1,7 @@
 import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
@@ -41,6 +42,16 @@ interface ProgramDetailProps {
    * Composition only — every count arrives derived.
    */
   readonly followThrough: EnrollmentFollowThroughDto | null;
+  /**
+   * The M17 run-closure summary of this run (Slice 10): factual counts plus the
+   * complete / concluded / open verdicts, or null when the read failed or the
+   * visitor has no run. EXPOSED ONLY — the three states it enables are rendered
+   * by Slice 11, so this slice draws no lifecycle state from it and the M14
+   * completion surface above remains the only state shown today. The prop is
+   * deliberately not destructured yet: no markup may depend on it before
+   * Slice 11's locked copy and states exist.
+   */
+  readonly runClosure: RunClosureSummaryDto | null;
 }
 
 /**

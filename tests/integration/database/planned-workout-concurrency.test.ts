@@ -33,6 +33,7 @@ import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import { createWorkoutSession } from '@/domain/entities/workout-session';
 import { createUserId, type EnrollmentId } from '@/domain/types/ids';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
+import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzlePlannedWorkoutRepository } from '@/infrastructure/database/repositories/drizzle-planned-workout-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
@@ -56,6 +57,7 @@ import {
 import { reps } from './personal-record-fixtures';
 import {
   closeDatabase,
+  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
@@ -92,6 +94,7 @@ function concurrentPool(max = 6) {
         new DrizzleProgramRepository(db),
         new DrizzleProgramEnrollmentRepository(db),
         new DrizzleWorkoutSessionRepository(db),
+        new DrizzleNotPerformedOccurrenceRepository(db),
         new NodeIdGenerator(),
       ),
     end: async (): Promise<void> => {
@@ -204,6 +207,7 @@ function restartUseCase(): RestartProgramUseCase {
     programRepository,
     programEnrollmentRepository,
     workoutSessionRepository,
+    notPerformedOccurrenceRepository,
     new NodeIdGenerator(),
   );
 }

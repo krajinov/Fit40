@@ -45,11 +45,9 @@ interface ProgramDetailProps {
   /**
    * The M17 run-closure summary of this run (Slice 10): factual counts plus the
    * complete / concluded / open verdicts, or null when the read failed or the
-   * visitor has no run. EXPOSED ONLY — the three states it enables are rendered
-   * by Slice 11, so this slice draws no lifecycle state from it and the M14
-   * completion surface above remains the only state shown today. The prop is
-   * deliberately not destructured yet: no markup may depend on it before
-   * Slice 11's locked copy and states exist.
+   * visitor has no run. Composition only — the panel renders the three states
+   * from it (M17 Slice 11) and never recomputes a verdict; the M14 completion
+   * surface remains the only completion state.
    */
   readonly runClosure: RunClosureSummaryDto | null;
 }
@@ -93,11 +91,24 @@ export function ProgramDetail({
   nextWorkoutPreview,
   schedule,
   followThrough,
+  runClosure,
 }: ProgramDetailProps) {
   const completedIds =
     enrollment !== null && enrollment.status === 'enrolled'
       ? new Set<string>(enrollment.completedScheduledWorkoutIds)
       : new Set<string>();
+  // Occurrences the M15 read already resolved as `not-performed`, addressed by
+  // the same route key the up-next preview uses. Facts are only ever read from
+  // that DTO: when the schedule read failed or the visitor is anonymous the set
+  // stays empty and nothing is inferred from a missing session (M17 Slice 11).
+  const recordedKeys = new Set<string>();
+  if (schedule !== null && schedule.status === 'loaded') {
+    for (const item of schedule.schedule.items) {
+      if (item.status === 'not-performed') {
+        recordedKeys.add(`${item.weekNumber}-${item.workoutOrder}`);
+      }
+    }
+  }
   const upNextKey =
     enrollment !== null &&
     enrollment.status === 'enrolled' &&
@@ -144,6 +155,7 @@ export function ProgramDetail({
         <EnrolledProgramPanel
           program={program}
           enrollment={enrollment}
+          runClosure={runClosure}
           nextWorkout={
             nextWorkoutPreview === null
               ? null
@@ -187,6 +199,7 @@ export function ProgramDetail({
             week={week}
             status={weekStatus(week.weekNumber, enrollment)}
             completedIds={completedIds}
+            recordedKeys={recordedKeys}
             upNextKey={upNextKey}
           />
         ))}

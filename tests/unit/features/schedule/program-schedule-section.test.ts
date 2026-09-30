@@ -24,8 +24,18 @@ vi.mock('@/features/schedule/actions/configure-training-days', () => ({
 vi.mock('@/features/schedule/actions/reschedule-planned-workout', () => ({
   reschedulePlannedWorkoutAction: vi.fn(),
 }));
+vi.mock('@/features/schedule/actions/record-not-performed', () => ({
+  recordNotPerformedAction: vi.fn(),
+}));
+vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
+  undoNotPerformedAction: vi.fn(),
+}));
 
-import type { PlannedWorkoutDto, ScheduleReadState } from '@/application/dto/schedule';
+import type {
+  PlannedWorkoutDto,
+  ScheduleReadState,
+  UnplacedNotPerformedWorkoutDto,
+} from '@/application/dto/schedule';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
 declare global {
@@ -308,10 +318,12 @@ describe('ProgramScheduleSection (M15 Slice 6)', () => {
       expect(href.startsWith(`/programs/${SLUG}/weeks/`)).toBe(true);
       expect(href).not.toContain('enr-');
     }
-    // Slice 7: only public fields exist in the scheduling forms — two Move
-    // forms (Monday past-due, Friday planned) plus the change-days form — and
-    // no enrollment/database/session/user identity anywhere.
-    expect(container.querySelectorAll('form')).toHaveLength(3);
+    // Scheduling forms only — two Move forms (Monday past-due, Friday
+    // planned), three record forms (the same two plus the in-progress slot),
+    // and the change-days form — with no enrollment/database/session/user
+    // identity anywhere: the settlement forms carry their authored
+    // coordinates from server-rendered props, not from hidden fields.
+    expect(container.querySelectorAll('form')).toHaveLength(6);
     const fieldNames = [...container.querySelectorAll<HTMLInputElement>('input')].map(
       (input) => input.name,
     );
@@ -407,12 +419,215 @@ describe('ProgramScheduleSection — recorded not-performed slots (M17 Slice 8)'
     });
 
     const monday = [...container.querySelectorAll('ol li')][0];
-    expect(monday?.textContent).toContain('Not performed');
+    expect(monday?.textContent).toContain('Recorded as not performed');
     const moves = [...(monday?.querySelectorAll('summary') ?? [])].filter(
       (node) => node.textContent === 'Move',
     );
     expect(moves).toHaveLength(0);
   });
 });
+
+/**
+ * M17 Slice 11 — the settlement controls of every calendar status, and the
+ * unplaced recorded list. Affordances are keyed ONLY by the DTO status the
+ * application resolved; presentation never inspects sessions, never derives a
+ * status and never fabricates a date.
+ */
+describe('ProgramScheduleSection — settlement controls (M17 Slice 11)', () => {
+  function stateWith(
+    items: ReadonlyArray<PlannedWorkoutDto>,
+    unplaced: ReadonlyArray<UnplacedNotPerformedWorkoutDto> = [],
+  ): ScheduleReadState {
+    return {
+      status: 'loaded',
+      schedule: {
+        programSlug: SLUG,
+        configured: true,
+        today: TODAY,
+        items: [...items],
+        unplacedNotPerformedWorkouts: [...unplaced],
+        focus: {
+          today: null,
+          next: null,
+          pastDue: null,
+          notPerformedRecorded: items.filter((entry) => entry.status === 'not-performed').length,
+        },
+      },
+    };
+  }
+
+  /** The seven day slots in Monday-first order (the calendar's own `<ol>`). */
+  function daySlots(container: HTMLElement): HTMLElement[] {
+    return [...container.querySelectorAll('ol li')] as HTMLElement[];
+  }
+
+  function movesIn(cell: Element | null | undefined): number {
+    if (cell === null || cell === undefined) return 0;
+    return [...cell.querySelectorAll('summary')].filter((node) => node.textContent === 'Move')
+      .length;
+  }
+
+  it('offers Move and "Didn\'t train this" on a planned slot', async () => {
+    const container = await renderSection(
+      stateWith([item({ scheduledWorkoutId: 'sw-fri', plannedDate: '2026-09-25' })]),
+    );
+
+    const friday = daySlots(container)[4];
+    expect(movesIn(friday)).toBe(1);
+    expect(friday?.textContent).toContain("Didn't train this");
+    // No honesty sentence for a workout that was never started.
+    expect(friday?.textContent).not.toContain(
+      'Recording removes the empty workout you have in progress.',
+    );
+  });
+
+  it('offers Move and "Didn\'t train this" on a past-due slot', async () => {
+    const container = await renderSection(
+      stateWith([
+        item({ scheduledWorkoutId: 'sw-mon', plannedDate: '2026-09-21', status: 'past-due' }),
+      ]),
+    );
+
+    const monday = daySlots(container)[0];
+    expect(monday?.textContent).toContain('Past due');
+    expect(movesIn(monday)).toBe(1);
+    expect(monday?.textContent).toContain("Didn't train this");
+  });
+
+  it('keeps Resume and adds the record control with the honesty copy on an in-progress slot', async () => {
+    const container = await renderSection(
+      stateWith([
+        item({
+          scheduledWorkoutId: 'sw-today',
+          plannedDate: TODAY,
+          workoutOrder: 2,
+          status: 'in-progress',
+        }),
+      ]),
+    );
+
+    const today = daySlots(container)[2];
+    // The existing session affordance is preserved…
+    expect(today?.querySelector('a[href$="/session"]')?.textContent).toBe('Resume');
+    // …and the record control states what recording will do to the empty
+    // in-progress workout. Whether recording is legal stays the use case's
+    // decision — no logged-set inspection happens here.
+    expect(today?.textContent).toContain("Didn't train this");
+    expect(today?.textContent).toContain(
+      'Recording removes the empty workout you have in progress.',
+    );
+    expect(movesIn(today)).toBe(0);
+  });
+
+  it('offers Undo only on a recorded slot: no Move, no session link', async () => {
+    const container = await renderSection(
+      stateWith([
+        item({ scheduledWorkoutId: 'sw-mon', plannedDate: '2026-09-21', status: 'not-performed' }),
+      ]),
+    );
+
+    const monday = daySlots(container)[0];
+    expect(monday?.textContent).toContain('Recorded as not performed');
+    expect([...(monday?.querySelectorAll('button') ?? [])].some((b) => b.textContent === 'Undo')).toBe(
+      true,
+    );
+    expect(movesIn(monday)).toBe(0);
+    expect(monday?.querySelector('a[href$="/session"]')).toBeNull();
+    expect(monday?.textContent).not.toContain("Didn't train this");
+  });
+
+  it('offers no settlement control on a completed slot', async () => {
+    const container = await renderSection(
+      stateWith([
+        item({
+          scheduledWorkoutId: 'sw-sun',
+          plannedDate: '2026-09-27',
+          workoutOrder: 4,
+          status: 'completed',
+        }),
+      ]),
+    );
+
+    const sunday = daySlots(container)[6];
+    expect(sunday?.textContent).toContain('Completed');
+    expect(sunday?.textContent).not.toContain("Didn't train this");
+    expect([...(sunday?.querySelectorAll('button') ?? [])].some((b) => b.textContent === 'Undo')).toBe(
+      false,
+    );
+    expect(movesIn(sunday)).toBe(0);
+  });
+
+  it('renders the unplaced recorded list with authored labels and one Undo per row', async () => {
+    const container = await renderSection(
+      stateWith([], [
+        {
+          scheduledWorkoutId: 'sched-w1-2',
+          weekNumber: 1,
+          workoutOrder: 2,
+          workoutName: 'Upper Body B',
+          recordedAtIso: '2026-09-24T18:30:00.000Z',
+        },
+      ]),
+    );
+
+    const list = container.querySelector('section[aria-label="Recorded as not performed"]');
+    expect(list).not.toBeNull();
+    expect(list?.textContent).toContain('Upper Body B');
+    expect(list?.textContent).toContain('Week 1 · Workout 2');
+    expect(
+      [...(list?.querySelectorAll('button') ?? [])].filter((b) => b.textContent === 'Undo'),
+    ).toHaveLength(1);
+  });
+
+  it('fabricates no date and exposes no Move or Start in the unplaced list', async () => {
+    const container = await renderSection(
+      stateWith([], [
+        {
+          scheduledWorkoutId: 'sched-w2-3',
+          weekNumber: 2,
+          workoutOrder: 3,
+          workoutName: 'Conditioning C',
+          recordedAtIso: '2026-09-24T18:30:00.000Z',
+        },
+      ]),
+    );
+
+    const list = container.querySelector('section[aria-label="Recorded as not performed"]');
+    // No canonical date, no date input, no planned-card affordances.
+    expect(list?.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(list?.querySelector('input[type="date"]')).toBeNull();
+    expect(movesIn(list)).toBe(0);
+    expect(list?.querySelector('a[href$="/session"]')).toBeNull();
+    expect(list?.textContent).not.toContain("Didn't train this");
+  });
+
+  it('keeps multiple unplaced items in the DTO authored order', async () => {
+    const container = await renderSection(
+      stateWith([], [
+        {
+          scheduledWorkoutId: 'sched-w1-3',
+          weekNumber: 1,
+          workoutOrder: 3,
+          workoutName: 'Conditioning A',
+          recordedAtIso: '2026-09-24T18:30:00.000Z',
+        },
+        {
+          scheduledWorkoutId: 'sched-w2-1',
+          weekNumber: 2,
+          workoutOrder: 1,
+          workoutName: 'Upper Body A',
+          recordedAtIso: '2026-09-24T18:31:00.000Z',
+        },
+      ]),
+    );
+
+    const list = container.querySelector('section[aria-label="Recorded as not performed"]');
+    const rows = [...(list?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Conditioning A');
+    expect(rows[1]).toContain('Upper Body A');
+  });
+});
+
 
 });

@@ -59,14 +59,9 @@ function makeFormData(): FormData {
 }
 
 const ERROR_CASES: ReadonlyArray<[string, RestartProgramError]> = [
-  [
-    'PROGRAM_NOT_COMPLETE',
-    {
-      code: 'PROGRAM_NOT_COMPLETE',
-      programSlug: SLUG,
-      message: 'This program run is not complete yet.',
-    },
-  ],
+  // PROGRAM_NOT_COMPLETE is deliberately NOT in this table: since M17 Slice 11
+  // its presentation copy is pinned separately (the Application code is
+  // unchanged, the wording is the Slice 11 one).
   [
     'ENROLLMENT_CHANGED',
     {
@@ -165,6 +160,32 @@ describe('restartProgramAction', () => {
       expect(redirectMock).not.toHaveBeenCalled();
     },
   );
+
+  it("27. maps PROGRAM_NOT_COMPLETE to the Slice 11 copy for a run that hasn't finished", async () => {
+    vi.mocked(restartProgramUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'PROGRAM_NOT_COMPLETE',
+        programSlug: SLUG,
+        // The Application message (M14 wording) is deliberately NOT echoed:
+        // since Slice 10 this code can only mean the run is still OPEN, so the
+        // action states that truth while keeping the code unchanged.
+        message: 'This program run is not complete yet, so it cannot be restarted.',
+      },
+    });
+
+    const state = await restartProgramAction(makeFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: { code: 'PROGRAM_NOT_COMPLETE', message: "This run hasn't finished yet." },
+    });
+    expect(state.ok).toBe(false);
+    if (state.ok) return;
+    expect(state.error.message).not.toContain('not complete yet');
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
 
   it('lets unexpected errors propagate instead of converting them to results', async () => {
     vi.mocked(restartProgramUseCase.execute).mockRejectedValue(new Error('connection lost'));

@@ -27,6 +27,7 @@ vi.mock('@/features/enrollment/actions/leave-program', () => ({
 }));
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
+import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
 import type { EnrollmentActionState } from '@/features/enrollment/types/enrollment-action-state';
 
@@ -90,6 +91,7 @@ type PanelNextWorkout =
 async function renderPanel(
   enrollment: EnrolledView,
   nextWorkout: PanelNextWorkout,
+  runClosure: RunClosureSummaryDto | null = null,
 ): Promise<HTMLElement> {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -100,6 +102,7 @@ async function renderPanel(
         program: PROGRAM,
         enrollment,
         nextWorkout,
+        runClosure,
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -202,5 +205,127 @@ describe('EnrolledProgramPanel / incomplete enrollment (M14)', () => {
     );
     expect(sessionLink?.textContent).toBe('Start workout');
     expect(leaveButtons(container)).toHaveLength(2);
+  });
+});
+
+describe('EnrolledProgramPanel / M17 closure states (Slice 11)', () => {
+  beforeEach(() => {
+    restartExecute.mockReset();
+    restartExecute.mockResolvedValue({ ok: true } satisfies EnrollmentActionState);
+  });
+
+  it('22. keeps the M14 completion presentation for a complete run', async () => {
+    const container = await renderPanel(completeEnrollment(), null, {
+      programSlug: 'fit40-beginner-strength',
+      totalWorkouts: 12,
+      completedWorkouts: 12,
+      notPerformedWorkouts: 0,
+      openWorkouts: 0,
+      hasOpenWorkout: false,
+      openInProgramOrder: [],
+      isConcluded: true,
+      isProgramComplete: true,
+      restartAvailable: true,
+    });
+
+    expect(container.textContent).toContain('Program completed — every workout is done.');
+    expect(
+      container.querySelector<HTMLAnchorElement>('a[href$="/completed"]')?.textContent,
+    ).toBe('View completion summary');
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === 'Start program again'),
+    ).toBe(true);
+    // The completion surface never borrows closure vocabulary.
+    expect(container.textContent).not.toContain('Run closed');
+  });
+
+  it('23./24. renders the concluded counts and restart, never completion language or link', async () => {
+    const container = await renderPanel(incompleteEnrollment(), {
+      weekNumber: 1,
+      workoutOrder: 2,
+      workoutName: 'Push B',
+      metaLabel: '6 exercises · about 45 minutes',
+      sessionState: 'not-started',
+    }, {
+      programSlug: 'fit40-beginner-strength',
+      totalWorkouts: 36,
+      completedWorkouts: 30,
+      notPerformedWorkouts: 6,
+      openWorkouts: 0,
+      hasOpenWorkout: false,
+      openInProgramOrder: [],
+      isConcluded: true,
+      isProgramComplete: false,
+      restartAvailable: true,
+    });
+
+    // Factual counts, both settlement kinds named as they are.
+    expect(container.textContent).toContain(
+      'Run closed — 30 completed, 6 recorded as not performed',
+    );
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === 'Start program again'),
+    ).toBe(true);
+    // Never completion copy, never the completion route, never a percentage.
+    expect(container.textContent).not.toContain('Program completed');
+    expect(container.textContent).not.toContain('every workout is done');
+    expect(container.querySelector('a[href$="/completed"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/\d+%/);
+  });
+
+  it('25. renders the open state with its counts and offers no restart', async () => {
+    const container = await renderPanel(incompleteEnrollment(), {
+      weekNumber: 1,
+      workoutOrder: 2,
+      workoutName: 'Push B',
+      metaLabel: '6 exercises · about 45 minutes',
+      sessionState: 'not-started',
+    }, {
+      programSlug: 'fit40-beginner-strength',
+      totalWorkouts: 12,
+      completedWorkouts: 5,
+      notPerformedWorkouts: 1,
+      openWorkouts: 7,
+      hasOpenWorkout: true,
+      openInProgramOrder: [],
+      isConcluded: false,
+      isProgramComplete: false,
+      restartAvailable: false,
+    });
+
+    expect(container.textContent).toContain('7 of 12 workouts still open');
+    expect(container.textContent).toContain('UP NEXT · WEEK 1 · WORKOUT 2');
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === 'Start program again'),
+    ).toBe(false);
+    expect(container.querySelectorAll('form')).toHaveLength(0);
+    expect(container.textContent).not.toContain('Run closed');
+  });
+
+  it('26. keeps a zero-workout run factual and restart-free', async () => {
+    const zeroEnrollment: EnrolledView = {
+      ...incompleteEnrollment(),
+      progress: { totalWorkouts: 0, completedWorkouts: 0, percentage: 0 },
+      nextWorkout: null,
+    };
+    const container = await renderPanel(zeroEnrollment, null, {
+      programSlug: 'fit40-beginner-strength',
+      totalWorkouts: 0,
+      completedWorkouts: 0,
+      notPerformedWorkouts: 0,
+      openWorkouts: 0,
+      hasOpenWorkout: false,
+      openInProgramOrder: [],
+      isConcluded: false,
+      isProgramComplete: false,
+      restartAvailable: false,
+    });
+
+    expect(container.textContent).toContain('0 of 0 workouts still open');
+    expect(container.textContent).not.toContain('Program completed');
+    expect(container.querySelector('a[href$="/completed"]')).toBeNull();
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === 'Start program again'),
+    ).toBe(false);
   });
 });

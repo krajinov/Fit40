@@ -37,11 +37,15 @@ export interface WeekDaySlotView {
 /** Monday-first ISO weekday labels; slot index 0 is Monday by construction. */
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
-/** Display labels for the DTO's statuses (never recomputed here). */
+/** Display labels for the DTO's statuses (never recomputed here).
+ *
+ * `not-performed` uses the locked stored-state vocabulary — `Recorded as not
+ * performed` — so every surface names the fact the same way (M17 Slice 11).
+ */
 const STATUS_LABELS: Record<PlannedWorkoutStatus, string> = {
   completed: 'Completed',
   'in-progress': 'In progress',
-  'not-performed': 'Not performed',
+  'not-performed': 'Recorded as not performed',
   'past-due': 'Past due',
   planned: 'Planned',
 };

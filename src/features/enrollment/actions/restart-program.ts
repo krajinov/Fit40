@@ -37,7 +37,7 @@ export async function restartProgramAction(
     programSlug: parsed.data.programSlug,
   });
   if (!result.ok) {
-    return { ok: false, error: { code: result.error.code, message: result.error.message } };
+    return { ok: false, error: { code: result.error.code, message: restartErrorMessage(result) } };
   }
 
   revalidatePath('/programs');
@@ -59,4 +59,20 @@ function completedRedirectTarget(formData: FormData): string {
   return parsed.success
     ? `/programs/${parsed.data.programSlug}/completed`
     : '/programs';
+}
+
+/**
+ * Presentation copy for a restart refusal (M17 Slice 11).
+ *
+ * The Application error CODE stays exactly `PROGRAM_NOT_COMPLETE` (no new
+ * vocabulary), but its M14 wording — "not complete yet, so it cannot be
+ * restarted" — is now false: since Slice 10 a run restarts when it is
+ * complete **or** concluded, so this code can only reach us for a run that is
+ * still open. The action therefore states that truth instead, and passes every
+ * other outcome's own message through unchanged.
+ */
+function restartErrorMessage(result: { readonly error: { readonly code: string; readonly message: string } }): string {
+  return result.error.code === 'PROGRAM_NOT_COMPLETE'
+    ? "This run hasn't finished yet."
+    : result.error.message;
 }

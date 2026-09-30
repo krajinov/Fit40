@@ -15,6 +15,13 @@ interface ProgramWeekSectionProps {
   readonly status: ProgramWeekStatus;
   readonly completedIds: ReadonlySet<string>;
   /**
+   * Route keys ("week-order") of occurrences the M15 read resolved as
+   * `not-performed` (M17 Slice 11). Empty for anonymous visitors or a
+   * degraded schedule read — the recorded fact is never guessed from a
+   * missing session.
+   */
+  readonly recordedKeys?: ReadonlySet<string>;
+  /**
    * Route key ("week-order") of the enrollment's next incomplete workout,
    * or null for anonymous visitors / completed programs.
    */
@@ -31,6 +38,7 @@ export function ProgramWeekSection({
   week,
   status,
   completedIds,
+  recordedKeys = new Set<string>(),
   upNextKey,
 }: ProgramWeekSectionProps) {
   return (
@@ -59,13 +67,14 @@ export function ProgramWeekSection({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {week.scheduledWorkouts.map((scheduled) => {
+          const key = `${week.weekNumber}-${scheduled.order}`;
+          // Settlement precedence mirrors the M15 status resolver: a recorded
+          // occurrence is settled truth, so it is never also "up next".
+          const recorded = recordedKeys.has(key);
           let state: ScheduledWorkoutState = 'scheduled';
           if (completedIds.has(scheduled.scheduledWorkoutId)) {
             state = 'completed';
-          } else if (
-            upNextKey === `${week.weekNumber}-${scheduled.order}` &&
-            status === 'in-progress'
-          ) {
+          } else if (!recorded && upNextKey === key && status === 'in-progress') {
             state = 'up-next';
           }
 
@@ -76,6 +85,7 @@ export function ProgramWeekSection({
               weekNumber={week.weekNumber}
               scheduled={scheduled}
               state={state}
+              recorded={recorded}
             />
           );
         })}

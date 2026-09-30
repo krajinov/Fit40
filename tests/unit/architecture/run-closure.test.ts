@@ -197,19 +197,17 @@ describe('M17 Slice 10 — program detail loads and EXPOSES the summary only', (
     expect(code).not.toContain('infrastructure/database/repositories');
   });
 
-  it('never renders from it: the component does not destructure the prop', () => {
+  it('hands the summary to the panel as composition only — Slice 11 owns the states', () => {
     const code = codeOf(PROGRAM_DETAIL);
-    const destructured = code.slice(
-      code.indexOf('export function ProgramDetail({'),
-      code.indexOf('}: ProgramDetailProps)', code.indexOf('export function ProgramDetail({')),
-    );
 
-    // The prop exists on the interface (Slice 11's input) but no markup may
-    // depend on it before the locked states and copy exist.
+    // The prop exists on the interface and is passed straight through; this
+    // component interprets no verdict and derives no gate from it.
     expect(code).toContain('readonly runClosure: RunClosureSummaryDto | null;');
-    expect(destructured).not.toContain('runClosure');
+    expect(code).toContain('runClosure={runClosure}');
     expect(code).not.toContain('isConcluded');
+    expect(code).not.toContain('isProgramComplete');
     expect(code).not.toContain('restartAvailable');
+    expect(code).not.toContain('resolveEnrolledPanelState');
   });
 
   it('wires the read-only fact port into both the closure read and the restart gate', () => {

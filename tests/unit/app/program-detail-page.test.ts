@@ -183,6 +183,7 @@ function scheduleDto(configured = true) {
     configured,
     today: '2026-09-23',
     items: configured ? [item] : [],
+    unplacedNotPerformedWorkouts: [],
     focus: configured
       ? { today: item, next: null, pastDue: null }
       : { today: null, next: null, pastDue: null },
@@ -380,6 +381,35 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('Weekly schedule');
     expect(markup).toContain('aria-label="Training schedule"');
     expect(markup).toContain('This plan so far');
+  });
+
+  it('surfaces a recorded occurrence on its authored card with Undo (M17 Slice 11)', async () => {
+    // The M15 read resolved the week-1 occurrence as `not-performed`; the page
+    // passes that user-scoped fact down to the authored schedule cards.
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            plannedDate: '2026-09-23',
+            status: 'not-performed',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+
+    const markup = await renderPage();
+
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    // No Start control is offered for it, and its detail link survives.
+    expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
   });
 
   it('degrades a failed run-closure read to a null DTO (logged), never to fabricated counts', async () => {

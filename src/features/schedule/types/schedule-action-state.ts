@@ -26,7 +26,18 @@ export type ScheduleActionErrorCode =
    * execution truth and cannot be moved. The rendering leaf prints the use
    * case's own message, so this member adds no copy.
    */
-  | 'OCCURRENCE_RECORDED_NOT_PERFORMED';
+  | 'OCCURRENCE_RECORDED_NOT_PERFORMED'
+  /**
+   * M17 Slice 11 — the settlement actions' vocabulary. Every member below is a
+   * Slice 7 Application outcome; the rendering leaf prints the use case's own
+   * message, so this union adds no copy of its own and a new Application code
+   * fails type-checking here until it is added.
+   */
+  | 'OCCURRENCE_ALREADY_RECORDED'
+  | 'OCCURRENCE_ALREADY_PERFORMED'
+  | 'OCCURRENCE_HAS_LOGGED_WORK'
+  | 'OCCURRENCE_NOT_RECORDED'
+  | 'ENROLLMENT_CHANGED';
 
 export interface ScheduleActionError {
   readonly code: ScheduleActionErrorCode;

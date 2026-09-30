@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WorkoutCtaState } from '@/features/sessions/workout-detail-view';
+import { UndoNotPerformedForm } from '@/features/schedule/components/UndoNotPerformedForm';
 
 interface WorkoutStartPanelProps {
   readonly programSlug: string;
@@ -19,6 +20,11 @@ interface WorkoutStartPanelProps {
  * never creates a duplicate session. The "View program" secondary CTA is
  * desktop-only in the locked design; mobile shows the full-width primary
  * CTA only.
+ *
+ * M17 Slice 11 adds the recorded state: when the occurrence is settled as
+ * recorded-not-performed the band states that fact and offers `Undo` (via the
+ * shared settlement leaf) instead of any Start/Resume link — Start is
+ * suppressed by the DTO's fact, never by guessing from a missing session.
  */
 export function WorkoutStartPanel({
   programSlug,
@@ -27,6 +33,41 @@ export function WorkoutStartPanel({
   ctaState,
 }: WorkoutStartPanelProps) {
   const sessionPath = `/programs/${programSlug}/weeks/${weekNumber}/workouts/${workoutOrder}/session`;
+
+  if (ctaState === 'not-performed') {
+    return (
+      <section
+        aria-label="Recorded as not performed"
+        className={cn(
+          'flex flex-col gap-2.5 rounded-card border border-accent-tint-border bg-accent-tint p-5 md:gap-5 md:p-7',
+        )}
+      >
+        <div className="flex flex-col gap-1">
+          <h2 className="font-display text-lg font-semibold text-foreground md:text-xl">
+            Recorded as not performed
+          </h2>
+          <p className="text-[13px] text-ink-2 md:text-sm">
+            It goes back to not started.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-3">
+          <UndoNotPerformedForm
+            programSlug={programSlug}
+            weekNumber={weekNumber}
+            workoutOrder={workoutOrder}
+            className="w-full md:w-auto"
+          />
+          <Link
+            href={`/programs/${programSlug}`}
+            className={cn(buttonVariants({ variant: 'secondary' }), 'hidden md:inline-flex')}
+          >
+            View program
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
   const subtitle =
     ctaState === 'completed'

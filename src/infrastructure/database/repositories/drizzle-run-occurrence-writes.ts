@@ -62,6 +62,14 @@ interface LockedSettlementFacts {
   readonly facts: RecordOccurrenceFacts;
   /** The session row's id, or null when the occurrence has no session. */
   readonly sessionId: string | null;
+  /**
+   * The session row's optimistic-concurrency token as the locked diagnostic
+   * read saw it, or null when there is no session row. The guarded DELETE
+   * pins it (see `recordNotPerformed` step 4): every session-content write
+   * bumps `version`, so a work commit that lands between the diagnostic read
+   * and the delete makes the pinned token stale and the delete match zero rows.
+   */
+  readonly sessionVersion: number | null;
 }
 
 /**
@@ -121,9 +129,23 @@ export class DrizzleRunOccurrenceWrites implements RunOccurrenceWriteRepository 
         // 4. Guarded deletion of the abandoned zero-work session, only when the
         //    decision authorized it. The predicate re-states the safety
         //    conditions; it cannot select an outcome.
+        //
+        //    `version` is pinned to the token the locked diagnostic read saw.
+        //    That is load-bearing, not decoration: session-content writes
+        //    (`WorkoutSessionRepository.save`) never take the enrollment lock,
+        //    so a save can commit a logged set between the diagnostic read and
+        //    this statement. PostgreSQL's READ COMMITTED re-check for a blocked
+        //    DELETE re-evaluates predicates on the TARGET row only — an
+        //    `NOT EXISTS (SELECT ...)` subquery keeps the snapshot taken when
+        //    the statement began, so a concurrently committed set is invisible
+        //    to it and the row (and, by cascade, that set) would be destroyed.
+        //    `version` IS a target-row column, so it is re-evaluated correctly:
+        //    any committed content write bumps it, the predicate misses, and
+        //    the transaction aborts as a contract violation instead of erasing
+        //    work. SIZE: same statement, one more column predicate.
         if (decision.deletesAbandonedSession) {
           const sessionId = lockedFacts.sessionId;
-          if (sessionId === null) {
+          if (sessionId === null || lockedFacts.sessionVersion === null) {
             // Unreachable: the decision only authorizes deletion for an
             // in-progress session, which the diagnostic saw.
             throw new RunOccurrenceWriteContractViolationError(
@@ -139,6 +161,7 @@ export class DrizzleRunOccurrenceWrites implements RunOccurrenceWriteRepository 
                 eq(workoutSessions.id, sessionId),
                 eq(workoutSessions.enrollmentId, input.enrollmentId),
                 eq(workoutSessions.scheduledWorkoutId, input.scheduledWorkoutId),
+                eq(workoutSessions.version, lockedFacts.sessionVersion),
                 isNull(workoutSessions.completedAt),
                 sql`not exists (select 1 from ${setLogs} where ${setLogs.sessionId} = ${workoutSessions.id})`,
               ),
@@ -371,6 +394,7 @@ async function readSettlementFacts(
     .select({
       factEnrollmentId: notPerformedWorkouts.enrollmentId,
       sessionId: workoutSessions.id,
+      sessionVersion: workoutSessions.version,
       sessionCompletedAt: workoutSessions.completedAt,
       loggedSetCount: sql<number>`(select count(*)::int from ${setLogs} where ${setLogs.sessionId} = ${workoutSessions.id})`,
     })
@@ -403,6 +427,7 @@ async function readSettlementFacts(
 
   return {
     sessionId: row.sessionId,
+    sessionVersion: row.sessionVersion,
     facts: {
       hasNotPerformedRecord: row.factEnrollmentId !== null,
       session: resolveSessionState(row.sessionId, row.sessionCompletedAt, row.loggedSetCount),

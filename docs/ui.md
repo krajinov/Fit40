@@ -677,11 +677,13 @@ M13 integration suites in
   date label ("Sep 23" — never the raw ISO string), today marked by the word
   "Today" **and** `aria-current="date"`, empty days as neutral "No workout
   planned", statuses as text badges (Planned / In progress / Completed / Past
-  due), an in-progress "Resume" link to the session route, and a collapsed
+  due / Recorded as not performed), an in-progress "Resume" link to the session route, and a collapsed
   **"Move"** disclosure (native `type="date"` input defaulting to the canonical
   date, label "New date for {workout}", submit "Move workout") on
   never-started cells only — `planned` and `past-due` expose Move, `completed`
-  and `in-progress` never do. A collapsed **"Change training days"**
+  and `in-progress` never do. Settlement affordances (M17 — the "Didn't train
+  this" record form and the "Undo" form) are documented under
+  [Run settlement & run closure](#run-settlement--run-closure-m17) below. A collapsed **"Change training days"**
   disclosure hosts the same fresh-selection form with the replacement copy
   ("Choose a new weekly pattern. Saving replaces the dates of future
   workouts; completed workouts stay in history and in-progress workouts keep
@@ -716,15 +718,21 @@ M13 integration suites in
   weeks”**; one `<ul aria-label="Plan follow-through by week">` of rows: week
   range label (component-based from the window's own bounds — `Sep 21–27`
   inside a month, `Sep 28–Oct 4` across one, never a raw instant), `"N of M
-  done"` straight from the DTO, optional `"n started"` and `"n past due"` (only
+  done"` straight from the DTO, optional `"n started"`, `"n past due"` and
+  `"n not performed"` (only
   when non-zero), and **“This week”** with `aria-current="date"` on the open
   week containing `today`. The current week is distinguished by words and
   semantics, never colour, and no row or total is ever framed as unfinished or
   failed.
 - **Totals line:** factual fragments from the DTO totals —
   `7 planned · 5 done · 1 completed early · 1 completed late · 1 started · 3
-  past due` — with the two core counts always shown (a real zero stays a zero).
-  The configured report whose weeks are all outside the horizon renders the
+  past due · 1 not performed` — with the two core counts always shown (a real
+  zero stays a zero). When `notPerformedUnplaced` is nonzero, one pointer line
+  renders: **“1 recorded as not performed without a calendar date — see
+  Training schedule”** (plural: “2 recorded…”), linking to the M15 calendar
+  where the unplaced list and Undo live; the count itself never reaches a week
+  or total. The configured report whose weeks are all outside the horizon
+  renders the
   honest **“No planned dates in the last 8 weeks.”** instead of six zero counts.
 - **Disclosure (exactly one, M16's only new caption):** “This describes the
   dates currently on your calendar. Changing your training days replaces them.”
@@ -738,12 +746,66 @@ M13 integration suites in
   `configured: false` and never fabricates weeks.
 - **Copy bans:** never `missed`, `failed`, `skipped`, `streak`, `adherence`,
   `score`, `goal`, `on track`/`off track`, or a percentage; `past due`,
-  `completed early` and `completed late` are the approved factual terms. The
+  `completed early`, `completed late` and `recorded as not performed` are the
+  approved factual terms. The
   page provides no interactive control here (no button, link or disclosure), so
-  no target-size or focus handling applies.
+  no target-size or focus handling applies — the record and Undo forms live on
+  the M15 calendar, never in this report.
 - Regression coverage:
   `tests/unit/features/schedule/{follow-through-view,plan-follow-through-section}.test.ts`,
   `tests/unit/app/program-detail-page.test.ts`,
   `tests/unit/architecture/follow-through.test.ts`, and the real-PostgreSQL
   `tests/integration/database/follow-through-round-trip.test.ts`.
 - Canonical reference: [Plan Follow-Through](follow-through.md).
+
+
+## Run settlement & run closure (M17)
+
+- **Calendar record affordance (M15 slots):** `planned` / `past-due` cells
+  keep the Move disclosure and gain the **"Didn't train this"** submit
+  (`RecordNotPerformedForm`, pending "Saving…"); `in-progress` cells offer
+  "Didn't train this" instead of Move, with the honesty sentence **"Recording
+  removes the empty workout you have in progress."** on motion-sensitive
+  inputs; `completed` cells gain nothing.
+- **Calendar undo affordance:** a `not-performed` cell shows the status text
+  **"Recorded as not performed"** and the **"Undo"** form (subtext **"It goes
+  back to not started."**) only — no Start, no Move. Undo is the safety
+  mechanism: there is **no confirmation dialog anywhere**, and there is **no
+  bulk record/undo action** (grep-locked in architecture tests).
+- **Unplaced list** (below the calendar, `UnplacedNotPerformedList`):
+  heading/aria-label **"Recorded as not performed"**, body **"These workouts
+  are recorded as not performed and have no calendar date right now."**, each
+  row = authored week/order labels + a per-row **Undo** — never an invented
+  date.
+- **Workout detail CTA band** (`WorkoutStartPanel`, `ctaState: 'not-performed'`):
+  heading **"Recorded as not performed"**, body **"It goes back to not
+  started."**, an **Undo** form; Start is suppressed for this state. The
+  scheduled workout card shows the same status text.
+- **Concluded run panel** (`ConcludedRunCallout` inside `EnrolledProgramPanel`):
+  **"Run closed — {n} completed, {m} recorded as not performed"** (both counts
+  always rendered), shown when the run is concluded; the **restart**
+  button renders iff `restartAvailable`, and the callout never links to
+  `/completed` — completion semantics stay unreachable for concluded-but-
+  incomplete runs.
+- **Restart refusal copy:** the typed `PROGRAM_NOT_COMPLETE` error renders as
+  **"This run hasn't finished yet."** — restartability (complete OR
+  concluded), never phrased as completion.
+- **Follow-through pointer:** the M16 report gains only the `"n not performed"`
+  week/totals fragment and the unplaced pointer line (see the M16 section);
+  no settlement control ever appears there.
+- **Errors:** every record/undo/start/restart failure surfaces inline through
+  `ScheduleActionError` / the restart form with `role="alert"` and the typed
+  use-case copy — no toast system, and contract violations log at the boundary
+  rather than rendering raw internals.
+- **Accessibility & trust:** forms carry only server-injected public
+  coordinates (no `EnrollmentId` / `ScheduledWorkoutId` / `SessionId` /
+  `userId` in DOM or URL); interactive targets stay ≥44px; pending submits are
+  disabled; status and settlement are always text + semantics, never colour
+  alone.
+- Regression coverage:
+  `tests/unit/features/schedule/{schedule-week-view,program-schedule-section,record-not-performed-action,undo-not-performed-action}.test.ts`,
+  `tests/unit/features/sessions/{workout-cta-state,workout-start-panel}.test.ts`,
+  `tests/unit/features/enrollment/{program-panel-state,enrolled-program-panel,restart-action}.test.ts`,
+  `tests/unit/features/schedule/follow-through-view.test.ts`, and
+  `tests/unit/architecture/{settlement-presentation,session-creation-authority}.test.ts`.
+- Canonical reference: [Run Closure & Not-Performed Settlement](run-closure.md).

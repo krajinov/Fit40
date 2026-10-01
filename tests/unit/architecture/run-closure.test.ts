@@ -250,3 +250,36 @@ describe('M17 Slice 10 — no persisted run-closure state exists', () => {
     }
   });
 });
+
+describe('M17 Slice 13 — no run archive or enrollment-history table exists', () => {
+  const SCHEMA_BARREL = 'src/infrastructure/database/schema/index.ts';
+
+  it('creates no archive- or history-named table in any migration', () => {
+    const migrations = readdirSync(path.join(ROOT, MIGRATIONS_DIR)).filter((file) =>
+      file.endsWith('.sql'),
+    );
+    expect(migrations.length).toBeGreaterThan(0);
+
+    const tables: string[] = [];
+    for (const file of migrations) {
+      const sql = readFileSync(path.join(ROOT, MIGRATIONS_DIR, file), 'utf8');
+      for (const match of sql.matchAll(/CREATE TABLE "([^"]+)"/g)) {
+        const table = match[1];
+        if (table !== undefined) {
+          tables.push(table);
+        }
+      }
+    }
+
+    // Every persisted table is live state — a pre-restart run's truth is
+    // deliberately unrecoverable, never archived.
+    expect(tables.length).toBeGreaterThan(0);
+    expect(tables.filter((table) => /archive|history/i.test(table))).toEqual([]);
+    // The settlement fact is run-scoped live state, not an archive of anything.
+    expect(tables).toContain('not_performed_workouts');
+  });
+
+  it('exports no archive-like table from the schema barrel', () => {
+    expect(codeOf(SCHEMA_BARREL)).not.toMatch(/archive|history/i);
+  });
+});

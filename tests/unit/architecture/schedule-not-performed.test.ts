@@ -9,7 +9,7 @@
  * the slice's deliberate absence of M16 wiring.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -221,5 +221,63 @@ describe('M17 Slice 9 — the M16 report READS the facts and never writes them',
       expect(read(file), `${file} carries action copy`).not.toContain("Didn't train");
       expect(read(file), `${file} carries undo copy`).not.toContain('goes back to not started');
     }
+  });
+});
+
+describe('M17 Slice 13 — recorded facts enter generation as the settled input', () => {
+  const GENERATION = 'src/domain/services/planned-schedule.ts';
+
+  it('hands notPerformedIds from the configure read into generatePlannedSchedule', () => {
+    const code = codeOf(CONFIGURE);
+
+    expect(code).toContain('generatePlannedSchedule({');
+    expect(code).toContain(
+      'notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId)',
+    );
+    // The facts come from the read-only port, never from a write authority.
+    expect(code).toContain('this.notPerformedRepository.listByEnrollment(');
+    expect(code).not.toContain('runOccurrenceWrites');
+    expect(code).not.toContain('recordNotPerformed');
+    expect(code).not.toContain('undoNotPerformed');
+  });
+
+  it('declares notPerformedIds on the generation input and unions it into settled', () => {
+    const code = codeOf(GENERATION);
+
+    // The input field, documented as the no-op default it is.
+    expect(code).toContain('readonly notPerformedIds?: ReadonlyArray<ScheduledWorkoutId>;');
+    // The partition unions it with completed ids — ONE settled set — before the
+    // occurrence walk, so a recorded occurrence can never receive a row.
+    const settledIndex = code.indexOf('const settled = new Set<ScheduledWorkoutId>([');
+    expect(settledIndex).toBeGreaterThan(0);
+    const settledBlock = code.slice(settledIndex, code.indexOf(']);', settledIndex));
+    expect(settledBlock).toContain('...input.completedIds,');
+    expect(settledBlock).toContain('...(input.notPerformedIds ?? [])');
+    const walkIndex = code.indexOf('settled.has(occurrence.id)');
+    expect(walkIndex).toBeGreaterThan(settledIndex);
+  });
+
+  it('is called from exactly one production site: the configure use case', () => {
+    /** Every production TypeScript module under `src`, as repository-relative paths. */
+    function sourceFiles(directory = 'src'): ReadonlyArray<string> {
+      const entries = readdirSync(path.join(ROOT, directory), { withFileTypes: true });
+      const files: string[] = [];
+
+      for (const entry of entries) {
+        const relative = `${directory}/${entry.name}`;
+        if (entry.isDirectory()) {
+          files.push(...sourceFiles(relative));
+        } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+          files.push(relative);
+        }
+      }
+
+      return files;
+    }
+
+    const callers = sourceFiles().filter((file) =>
+      codeOf(file).includes('generatePlannedSchedule('),
+    );
+    expect([...callers].sort()).toEqual([CONFIGURE, GENERATION].sort());
   });
 });

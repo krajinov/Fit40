@@ -1,7 +1,7 @@
 # Plan Follow-Through (M16)
 
 Canonical reference for the M16 milestone: how the current run's calendar
-intent is reconciled with session truth, the seven Domain outcomes and their
+intent is reconciled with session truth, the eight Domain outcomes and their
 precedence, the eight-week UTC week model, why M16 evaluates the CURRENT
 calendar rather than a historical plan, how it differs from M14 completion and
 M13 weekly insights, what it reads (and never writes), and what it deliberately
@@ -15,14 +15,16 @@ Plan Follow-Through answers one question:
 
 > How has the current program run followed its current training calendar?
 
-It reconciles three existing truths, adding no fourth:
+It reconciles the run's existing truths, adding no new authority or judgement:
 
 1. **authored program structure** (`scheduled_workouts`) — the run's
    occurrences, addressed as opaque ids by this read;
 2. **current calendar intent** (`planned_workouts`) — the dates the run is
    currently scheduled on (M15);
 3. **execution facts** (`workout_sessions`) — what actually started and
-   completed.
+   completed;
+4. **recorded settlement** (`not_performed_workouts`, M17) — an explicit user
+   attestation, never a date inference; it adds counts, never a verdict.
 
 The read is **read-only**. Nothing in M16 writes, mutates, completes or moves
 anything, and no completion, progression, personal-record, history or planning
@@ -50,7 +52,7 @@ them; it simply does not report them as *this run's* calendar follow-through.
 
 ## Outcomes
 
-Seven Domain outcomes, resolved by `resolveFollowThroughOutcome`
+Eight Domain outcomes, resolved by `resolveFollowThroughOutcome`
 (`src/domain/services/plan-follow-through.ts`), in locked precedence:
 
 1. **completed** — a completion fact, refined by comparing the **UTC calendar
@@ -58,13 +60,16 @@ Seven Domain outcomes, resolved by `resolveFollowThroughOutcome`
    `completed-early` (day before), `completed-on-plan` (same day),
    `completed-late` (day after);
 2. **started** — a live in-progress session and no completion;
-3. **date-derived** — otherwise the planned date against today:
+3. **not-performed** — a recorded `NotPerformedOccurrence` (M17) and neither
+   fact above; an explicit user attestation, never derived from a date;
+4. **date-derived** — otherwise the planned date against today:
    `past-due`, `today`, `upcoming`.
 
-Precedence in one line: **completed fact > in-progress fact > planned-date
-classification**. Consequences: a completed occurrence is never `started`,
-`past-due`, `today` or `upcoming`; an in-progress occurrence is never
-`past-due`; only occurrences with neither fact are classified from dates.
+Precedence in one line: **completed fact > in-progress fact > recorded fact >
+planned-date classification**. Consequences: a completed occurrence is never
+`started`, `not-performed`, `past-due`, `today` or `upcoming`; an in-progress
+occurrence is never `past-due`; only occurrences with none of the three facts
+are classified from dates.
 
 `completed-early` / `completed-late` are **classifications, not judgements**.
 There is no grace period, no time-of-day comparison and no local-time
@@ -73,8 +78,9 @@ is `completed-late`. A failed read or a contract violation throws (corrupt data
 is loud); expected absence is returned as data.
 
 Parity with M15 is pinned by a guard test: the three completed variants
-normalize back to M15's single `completed`, `started` to `in-progress`, and
-`today`/`upcoming` to `planned`, so the two taxonomies cannot silently drift.
+normalize back to M15's single `completed`, `started` to `in-progress`,
+`not-performed` to M15's `not-performed`, and `today`/`upcoming` to `planned`,
+so the two taxonomies cannot silently drift.
 
 ## Weekly summary
 
@@ -84,7 +90,7 @@ M13 insights and M15's calendar use). One report covers the **most recent 8
 weeks, ending with the current week** (`FOLLOW_THROUGH_WEEK_COUNT = 8`,
 deliberately equal to M13's horizon).
 
-Per week, and summed as section totals, six integers are reported:
+Per week, and summed as section totals, seven integers are reported:
 
 | Count | Meaning |
 |-------|---------|
@@ -94,17 +100,20 @@ Per week, and summed as section totals, six integers are reported:
 | `completedLate` | completions whose UTC day follows the planned date |
 | `started` | occurrences with a live session and no completion |
 | `pastDue` | occurrences with no session whose planned date has passed |
+| `notPerformed` | occurrences recorded as not performed (M17) |
 
 How completions distribute:
 
 - **on plan** contributes to `completed` **only**;
 - **early** contributes to `completed` **and** `completedEarly`;
 - **late** contributes to `completed` **and** `completedLate`;
-- `today` and `upcoming` contribute to `planned` and to **no** subtype count.
+- `today` and `upcoming` contribute to `planned` and to **no** subtype count;
+- `notPerformed` contributes to `planned` (when its row falls in the week) and
+  to no other count — a record never reads as started, past-due or completed.
 
 Therefore `completedEarly + completedLate ≤ completed`, and
-`planned − completed − started − pastDue` is exactly the count of occurrences
-dated today or later in the week.
+`planned − completed − started − pastDue − notPerformed` is exactly the count
+of occurrences dated today or later in the week.
 
 Structural rules:
 
@@ -138,6 +147,10 @@ statement, never an audit of how the plan once looked.
   history: M16 makes no claim that historical data was lost, and it is not a
   substitute for the history views (`/history`, exercise history, session
   detail), which remain the authority for what was trained.
+- A **recorded occurrence that has no current planned row is not injected back
+  into the report either.** It contributes only to `notPerformedUnplaced`
+  (see below) and never to a week or total — M16 still never invents a date
+  for it.
 - **M16 does not reconstruct historical planning intent**, because Fit40 does
   not persist plan-version history. Regeneration is a whole-set replacement of
   rows with no audit trail (a deliberate M15 design choice), so no application
@@ -150,6 +163,33 @@ statement, never an audit of how the plan once looked.
 never merged: history is what you did (all sessions, any plan state),
 follow-through is how the current calendar held up.
 
+## Recorded-not-performed projection (M17)
+
+Since M17 the report also reads the run's recorded-not-performed facts. The
+projection of one occurrence follows exactly three rows:
+
+| | Current `planned_workouts` row? | Truth | Where it lands |
+|---|---|---|---|
+| 1 | yes | recorded fact | the occurrence's **week occurrence** — normal counts plus `notPerformed: +1` |
+| 2 | no | recorded fact | **excluded from weeks and totals**, contributes **only** `notPerformedUnplaced: +1` |
+| 3 | no | completed session (no record) | **history-only** — never injected into a week, and never counted as unplaced |
+
+- `notPerformedUnplaced` is the **row-set difference** between the run's
+  recorded occurrences and **all** of its current planned rows: every recorded
+  occurrence with no current row counts, whenever its planned date was or
+  whether it ever had one. It is **horizon-independent** — the 8-week window
+  never affects it — and it counts unplaced *records*, not unperformed work.
+  An occurrence with neither a row nor a fact contributes nothing to the
+  report.
+- The M16 spine remains the current planned rows: an occurrence is never
+  appended to a week solely because it holds a fact, and the horizon constant
+  stays `FOLLOW_THROUGH_WEEK_COUNT = 8`.
+- The pointer copy (locked): `n recorded as not performed without a calendar
+  date — see Training schedule`; it links to the M15 calendar, where the
+  unplaced list and Undo live. M16 remains read-only: no record or undo
+  control appears here, and no adherence percentage is added for the new
+  count.
+
 ## M14 vs M16 semantics
 
 Program completion and plan follow-through are **different questions with
@@ -159,7 +199,7 @@ different denominators**, and they are intentionally allowed to disagree:
 |---|---|---|
 | Question | is every *authored* workout of the run done? | how did the run's *current calendar* hold up? |
 | Denominator | authored program structure (`scheduled_workouts` of the run) | current `planned_workouts` rows |
-| Source | `isProgramComplete` + completed scheduled ids | seven outcomes over the current plan |
+| Source | `isProgramComplete` + completed scheduled ids | eight outcomes over the current plan |
 | Lifecycle authority | yes — completion/restart surface | no — read-only report below the calendar |
 
 A run can be 8 of 24 authored workouts complete while reporting `1 of 3 done`
@@ -194,6 +234,8 @@ migration, no index. Everything it reads already exists:
   `listCompletedOccurrenceActivity`): occurrence identity plus the completion
   instant, ordered by `(completed_at, started_at, id)` for determinism only;
 - **in-progress identities** reuse M15's existing `workout_sessions` projection;
+- **recorded settlement** comes from the run's `not_performed_workouts` rows
+  (M17's `NotPerformedOccurrenceRepository.listByEnrollment`) — counts only;
 - **enrollment lookup** is the existing `ProgramEnrollmentRepository` read.
 
 Invariants this relies on, all enforced by the database rather than by code:
@@ -214,8 +256,9 @@ Consequently:
   throws (`Follow-through contract violated: occurrence "…" was supplied more
   than once`) rather than merging two facts, because merging would report a
   number that matches neither source;
-- the read is **four bounded statements** (enrollment lookup, planned rows, and
-  the two independent occurrence reads issued together) — **no N+1**, no
+- the read is **five bounded statements** (enrollment lookup, planned rows, and
+  the three independent reads — completed activity, in-progress ids,
+  recorded-not-performed facts — issued together) — **no N+1**, no
   hydration of session aggregates or logs, no join across logs, no `DISTINCT`
   repair, and no write of any kind;
 - presentation never reaches a repository: it consumes the DTO only, and the
@@ -231,9 +274,10 @@ Framing and copy (locked):
 
 - title: **“This plan so far”**; horizon hint: **“last 8 weeks”**;
 - one row per reported week: range label, `"N of M done"`, optional `"n
-  started"` / `"n past due"`, and **“This week”** with `aria-current="date"`
+  started"` / `"n past due"` / `"n not performed"`, and **“This week”** with `aria-current="date"`
   for the open week containing `today` (text + semantics, never colour);
-- section totals as a factual line (`7 planned · 5 done · 1 completed early · …`);
+- section totals as a factual line (`7 planned · 5 done · 1 completed early · …`,
+  including an `n not performed` fragment when nonzero);
 - the single current-calendar disclosure:
   **“This describes the dates currently on your calendar. Changing your
   training days replaces them.”** — M16 adds no other disclosure, and no UTC
@@ -247,7 +291,8 @@ Framing and copy (locked):
 
 Copy bans: `missed`, `failed`, `skipped`, `streak`, `adherence`, `score`,
 `goal`, `on track`, `off track`, and any percentage. `past due`, `completed
-early` and `completed late` are the approved factual terms.
+early`, `completed late` and `recorded as not performed` are the approved
+factual terms.
 
 ## Non-goals
 
@@ -278,7 +323,7 @@ Deferred items are listed as *deferred*, not as a roadmap promise.
   duplicate-occurrence contract violation);
   `schedule-follow-through-parity.test.ts` (**the M15 drift guard**: shared
   fixture, real `resolvePlannedWorkoutStatus`, completed variants normalize to
-  `completed`, all seven outcomes covered).
+  `completed`, all eight outcomes covered).
 - **Application** (`tests/unit/application/use-cases/get-enrollment-follow-through.test.ts`):
   `INVALID_INPUT`, `ok(null)` with no downstream reads, `configured: false`
   with no session reads and no fabricated zeros, full assembly, completion
@@ -299,10 +344,10 @@ Deferred items are listed as *deferred*, not as a roadmap promise.
   and a module guard that fails if presentation imports repositories.
 - **Real PostgreSQL** (`tests/integration/database/follow-through-round-trip.test.ts`):
   planned rows + real sessions → the real use case → the Domain summary → the
-  DTO: all seven outcomes across three reported weeks, empty windows omitted,
+  DTO: all eight outcomes across three reported weeks, empty windows omitted,
   `closed` from a fixed clock, totals = Σ rows, the unplanned completed
   occurrence stays history, another run and detached history contribute
-  nothing, and the read is exactly four `SELECT`s with no write.
+  nothing, and the read is exactly five `SELECT`s with no write.
 - **Architecture guards** (`tests/unit/architecture/follow-through.test.ts`):
   import boundaries per layer, Server Component (`no "use client"`), no M16
   persistence object, presentation only through the composition root, and the

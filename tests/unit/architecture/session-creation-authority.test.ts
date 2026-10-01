@@ -184,3 +184,173 @@ describe('M17 Slice 7 — Application never decides settlement policy', () => {
     expect(services).not.toContain('DrizzleRunOccurrenceWrites');
   });
 });
+
+describe('M17 Slice 13 — the write port shape and the lock-before-read order', () => {
+  /** The stripped body of one settlement method, bounded by its neighbours. */
+  function methodBody(
+    code: string,
+    signature: string,
+    nextSignature: string | null,
+  ): string {
+    const start = code.indexOf(signature);
+    expect(start, `${signature} not found`).toBeGreaterThan(0);
+    const end = nextSignature === null ? code.length : code.indexOf(nextSignature, start + 1);
+    expect(end, `${signature} has no end boundary`).toBeGreaterThan(start);
+    return code.slice(start, end);
+  }
+
+  it('declares exactly the three settlement operations on the write port — and nowhere else', () => {
+    const port = codeOf(RUN_WRITE_PORT);
+    const start = port.indexOf('export interface RunOccurrenceWriteRepository {');
+    expect(start).toBeGreaterThan(0);
+    const body = port.slice(start, port.indexOf('\n}', start));
+
+    const methods = [...body.matchAll(/^ {2}(\w+)\s*\(/gm)].map((match) => match[1]);
+    expect([...methods].sort()).toEqual([
+      'createSessionForOccurrence',
+      'recordNotPerformed',
+      'undoNotPerformed',
+    ]);
+
+    // No other port interface may re-declare a settlement operation, in any form.
+    for (const file of sourceFiles('src/application/ports')) {
+      if (file === RUN_WRITE_PORT) continue;
+      expect(codeOf(file), `${file} declares a settlement operation`).not.toMatch(
+        /recordNotPerformed\s*\(|undoNotPerformed\s*\(|createSessionForOccurrence\s*\(/,
+      );
+    }
+  });
+
+  it('locks the parent enrollment BEFORE every diagnostic read in all three methods', () => {
+    const code = codeOf(RUN_OCCURRENCE_WRITES);
+    const lock = ".for('no key update')";
+
+    const record = methodBody(code, 'async recordNotPerformed(', 'async undoNotPerformed(');
+    const undo = methodBody(code, 'async undoNotPerformed(', 'async createSessionForOccurrence(');
+    const create = methodBody(code, 'async createSessionForOccurrence(', null);
+
+    // record: lock → diagnostic facts → Domain decision → guarded DELETE → fact INSERT.
+    const order = [
+      record.indexOf(lock),
+      record.indexOf('readSettlementFacts(tx, input)'),
+      record.indexOf('decideRecordNotPerformed('),
+      record.indexOf('delete(workoutSessions)'),
+      record.indexOf('insert(notPerformedWorkouts)'),
+    ];
+    expect(order.every((index) => index > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+
+    // undo: lock → fact read → Domain decision → fact DELETE.
+    const undoOrder = [
+      undo.indexOf(lock),
+      undo.indexOf('from(notPerformedWorkouts)'),
+      undo.indexOf('decideUndoNotPerformed('),
+      undo.indexOf('delete(notPerformedWorkouts)'),
+    ];
+    expect(undoOrder.every((index) => index > 0)).toBe(true);
+    expect([...undoOrder].sort((a, b) => a - b)).toEqual(undoOrder);
+
+    // create: lock → recorded-fact check → session INSERT.
+    const createOrder = [
+      create.indexOf(lock),
+      create.indexOf('from(notPerformedWorkouts)'),
+      create.indexOf('insertWorkoutSessionRows('),
+    ];
+    expect(createOrder.every((index) => index > 0)).toBe(true);
+    expect([...createOrder].sort((a, b) => a - b)).toEqual(createOrder);
+
+    // Exactly three lock sites — one per method, none anywhere else.
+    expect(code.match(/\.for\('no key update'\)/g)).toHaveLength(3);
+  });
+
+  it('pins the diagnosed session version on the guarded DELETE', () => {
+    const code = codeOf(RUN_OCCURRENCE_WRITES);
+    const record = methodBody(code, 'async recordNotPerformed(', 'async undoNotPerformed(');
+
+    // The diagnostic read selects the token…
+    expect(code).toContain('sessionVersion: workoutSessions.version');
+    // …and the guarded DELETE pins it, between the delete and the fact insert.
+    const deleteIndex = record.indexOf('delete(workoutSessions)');
+    const pinIndex = record.indexOf('eq(workoutSessions.version, lockedFacts.sessionVersion)');
+    const insertIndex = record.indexOf('insert(notPerformedWorkouts)');
+    expect(deleteIndex).toBeGreaterThan(0);
+    expect(pinIndex).toBeGreaterThan(deleteIndex);
+    expect(insertIndex).toBeGreaterThan(pinIndex);
+    // The other safety predicates ride along unchanged.
+    expect(record).toContain('isNull(workoutSessions.completedAt)');
+    expect(record).toContain('not exists (select 1 from');
+    // Zero affected rows after an authorized write is a thrown violation, never
+    // a swallowed business outcome.
+    expect(record).toContain('RunOccurrenceWriteContractViolationError');
+  });
+
+  it('runs no retry loop: one transaction, one decision, one mutation per call', () => {
+    // The transaction module has no loop construct at all (`.for('…')` is a
+    // row-lock clause, not a `for` statement — the lookbehind makes the
+    // distinction structural, not textual).
+    const writes = codeOf(RUN_OCCURRENCE_WRITES);
+    expect(writes).not.toMatch(/(?<![.\w$])for\s*\(/);
+    expect(writes).not.toMatch(/while\s*\(/);
+    expect(writes).not.toContain('do {');
+
+    // Each use case requests its ONE mutation exactly once and loops nothing.
+    const cases = [
+      { file: RECORD_USE_CASE, call: /\.recordNotPerformed\(/g },
+      { file: UNDO_USE_CASE, call: /\.undoNotPerformed\(/g },
+    ] as const;
+    for (const { file, call } of cases) {
+      const code = codeOf(file);
+      expect(code.match(call), `${file} mutation call count`).toHaveLength(1);
+      expect(code).not.toMatch(/(?<![.\w$])for\s*\(/);
+      expect(code).not.toMatch(/while\s*\(/);
+    }
+  });
+  // M17-S13-ANCHOR
+});
+
+describe('M17 Slice 13 — start wiring and the no-resurrection backstop', () => {
+  const SESSIONS_SERVICES = 'src/features/sessions/services.ts';
+  const REPOSITORY_INDEX = 'src/infrastructure/database/repositories/index.ts';
+
+  it('wires start through the shared authority from the sessions composition root', () => {
+    // Whitespace-normalized so the assertion is about the arguments, not the
+    // formatter's line breaks.
+    const services = codeOf(SESSIONS_SERVICES).replace(/\s+/g, ' ');
+
+    expect(services).toMatch(
+      /new StartWorkoutSessionUseCase\(\s*programRepository,\s*runOccurrenceWrites,/,
+    );
+    expect(services).not.toContain('DrizzleRunOccurrenceWrites');
+    expect(services).not.toContain('insert(workoutSessions)');
+
+    // The singleton itself is constructed exactly once, in the repository index.
+    const constructors = sourceFiles().filter((file) =>
+      codeOf(file).includes('new DrizzleRunOccurrenceWrites('),
+    );
+    expect(constructors).toEqual([REPOSITORY_INDEX]);
+  });
+
+  it('never upserts a workout session anywhere in production source', () => {
+    // The ONE INSERT site…
+    const inserters = sourceFiles().filter((file) =>
+      codeOf(file).includes('insert(workoutSessions)'),
+    );
+    expect(inserters).toEqual([SESSION_WRITES]);
+    // …carries no conflict clause at all, and neither does the update-only
+    // session repository: a deleted session row can never be resurrected.
+    expect(codeOf(SESSION_WRITES)).not.toMatch(/onConflict/);
+    expect(codeOf(SESSION_REPOSITORY)).not.toMatch(/onConflict/);
+
+    // The transaction module's single conflict clause is the I1 primary-key
+    // backstop on the FACT insert — never on a session row.
+    const writes = codeOf(RUN_OCCURRENCE_WRITES);
+    const clauses = writes.match(/onConflict\w*/g) ?? [];
+    expect(clauses).toEqual(['onConflictDoNothing']);
+    const factInsert = writes.indexOf('insert(notPerformedWorkouts)');
+    const clause = writes.indexOf('onConflictDoNothing');
+    expect(factInsert).toBeGreaterThan(0);
+    expect(clause).toBeGreaterThan(factInsert);
+    expect(writes).not.toContain('insert(workoutSessions)');
+    expect(writes).not.toMatch(/onConflictDoUpdate/);
+  });
+});

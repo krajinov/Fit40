@@ -369,16 +369,33 @@ lock and never runs in a transaction — one statement needs neither.
 This is the general M17 read invariant, not a closure-only rule: **any read
 model that combines mutually exclusive session execution state and
 not-performed settlement state must project those facts from one coherent
-database snapshot.** Three projections share it:
+database snapshot.** Four projections share it:
 
 | Read model | Port | Snapshot mechanism |
 |---|---|---|
 | Run closure summary | `RunClosureFactsRepository` | ONE statement (`UNION ALL`) |
 | Occurrence session detail | `OccurrenceExecutionFactsRepository` | ONE bounded, read-only REPEATABLE READ transaction (the session aggregate spans several rows, so one statement cannot hydrate it) |
 | Enrollment schedule execution facts | `ScheduleExecutionFactsRepository` | ONE statement (`UNION ALL`) |
+| Follow-through execution facts | `FollowThroughExecutionFactsRepository` | ONE statement (`UNION ALL`) |
 
-None of them takes the enrollment write lock, retries, or serializes behind
-the write side: a coherent read needs exactly one snapshot, nothing more.
+The restart **preflight gate** reads the run's settlement facts through the
+same `RunClosureFactsRepository` projection — never two independently mutable
+reads — while the authoritative re-check inside the locked replacement
+transaction stays the final write-side authority.
+
+A second invariant governs composition: **a run-level read composed into an
+already-loaded run must be fenced to that exact `ProgramEnrollmentId`.** The
+dashboard and Program Detail pass their loaded enrollment's id as the closure
+read's `expectedEnrollmentId`; if that enrollment was replaced or deleted
+mid-composition (restart, leave), the read returns the typed
+`ENROLLMENT_CHANGED` refusal instead of silently switching to the new run — a
+parent view can never mix one enrollment generation's data with another's
+facts. The standalone read convention (resolve the current enrollment) is
+unchanged when no expected id is supplied.
+
+None of the snapshot reads takes the enrollment write lock, retries, or
+serializes behind the write side: a coherent read needs exactly one snapshot,
+nothing more.
 
 `resolveRunClosure`'s denominator is the run's **authored structure**:
 `listScheduledWorkoutsInOrder` for the current program, minus completed ids
@@ -426,6 +443,8 @@ M17 never touched the M14 completion surface:
 | One-snapshot closure-facts projection (completed + not-performed sets) | Infrastructure | `drizzle-run-closure-facts-repository.ts` |
 | One-snapshot occurrence execution facts (session + record) | Infrastructure | `drizzle-occurrence-execution-facts-repository.ts` |
 | One-snapshot schedule execution facts (completed + in-progress + records) | Infrastructure | `drizzle-schedule-execution-facts-repository.ts` |
+| One-snapshot follow-through execution facts (completed activity + in-progress + records) | Infrastructure | `drizzle-follow-through-execution-facts-repository.ts` |
+| Enrollment-identity fencing for composed closure reads (`expectedEnrollmentId` → `findById` + ownership verification) | Application (use case) / Infrastructure (by-identity read) | `get-run-closure-summary.ts`, `ProgramEnrollmentRepository.findById` |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
 Presentation never decides settlement or closure: Server Actions own auth,
@@ -440,6 +459,7 @@ resolve *display* rules from computed flags only.
 | `RunClosureFactsRepository` | `listClosureFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
 | `OccurrenceExecutionFactsRepository` | `findOccurrenceExecutionFacts` | **none** — read-only; ONE read-only REPEATABLE READ transaction, one snapshot |
 | `ScheduleExecutionFactsRepository` | `listScheduleExecutionFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
+| `FollowThroughExecutionFactsRepository` | `listFollowThroughExecutionFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
 | `RunOccurrenceWriteRepository` | `recordNotPerformed`, `undoNotPerformed`, `createSessionForOccurrence` | the three settlement/creation writes only |
 | `WorkoutSessionRepository` | `save`, `listCompletedWorkoutSessionsByEnrollment`, `findActiveSessionByScheduledWorkout`, `findActiveSessionForEnrollment`, `listActiveSessionsByEnrollment`, `listSessionsByScheduledWorkout`, `listCompletedSessionsByScheduledWorkout`, `listSessionSummaries`, `listSessionSummariesByEnrollment`, `findSessionWithDetail`, `listInProgressTrainingHistory`, `findActiveWorkoutSession` | **update only** — no create/upsert of a session row |
 | `PersonalRecordRepository` | read-side queries | **none** — read-only (M12 boundary) |
@@ -517,6 +537,7 @@ The evidence lives in the suites themselves; this is the map.
 | Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
 | Integration | `run-closure-snapshot.test.ts`, `run-closure-facts-repository.test.ts` | the closure projection reads one coherent snapshot across a gated Undo→start→complete commit (deterministic `pg_locks` gates, negative control reproduces the torn two-statement read); projection port contract |
 | Integration | `occurrence-session-snapshot.test.ts`, `schedule-execution-snapshot.test.ts` | the occurrence and schedule projections read one coherent snapshot across a gated abandoned-session → record transition (deterministic `pg_locks` gates, negative controls reproduce the torn multi-statement reads); regression states unchanged |
+| Integration | `follow-through-snapshot.test.ts`, `restart-preflight-snapshot.test.ts`, `run-closure-enrollment-fencing.test.ts` | the follow-through projection and the restart preflight read one coherent snapshot across the gated Undo→start→complete transition (negative controls reproduce the torn reads); the fenced closure read refuses `ENROLLMENT_CHANGED` when the loaded enrollment was replaced, instead of switching generations |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

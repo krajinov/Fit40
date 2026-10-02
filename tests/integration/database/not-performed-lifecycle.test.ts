@@ -54,6 +54,7 @@ import {
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
+  followThroughExecutionFactsRepository,
   resetAndSeed,
   runClosureFactsRepository,
   scheduleExecutionFactsRepository,
@@ -104,7 +105,7 @@ function useCases() {
     followThrough: new GetEnrollmentFollowThroughUseCase(
       programEnrollmentRepository,
       plannedWorkoutRepository,
-      workoutSessionRepository,
+      followThroughExecutionFactsRepository,
       notPerformedOccurrenceRepository,
     ),
     closure: new GetRunClosureSummaryUseCase(
@@ -124,8 +125,7 @@ function useCases() {
     restart: new RestartProgramUseCase(
       programRepository,
       programEnrollmentRepository,
-      workoutSessionRepository,
-      notPerformedOccurrenceRepository,
+      runClosureFactsRepository,
       new NodeIdGenerator(),
     ),
     leave: new LeaveProgramUseCase(programRepository, programEnrollmentRepository),

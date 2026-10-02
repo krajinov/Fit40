@@ -187,6 +187,22 @@ describe('M17 snapshot reads — execution truth and settlement facts are ONE co
     expect(adapter).not.toContain('delete(');
   });
 
+  it('the follow-through projection is ONE statement — no transaction, no lock, no writes', () => {
+    const adapter = codeOf(
+      'src/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository.ts',
+    );
+
+    // ONE statement takes ONE snapshot, so completed activity and the recorded
+    // facts can never be torn across a concurrent settlement transition.
+    expect(adapter).toContain('.unionAll(');
+    expect(adapter.match(/await /g)).toHaveLength(1);
+    expect(adapter).not.toContain('transaction(');
+    expect(adapter).not.toContain(".for('");
+    expect(adapter).not.toContain('insert(');
+    expect(adapter).not.toContain('update(');
+    expect(adapter).not.toContain('delete(');
+  });
+
   it('wires the snapshot ports into the schedule and session composition roots', () => {
     const schedule = codeOf(SCHEDULE_SERVICES).replace(/\s+/g, ' ');
     expect(schedule).toMatch(
@@ -206,10 +222,17 @@ describe('M17 Slice 9 — the M16 report READS the facts and never writes them',
 
     // The planned-row intent read: exactly one.
     expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(1);
-    // The fact projection: ONE read per terminal path — the no-calendar path
-    // (so a rowless fact is still counted) and the configured path. Never one
-    // query per row or per fact, and always the READ-ONLY port.
-    expect(code.match(/notPerformedRepository\.listByEnrollment\(/g)).toHaveLength(2);
+    // The fact projection: ONE read on the no-calendar terminal path only
+    // (so a rowless fact is still counted) — the configured path takes the
+    // one-snapshot execution-facts port instead. Never one query per row or
+    // per fact, and always a READ-ONLY port.
+    expect(code.match(/notPerformedRepository\.listByEnrollment\(/g)).toHaveLength(1);
+    expect(code).toContain(
+      'followThroughExecutionFactsRepository.listFollowThroughExecutionFactsByEnrollment(',
+    );
+    // The configured path never coordinates independently mutable reads.
+    expect(code).not.toContain('listCompletedOccurrenceActivity(');
+    expect(code).not.toContain('listInProgressScheduledWorkoutIds(');
     // Never the mutation authority, and never one of its writes.
     expect(code).not.toContain('RunOccurrenceWriteRepository');
     expect(code).not.toContain('runOccurrenceWrites');

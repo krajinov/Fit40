@@ -36,10 +36,10 @@ import {
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import type { ExerciseId } from '@/domain/types/ids';
+import { DrizzleFollowThroughExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository';
 import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzlePlannedWorkoutRepository } from '@/infrastructure/database/repositories/drizzle-planned-workout-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
-import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
 
 import { countFacts, insertFact } from './not-performed-fixtures';
@@ -55,6 +55,7 @@ import {
 import { reps, seedEnrollment, userId, workoutSessionId } from './personal-record-fixtures';
 import {
   closeDatabase,
+  followThroughExecutionFactsRepository,
   notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
@@ -205,7 +206,7 @@ function makeUseCase(): GetEnrollmentFollowThroughUseCase {
   return new GetEnrollmentFollowThroughUseCase(
     programEnrollmentRepository,
     plannedWorkoutRepository,
-    workoutSessionRepository,
+    followThroughExecutionFactsRepository,
     notPerformedOccurrenceRepository,
   );
 }
@@ -575,7 +576,7 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       const useCase = new GetEnrollmentFollowThroughUseCase(
         new DrizzleProgramEnrollmentRepository(loggingDb),
         new DrizzlePlannedWorkoutRepository(loggingDb),
-        new DrizzleWorkoutSessionRepository(loggingDb),
+        new DrizzleFollowThroughExecutionFactsRepository(loggingDb),
         new DrizzleNotPerformedOccurrenceRepository(loggingDb),
       );
 
@@ -585,15 +586,21 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       const result = await useCase.execute({ userId: OWNER, program: run.program, now: NOW });
 
       expect(result.ok).toBe(true);
-      // Five bounded statements: the enrollment lookup, the run's planned rows,
-      // and the three independent occurrence reads — never one query per row.
-      expect(queries).toHaveLength(5);
-      expect(queries.filter((query) => !query.startsWith('select'))).toEqual([]);
+      // THREE bounded statements: the enrollment lookup, the run's planned rows,
+      // and ONE coherent execution-facts statement (a single UNION ALL covering
+      // the completed activity, the in-progress sessions and the M17 facts) —
+      // never one query per row, and never two reads that could tear.
+      expect(queries).toHaveLength(3);
+      expect(queries.filter((query) => !query.startsWith('select') && !query.startsWith('('))).toEqual([]);
       expect(queries.some((query) => query.includes('program_enrollments'))).toBe(true);
       expect(queries.some((query) => query.includes('planned_workouts'))).toBe(true);
-      expect(queries.filter((query) => query.includes('workout_sessions'))).toHaveLength(2);
-      // The M17 fact projection is one statement, not one per occurrence.
-      expect(queries.filter((query) => query.includes('not_performed_workouts'))).toHaveLength(1);
+      // The execution facts are ONE statement touching both tables — the
+      // snapshot guarantee, observable at the wire.
+      const factsStatements = queries.filter(
+        (query) =>
+          query.includes('workout_sessions') && query.includes('not_performed_workouts'),
+      );
+      expect(factsStatements).toHaveLength(1);
       // Read-only: the report never inserts, updates or deletes anything.
       expect(queries.filter((query) => /^(insert|update|delete)/.test(query))).toEqual([]);
     } finally {

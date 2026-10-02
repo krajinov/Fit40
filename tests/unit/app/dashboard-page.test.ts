@@ -113,6 +113,7 @@ const PROGRAM_DETAIL = {
 
 const ENROLLED = {
   status: 'enrolled',
+  enrollmentId: 'enr-dashboard-test',
   enrolledAt: '2026-01-01T10:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 3, percentage: 25 },
   nextWorkout: { weekNumber: 1, workoutOrder: 4 },

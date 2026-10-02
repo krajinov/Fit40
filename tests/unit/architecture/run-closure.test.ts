@@ -112,8 +112,11 @@ describe('M17 Slice 10 — the restart gate delegates to the Domain', () => {
     expect(code).not.toContain('insert(');
     expect(code).not.toContain('delete(');
     expect(code).not.toContain('drizzle');
-    // Facts are read through the read-only port, never written here.
-    expect(code).toContain('notPerformedRepository.listByEnrollment(');
+    // The preflight reads ONE coherent snapshot — the closure-facts projection
+    // — and never two independently mutable settlement reads.
+    expect(code).toContain('closureFactsRepository.listClosureFactsByEnrollment(');
+    expect(code).not.toContain('notPerformedRepository');
+    expect(code).not.toContain('listCompletedScheduledWorkoutIds(');
     expect(code).not.toContain('runOccurrenceWrites');
     expect(code).not.toContain('recordNotPerformed(');
     expect(code).not.toContain('undoNotPerformed(');
@@ -225,7 +228,7 @@ describe('M17 Slice 10 — program detail loads and EXPOSES the summary only', (
       /new GetRunClosureSummaryUseCase\(\s*programEnrollmentRepository,\s*runClosureFactsRepository,/,
     );
     expect(services).toMatch(
-      /new RestartProgramUseCase\(\s*programRepository,\s*programEnrollmentRepository,\s*workoutSessionRepository,\s*notPerformedOccurrenceRepository,/,
+      /new RestartProgramUseCase\(\s*programRepository,\s*programEnrollmentRepository,\s*runClosureFactsRepository,/,
     );
     // Never the mutation authority in a read model or the eligibility gate.
     expect(services).not.toContain('new RunOccurrenceWrites');
@@ -290,6 +293,49 @@ describe('M17 Slice 13 — no run archive or enrollment-history table exists', (
   });
 });
 
+describe('M17 — composed run-level reads are fenced by ProgramEnrollmentId', () => {
+  it('the closure read resolves the CURRENT enrollment only on the standalone path', () => {
+    const code = codeOf(CLOSURE_READ);
+
+    // The fenced path: exactly the caller's expected enrollment, or the typed
+    // refusal — never a silent switch to the current run.
+    expect(code).toContain('expectedEnrollmentId?: string;');
+    expect(code).toContain('resolveFencedEnrollment(');
+    expect(code).toContain("code: 'ENROLLMENT_CHANGED'");
+    // Current-enrollment resolution happens exactly once: the standalone path.
+    expect(code.match(/findByUserAndProgram\(/g)).toHaveLength(1);
+    // The fenced path resolves by identity, then verifies (user, program)
+    // ownership against the trusted pair.
+    expect(code).toContain('findById(');
+    expect(code).toContain('enrollment.userId !== userId');
+    expect(code).toContain('enrollment.programId !== programId');
+  });
+
+  it('the dashboard fences the closure read to the enrollment it already loaded', () => {
+    const code = codeOf('src/application/use-cases/get-current-program-dashboard.ts');
+
+    expect(code).toContain('expectedEnrollmentId');
+    expect(code).toContain('enrollment.enrollmentId');
+    // The typed refusal degrades to NO closure data, never a fabricated summary.
+    expect(code).not.toContain('resolveCurrentEnrollment');
+  });
+
+  it('program detail fences the closure read the same way', () => {
+    const code = codeOf('src/app/(app)/programs/[programSlug]/page.tsx');
+
+    expect(code).toContain('expectedEnrollmentId');
+    expect(code).toContain('enrollment.enrollmentId');
+  });
+
+  it('exposes the loaded enrollment id for fencing through the enrollment view DTO', () => {
+    const dto = codeOf('src/application/dto/enrollment.ts');
+    const read = codeOf('src/application/use-cases/get-program-enrollment.ts');
+
+    expect(dto).toContain('readonly enrollmentId: string;');
+    expect(read).toContain('enrollmentId: enrollment.id');
+  });
+});
+
 describe('M17 closure projection — one snapshot read owns both fact sets', () => {
   const PORT = 'src/application/ports/run-closure-facts-repository.ts';
   const ADAPTER =
@@ -325,11 +371,13 @@ describe('M17 closure projection — one snapshot read owns both fact sets', () 
     expect(adapter.toLowerCase()).not.toContain('repeatable');
   });
 
-  it('wires the projection into the closure read and nothing else', () => {
+  it('wires the projection into the closure read and the restart preflight only', () => {
     const services = codeOf(ENROLLMENT_SERVICES);
 
+    // The closure read AND the restart preflight share the one-snapshot
+    // projection; nothing else may reach it.
     expect(services).toContain('runClosureFactsRepository');
-    expect(services.match(/runClosureFactsRepository/g)).toHaveLength(2);
+    expect(services.match(/runClosureFactsRepository/g)).toHaveLength(3);
   });
 });
 

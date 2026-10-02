@@ -21,6 +21,7 @@ import {
   programEnrollmentRepository,
   programRepository,
   runOccurrenceWrites,
+  followThroughExecutionFactsRepository,
   scheduleExecutionFactsRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
@@ -40,14 +41,15 @@ export const getEnrollmentScheduleUseCase = new GetEnrollmentScheduleUseCase(
 
 /**
  * The run's plan follow-through (M16): the last 8 UTC weeks of calendar intent
- * reconciled with session facts. Read-only, and like the schedule read the
- * caller passes the program aggregate it already loaded, so one request
- * hydrates the program exactly once.
+ * reconciled with session facts — the session execution truth and the recorded
+ * facts come from ONE coherent snapshot port. Read-only, and like the schedule
+ * read the caller passes the program aggregate it already loaded, so one
+ * request hydrates the program exactly once.
  */
 export const getEnrollmentFollowThroughUseCase = new GetEnrollmentFollowThroughUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
-  workoutSessionRepository,
+  followThroughExecutionFactsRepository,
   notPerformedOccurrenceRepository,
 );
 

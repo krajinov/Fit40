@@ -21,8 +21,9 @@ import {
   enrollmentId,
   LAST_FRI,
   LAST_WED,
-  makeProgram,
+  makeFollowThroughExecutionFactsRepo,
   makeNotPerformedRepo,
+  makeProgram,
   MON,
   notPerformedFact,
   NOW,
@@ -55,13 +56,14 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
   const notPerformed = makeNotPerformedRepo(facts);
+  const executionFacts = makeFollowThroughExecutionFactsRepo(sessions, facts);
   const useCase = new GetEnrollmentFollowThroughUseCase(
     enrollments,
     plannedWorkouts,
-    sessions,
+    executionFacts,
     notPerformed,
   );
-  return { enrollments, plannedWorkouts, sessions, notPerformed, useCase };
+  return { enrollments, plannedWorkouts, sessions, executionFacts, notPerformed, useCase };
 }
 
 type Harness = ReturnType<typeof makeHarness>;
@@ -379,50 +381,21 @@ describe('GetEnrollmentFollowThroughUseCase', () => {
     expect(dto.weeks.map((week) => week.planned)).toEqual([3, 1, 1]);
   });
 
-  it('issues the two activity reads concurrently', async () => {
+  it('issues exactly ONE snapshot read for every execution fact of the configured path', async () => {
     const harness = makeHarness();
     await enrolledRun(harness);
     await configure(harness, [planned(ENR_A, OCCURRENCE_W1_1, MON)]);
-
-    let openGate: () => void = () => {};
-    const gateOpened = new Promise<void>((resolve) => {
-      openGate = resolve;
-    });
-    let inFlight = 0;
-    let maxInFlight = 0;
-    /**
-     * Holds a read open until the other one arrives, with a bounded fallback: a
-     * sequential implementation then fails the overlap assertion instead of
-     * hanging the suite.
-     */
-    const tracked = async <T>(read: () => Promise<T>): Promise<T> => {
-      inFlight += 1;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      if (inFlight === 2) openGate();
-      try {
-        await Promise.race([
-          gateOpened,
-          new Promise<void>((resolve) => setTimeout(resolve, 25)),
-        ]);
-        return await read();
-      } finally {
-        inFlight -= 1;
-      }
-    };
-
-    const completed = harness.sessions.listCompletedOccurrenceActivity.bind(harness.sessions);
-    const inProgress = harness.sessions.listInProgressScheduledWorkoutIds.bind(harness.sessions);
-    vi.spyOn(harness.sessions, 'listCompletedOccurrenceActivity').mockImplementation(() =>
-      tracked(() => completed(enrollmentId(ENR_A))),
-    );
-    vi.spyOn(harness.sessions, 'listInProgressScheduledWorkoutIds').mockImplementation(() =>
-      tracked(() => inProgress(enrollmentId(ENR_A))),
-    );
+    const plannedRead = vi.spyOn(harness.plannedWorkouts, 'listByEnrollment');
+    const snapshotRead = harness.executionFacts.listFollowThroughExecutionFactsByEnrollment;
 
     await readConfigured(harness);
 
-    // Both reads were in flight together: neither decides whether the other runs.
-    expect(maxInFlight).toBe(2);
+    // ONE coherent snapshot supplies completed activity, in-progress sessions
+    // and the recorded facts — the use case never coordinates two independently
+    // mutable reads that could tear across a settlement transition.
+    expect(snapshotRead).toHaveBeenCalledTimes(1);
+    expect(snapshotRead).toHaveBeenCalledWith(enrollmentId(ENR_A));
+    expect(plannedRead).toHaveBeenCalledTimes(1);
   });
 
   it('never invokes a repository write', async () => {
@@ -750,7 +723,7 @@ describe('GetEnrollmentFollowThroughUseCase — recorded not-performed facts (Sl
     const plain = makeHarness();
     await enrolledRun(plain);
     await configure(plain, rows);
-    const factsRead = vi.spyOn(orphans.notPerformed, 'listByEnrollment');
+    const factsRead = orphans.executionFacts.listFollowThroughExecutionFactsByEnrollment;
 
     const dto = await readConfigured(orphans);
     const baseline = await readConfigured(plain);
@@ -760,8 +733,10 @@ describe('GetEnrollmentFollowThroughUseCase — recorded not-performed facts (Sl
     expect(dto.weeks).toEqual(baseline.weeks);
     expect(dto.totals).toEqual(baseline.totals);
     expect(dto.notPerformedUnplaced).toBe(3);
-    // One bounded, enrollment-scoped read — never one query per row or fact.
+    // One bounded, enrollment-scoped snapshot read supplies every execution
+    // fact — never one query per row or fact, never two mutable reads.
     expect(factsRead).toHaveBeenCalledTimes(1);
+    expect(factsRead).toHaveBeenCalledWith(enrollmentId(ENR_A));
   });
 
   it('counts one recorded occurrence once when a fact is repeated', async () => {

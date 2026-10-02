@@ -15,7 +15,6 @@ import postgres from 'postgres';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { ScheduledWorkout, TrainingProgram } from '@/domain/entities/training-program';
 import {
@@ -36,10 +35,8 @@ import {
 } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
-import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
-import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
 import { exercises, programEnrollments, workoutSessions } from '@/infrastructure/database/schema';
 
@@ -52,10 +49,13 @@ import {
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
+  runClosureFactsRepository,
   trainingHistoryRepository,
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import { countFacts, insertFact } from './not-performed-fixtures';
 import {
   createGate,
@@ -296,16 +296,14 @@ async function seedMixedRun(options: {
 }
 
 function restartUseCase(
-  enrollmentRepo = programEnrollmentRepository,
-  sessionRepo = workoutSessionRepository,
   programRepo = programRepository,
-  notPerformedRepo = notPerformedOccurrenceRepository,
+  enrollmentRepo = programEnrollmentRepository,
+  closureFactsRepo = runClosureFactsRepository,
 ) {
   return new RestartProgramUseCase(
     programRepo,
     enrollmentRepo,
-    sessionRepo,
-    notPerformedRepo,
+    closureFactsRepo,
     new NodeIdGenerator(),
   );
 }
@@ -446,10 +444,9 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
     try {
       const concurrentDb = drizzle(concurrentClient, { schema });
       const useCase = restartUseCase(
-        new DrizzleProgramEnrollmentRepository(concurrentDb),
-        new DrizzleWorkoutSessionRepository(concurrentDb),
         new DrizzleProgramRepository(concurrentDb),
-        new DrizzleNotPerformedOccurrenceRepository(concurrentDb),
+        new DrizzleProgramEnrollmentRepository(concurrentDb),
+        new DrizzleRunClosureFactsRepository(concurrentDb),
       );
 
       const outcomes = await Promise.all([
@@ -630,9 +627,12 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
       // replacement's lock. No sleep is used.
       const preReadCaptured = createGate();
       const releasePreRead = createGate();
-      const gatedNotPerformed: NotPerformedOccurrenceRepository = {
-        async listByEnrollment(enrollmentId) {
-          const facts = await harness.notPerformed.listByEnrollment(enrollmentId);
+      // The gated preflight read: the SAME one-snapshot closure-facts
+      // projection the production preflight uses, held mid-read by a gate.
+      const closureFacts = new DrizzleRunClosureFactsRepository(harness.db);
+      const gatedClosureFacts: RunClosureFactsRepository = {
+        async listClosureFactsByEnrollment(enrollmentId) {
+          const facts = await closureFacts.listClosureFactsByEnrollment(enrollmentId);
           preReadCaptured.open();
           await releasePreRead.opened;
           return facts;
@@ -642,8 +642,7 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
       const useCase = new RestartProgramUseCase(
         harness.programs,
         harness.enrollments,
-        harness.sessions,
-        gatedNotPerformed,
+        gatedClosureFacts,
         new NodeIdGenerator(),
       );
 

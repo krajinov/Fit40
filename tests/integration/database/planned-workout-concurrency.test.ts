@@ -33,11 +33,9 @@ import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import { createWorkoutSession } from '@/domain/entities/workout-session';
 import { createUserId, type EnrollmentId } from '@/domain/types/ids';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
-import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzlePlannedWorkoutRepository } from '@/infrastructure/database/repositories/drizzle-planned-workout-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
-import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
 
 import {
@@ -62,10 +60,12 @@ import {
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
+  runClosureFactsRepository,
   runOccurrenceWrites,
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
 import { insertSession } from './session-fixtures';
 
 const OWNER = 'planned-concurrency-owner';
@@ -93,8 +93,7 @@ function concurrentPool(max = 6) {
       new RestartProgramUseCase(
         new DrizzleProgramRepository(db),
         new DrizzleProgramEnrollmentRepository(db),
-        new DrizzleWorkoutSessionRepository(db),
-        new DrizzleNotPerformedOccurrenceRepository(db),
+        new DrizzleRunClosureFactsRepository(db),
         new NodeIdGenerator(),
       ),
     end: async (): Promise<void> => {
@@ -206,8 +205,7 @@ function restartUseCase(): RestartProgramUseCase {
   return new RestartProgramUseCase(
     programRepository,
     programEnrollmentRepository,
-    workoutSessionRepository,
-    notPerformedOccurrenceRepository,
+    runClosureFactsRepository,
     new NodeIdGenerator(),
   );
 }

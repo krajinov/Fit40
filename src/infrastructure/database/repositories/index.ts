@@ -8,6 +8,7 @@
 import { db } from '../client';
 import { DrizzleExerciseRepository } from './drizzle-exercise-repository';
 import { DrizzleNotPerformedOccurrenceRepository } from './drizzle-not-performed-occurrence-repository';
+import { DrizzleFollowThroughExecutionFactsRepository } from './drizzle-follow-through-execution-facts-repository';
 import { DrizzleOccurrenceExecutionFactsRepository } from './drizzle-occurrence-execution-facts-repository';
 import { DrizzlePersonalRecordRepository } from './drizzle-personal-record-repository';
 import { DrizzleRunOccurrenceWrites } from './drizzle-run-occurrence-writes';
@@ -36,6 +37,7 @@ export const notPerformedOccurrenceRepository = new DrizzleNotPerformedOccurrenc
 export const runOccurrenceWrites = new DrizzleRunOccurrenceWrites(db);
 export const runClosureFactsRepository = new DrizzleRunClosureFactsRepository(db);
 export const scheduleExecutionFactsRepository = new DrizzleScheduleExecutionFactsRepository(db);
+export const followThroughExecutionFactsRepository = new DrizzleFollowThroughExecutionFactsRepository(db);
 export const occurrenceExecutionFactsRepository = new DrizzleOccurrenceExecutionFactsRepository(db);
 export const trainingHistoryRepository = new DrizzleTrainingHistoryRepository(db);
 export const personalRecordRepository = new DrizzlePersonalRecordRepository(db);
@@ -51,6 +53,7 @@ export { DrizzleRegistrationRepository } from './drizzle-registration-repository
 export { DrizzleRunClosureFactsRepository } from './drizzle-run-closure-facts-repository';
 export { DrizzleScheduleExecutionFactsRepository } from './drizzle-schedule-execution-facts-repository';
 export { DrizzleOccurrenceExecutionFactsRepository } from './drizzle-occurrence-execution-facts-repository';
+export { DrizzleFollowThroughExecutionFactsRepository } from './drizzle-follow-through-execution-facts-repository';
 export { DrizzleSessionRepository } from './drizzle-session-repository';
 export { DrizzleTrainingHistoryRepository } from './drizzle-training-history-repository';
 export { DrizzleUserRepository } from './drizzle-user-repository';

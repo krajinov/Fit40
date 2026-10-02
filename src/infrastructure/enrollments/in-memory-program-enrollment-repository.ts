@@ -45,6 +45,10 @@ export class InMemoryProgramEnrollmentRepository implements ProgramEnrollmentRep
     this.runSettlementFacts.set(enrollmentId, facts);
   }
 
+  async findById(id: EnrollmentId): Promise<ProgramEnrollment | null> {
+    return this.enrollmentsById.get(id) ?? null;
+  }
+
   async findByUserAndProgram(
     userId: UserId,
     programId: ProgramId,

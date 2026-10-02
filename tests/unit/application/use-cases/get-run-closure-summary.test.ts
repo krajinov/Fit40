@@ -383,3 +383,92 @@ describe('GetRunClosureSummaryUseCase — ownership, reads and shape', () => {
     ]);
   });
 });
+
+describe('GetRunClosureSummaryUseCase — enrollment identity fencing', () => {
+  it('reads the closure of EXACTLY the expected enrollment when it is still current', async () => {
+    const harness = await makeHarness({
+      completed: [OCCURRENCE_W1_1],
+      facts: [notPerformedFact(ENR_A, OCCURRENCE_W1_2)],
+    });
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      completedWorkouts: 1,
+      notPerformedWorkouts: 1,
+      // Four authored occurrences are still open, so the run is NOT concluded.
+      isConcluded: false,
+    });
+  });
+
+  it('refuses with ENROLLMENT_CHANGED when the expected enrollment was replaced, reading no facts', async () => {
+    const harness = await makeHarness({ completed: [OCCURRENCE_W1_1] });
+    // The replacement a restart produces: the old row is deleted and a
+    // DIFFERENT id becomes the current run of the same (user, program) pair.
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+    const factsRead = harness.closureFacts.listClosureFactsByEnrollment;
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    // The caller is composing an old-enrollment DTO: the fenced read refuses
+    // rather than silently switching to the replacement run's facts.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    // No facts read is ever issued for the vanished expected enrollment.
+    expect(factsRead).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the expected enrollment belongs to another user, reading no facts', async () => {
+    const harness = await makeHarness();
+    // ENR_B is a real, current enrollment — but it is USER_B's run.
+    const factsRead = harness.closureFacts.listClosureFactsByEnrollment;
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      expectedEnrollmentId: ENR_B,
+    });
+
+    // The id alone never authorizes: ownership is verified against the
+    // trusted (user, program) pair before any fact is read.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    expect(factsRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps resolving the CURRENT enrollment when no expected id is supplied', async () => {
+    const harness = await makeHarness({ completed: [OCCURRENCE_W1_1] });
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+    await saveCompletedSession(harness.sessions, {
+      id: 'r-occurrence',
+      userId: USER_A,
+      enrollmentId: enrollmentId('enr-a-replacement'),
+      scheduledWorkoutId: OCCURRENCE_W1_2,
+    });
+
+    // The standalone convention is unchanged: without a fence the read
+    // describes whichever run is current — here the replacement.
+    const result = await harness.useCase.execute({ userId: USER_A, program: PROGRAM });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      completedWorkouts: 1,
+      isConcluded: false,
+    });
+  });
+});

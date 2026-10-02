@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
 import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
+import { DrizzleFollowThroughExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository';
 import { DrizzleOccurrenceExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-occurrence-execution-facts-repository';
 import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
 import { DrizzleScheduleExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository';
@@ -36,6 +37,7 @@ export const notPerformedOccurrenceRepository = new DrizzleNotPerformedOccurrenc
 export const runOccurrenceWrites = new DrizzleRunOccurrenceWrites(db);
 export const runClosureFactsRepository = new DrizzleRunClosureFactsRepository(db);
 export const scheduleExecutionFactsRepository = new DrizzleScheduleExecutionFactsRepository(db);
+export const followThroughExecutionFactsRepository = new DrizzleFollowThroughExecutionFactsRepository(db);
 export const occurrenceExecutionFactsRepository = new DrizzleOccurrenceExecutionFactsRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);

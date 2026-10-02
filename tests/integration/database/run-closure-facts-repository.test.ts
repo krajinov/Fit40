@@ -102,7 +102,7 @@ describe('DrizzleRunClosureFactsRepository — the closure-facts projection', ()
 
   it('excludes another run\u2019s truth and detached history structurally', async () => {
     const run = await seedEnrolledRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN_ID });
-    const otherRun = await seedEnrolledRun({
+    await seedEnrolledRun({
       owner: OTHER_OWNER,
       programSlug: PROGRAM_SLUG,
       enrollmentId: OTHER_RUN_ID,

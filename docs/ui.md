@@ -676,8 +676,12 @@ M13 integration suites in
   linking to `/programs/[slug]` (where the form lives). Configured runs get
   **TODAY** (accent badge + "Week N · Workout N" eyebrow + workout name;
   "Start workout" / "Resume workout" via the existing session route, or a
-  `done` badge "Completed today" with no Start), **NEXT WORKOUT** (neutral
-  badge; rendered only when nothing is actionable today; "Planned for Sep 30"
+  `done` badge "Completed today" with no Start, or — M17 — a neutral badge
+  "Recorded as not performed" with no Start: a recorded occurrence is settled
+  execution fact, never actionable), **NEXT WORKOUT** (neutral badge; rendered
+  only when nothing is actionable today — settled statuses (`completed`,
+  `not-performed`) are not actionable, so a recorded today item never hides the
+  genuine next open workout; "Planned for Sep 30"
   from the component-based date formatter; secondary "View details" only, so it
   never competes with an actionable Today), and a neutral past-due line ("N
   planned workout(s) behind schedule"). A failed read renders nothing — it

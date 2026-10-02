@@ -6,14 +6,13 @@ import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
 import {
   resolveRunNextOccurrence,
-  type NextOccurrenceCoordinates,
 } from '@/features/enrollment/next-occurrence';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import type { ProgramWeekStatus } from '@/features/programs/components/ProgramWeekSection';
+import { resolveProgramWeekStatus } from '@/features/programs/week-status';
 import { PlanFollowThroughSection } from '@/features/schedule/components/PlanFollowThroughSection';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
@@ -25,9 +24,11 @@ interface ProgramDetailProps {
    */
   readonly enrollment: ProgramEnrollmentViewDto | null;
   /**
-   * Three-valued next-workout state of the enrollment (shared with the
-   * dashboard). Null when anonymous or not enrolled — no enrollment
-   * controls or up-next area then.
+   * Multi-valued next-workout state of the enrollment (shared with the
+   * dashboard): available / unavailable / complete / concluded. Null when
+   * anonymous or not enrolled — no enrollment controls or up-next area then.
+   * The panel reads its own lifecycle from `runClosure`, so a `complete` state
+   * for a concluded run still renders the factual run-closed callout.
    */
   readonly nextWorkoutPreview: NextWorkoutPreviewState | null;
   /**
@@ -54,38 +55,6 @@ interface ProgramDetailProps {
    * surface remains the only completion state.
    */
   readonly runClosure: RunClosureSummaryDto | null;
-}
-
-/**
- * Derives a week's status from the run's AUTHORITATIVE next occurrence (M17
- * `resolveRunNextOccurrence`): weeks before it are completed, its own week is in
- * progress, later ones upcoming. A null next occurrence (settled run) marks all
- * weeks completed. Anonymous or not-enrolled visitors see every week upcoming.
- *
- * The next occurrence is the closure-resolved FIRST OPEN authored occurrence
- * when the closure read supplied it, so a week holding only a recorded
- * occurrence is never painted "in progress" (M17 Slice 11 correction).
- */
-function weekStatus(
-  weekNumber: number,
-  enrolled: boolean,
-  nextOccurrence: NextOccurrenceCoordinates | null,
-): ProgramWeekStatus {
-  if (!enrolled) {
-    return 'upcoming';
-  }
-
-  if (nextOccurrence === null) {
-    return 'completed';
-  }
-
-  if (weekNumber < nextOccurrence.weekNumber) {
-    return 'completed';
-  }
-  if (weekNumber === nextOccurrence.weekNumber) {
-    return 'in-progress';
-  }
-  return 'upcoming';
 }
 
 /**
@@ -221,7 +190,17 @@ export function ProgramDetail({
             key={week.weekNumber}
             programSlug={program.slug}
             week={week}
-            status={weekStatus(week.weekNumber, enrolled, nextOccurrence)}
+            status={resolveProgramWeekStatus({
+              enrolled,
+              weekNumber: week.weekNumber,
+              occurrences: week.scheduledWorkouts.map((scheduled) => ({
+                scheduledWorkoutId: scheduled.scheduledWorkoutId,
+                key: `${week.weekNumber}-${scheduled.order}`,
+              })),
+              completedIds,
+              recordedKeys,
+              upNext: nextOccurrence,
+            })}
             completedIds={completedIds}
             recordedKeys={recordedKeys}
             upNextKey={upNextKey}

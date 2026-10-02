@@ -187,6 +187,7 @@ async function renderScreen(
     progress: buildSessionProgress(session),
     addableExercises: [],
     screenState: 'in-progress',
+    notPerformedRecorded: false,
     programCompletion,
   };
 

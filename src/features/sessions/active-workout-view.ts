@@ -50,6 +50,8 @@ import {
 export type ActiveWorkoutScreenState =
   | 'not-enrolled'
   | 'not-started'
+  /** The occurrence is settled as recorded-not-performed (M17) — no Start. */
+  | 'not-performed'
   | 'in-progress'
   | 'completed';
 
@@ -70,6 +72,13 @@ export interface ActiveWorkoutView {
    */
   readonly addableExercises: ReadonlyArray<ExerciseSummaryDto>;
   readonly screenState: ActiveWorkoutScreenState;
+  /**
+   * The occurrence's M17 not-performed fact, read through the session use case
+   * (never inferred from a missing session). When true the screen presents the
+   * recorded state — `Recorded as not performed` with Undo and no Start — even
+   * for a direct/bookmarked session URL (M17 final review).
+   */
+  readonly notPerformedRecorded: boolean;
   /**
    * M14 program-complete surfacing: non-null ONLY when this completed
    * session's current program enrollment is authoritatively complete
@@ -225,16 +234,26 @@ export async function buildActiveWorkoutView(
     );
   }
 
-  const { enrolled, session } = sessionResult.data;
+  const { enrolled, session, notPerformedRecorded } = sessionResult.data;
 
   if (!enrolled || session === null) {
+    // Recorded state dominates the not-started state (M17 final review): an
+    // occurrence recorded as not performed is settled, so a direct/bookmarked
+    // session URL presents the recorded fact with Undo — never an impossible
+    // "Start workout". The fact is read from the use case, never inferred.
+    const screenState: ActiveWorkoutScreenState = !enrolled
+      ? 'not-enrolled'
+      : notPerformedRecorded
+        ? 'not-performed'
+        : 'not-started';
     return {
       workout,
       session: null,
       cards: [],
       progress: null,
       addableExercises: [],
-      screenState: !enrolled ? 'not-enrolled' : 'not-started',
+      screenState,
+      notPerformedRecorded,
       programCompletion: null,
     };
   }
@@ -282,6 +301,7 @@ export async function buildActiveWorkoutView(
     progress: buildSessionProgress(session),
     addableExercises: exerciseData.addableExercises,
     screenState,
+    notPerformedRecorded,
     programCompletion,
   };
 }

@@ -208,6 +208,17 @@ the sign-in links; the menu performs no authorization itself.
   the domain has no explicit current-program concept).
 - Empty states: no enrollment → `NoProgramCard` (EmptyState + Browse
   programs CTA); program fully completed → `ProgramCompletedCard`.
+- **"Up next" authority (M17):** the dashboard "Up next" card follows the run's
+  **first OPEN authored occurrence** — the closure read's
+  `openInProgramOrder[0]` — when authoritative closure data is available, so an
+  occurrence already recorded as not performed is never offered as "Up next" /
+  "Start workout". When the closure read is unavailable the M14 `nextWorkout`
+  fallback stands (graceful degradation; no settlement truth is invented). A
+  **concluded-but-incomplete** run has no Up next: it renders the factual
+  `ConcludedRunCallout` (**"Run closed — {n} completed, {m} recorded as not
+  performed"**, no restart control per the M14 dashboard decision) instead of
+  the completed card, links to no `/completed`, and suppresses the schedule
+  card.
 
 ### Program detail structure
 
@@ -223,7 +234,10 @@ the sign-in links; the menu performs no authorization itself.
      whose panels own the start/resume semantics); mobile shows the
      compact eyebrow/track/count variant and keeps Leave reachable.
 - Weekly schedule: one card per week; in-progress weeks get the
-  accent-tint-border card treatment. Workout cards: completed (accent
+  accent-tint-border card treatment, and a **settled-but-incomplete** week
+  (every authored workout completed or recorded not performed, at least one
+  recorded) shows a neutral **"Settled"** badge — never "Completed" (M17).
+  Workout cards: completed (accent
   check circle, "Completed"), up next (accent-tint card, accent border,
   "Up next"), scheduled (bordered order circle, "Scheduled") — all links.
 - Catalog page and cards were restyled onto the same primitives; the
@@ -781,6 +795,15 @@ M13 integration suites in
   heading **"Recorded as not performed"**, body **"It goes back to not
   started."**, an **Undo** form; Start is suppressed for this state. The
   scheduled workout card shows the same status text.
+- **Session route recorded state** (`SessionRecordedPanel`, a direct/bookmarked
+  session URL): when the occurrence is recorded and no session exists, the
+  session screen renders the SAME recorded CTA band (heading **"Recorded as not
+  performed"**, **"It goes back to not started."**, an **Undo** form) and offers
+  **no** Start — recorded state dominates the not-started presentation, so a
+  bookmarked URL can never show an impossible "Start workout". The recorded
+  fact is read from `GetWorkoutSessionUseCase`; after **Undo** the next
+  authoritative read restores the normal not-started / open state and Start may
+  become available again.
 - **Concluded run panel** (`ConcludedRunCallout` inside `EnrolledProgramPanel`):
   **"Run closed — {n} completed, {m} recorded as not performed"** (both counts
   always rendered), shown when the run is concluded; the **restart**
@@ -794,12 +817,21 @@ M13 integration suites in
   `not-performed` items and the rowless `unplacedNotPerformedWorkouts`
   projection, so a rowless record needs no fabricated planned date to suppress
   Start.
-- **Up-next authority:** the panel/up-next affordance follows the run's
+- **Up-next authority:** the program panel and the **dashboard** follow the run's
   **first OPEN authored occurrence** from the closure DTO's `openInProgramOrder`
   when the closure read is available — an occurrence recorded as not performed
   is settled, so it is never displayed as "Up next" or offered a Start. The M14
   `nextWorkout` is used only as the fallback when the closure read is
   unavailable (graceful degradation), and React never recomputes openness.
+- **Week status authority (M17):** an authored week is **Completed** only when
+  EVERY authored occurrence in it has a completed session — a
+  not-performed record never counts as one. A week whose authored occurrences
+  are all settled but not all completed (a completion plus a record, or an
+  all-recorded week) is **Settled**; the current week holding the authoritative
+  first OPEN occurrence stays **In progress**; a concluded-but-incomplete run
+  paints no week "Completed". Completion is never inferred from the first open
+  occurrence, from `nextOccurrence === null`, from run conclusion, or from a
+  record (pure resolver `resolveProgramWeekStatus`).
 - **Restart refusal copy:** the typed `PROGRAM_NOT_COMPLETE` error renders as
   **"This run hasn't finished yet."** — restartability (complete OR
   concluded), never phrased as completion.

@@ -19,6 +19,7 @@ vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
 
 import type { ProgramWeekDto } from '@/application/dto/program';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
+import type { ProgramWeekStatus } from '@/features/programs/week-status';
 
 declare global {
   // React 19's act() environment flag; not part of the DOM lib typings.
@@ -64,6 +65,7 @@ const WEEK: ProgramWeekDto = {
 
 async function renderWeek(
   options: {
+    readonly status?: ProgramWeekStatus;
     readonly completedIds?: ReadonlySet<string>;
     readonly recordedKeys?: ReadonlySet<string>;
     readonly upNextKey?: string | null;
@@ -77,7 +79,7 @@ async function renderWeek(
       createElement(ProgramWeekSection, {
         programSlug: SLUG,
         week: WEEK,
-        status: 'in-progress',
+        status: options.status ?? 'in-progress',
         completedIds: options.completedIds ?? new Set<string>(),
         recordedKeys: options.recordedKeys,
         upNextKey: options.upNextKey ?? '1-1',
@@ -150,3 +152,41 @@ describe('ProgramWeekSection / recorded state (M17 Slice 11)', () => {
     ).toBe(false);
   });
 });
+
+describe('ProgramWeekSection / settled-but-incomplete week (M17 final review)', () => {
+  it('states a settled week factually — never "Completed" and no completion vocabulary', async () => {
+    const container = await renderWeek({
+      status: 'settled',
+      completedIds: new Set(['sw-1']),
+      recordedKeys: new Set(['1-2']),
+      upNextKey: null,
+    });
+    // The week HEADER badge is the settlement verdict; individual cards still
+    // state their own completed / recorded facts.
+    const headerText = container.querySelector('header')?.textContent ?? '';
+
+    expect(headerText).toContain('Settled');
+    expect(headerText).not.toContain('Completed');
+    expect(headerText).not.toContain('Failed');
+    expect(headerText).not.toContain('Missed');
+    expect(headerText).not.toContain('Skipped');
+    expect(headerText).not.toContain('Incomplete');
+  });
+
+  it('still marks a genuinely completed week Completed', async () => {
+    const container = await renderWeek({
+      status: 'completed',
+      completedIds: new Set(['sw-1', 'sw-2']),
+      upNextKey: null,
+    });
+
+    expect(container.querySelector('header')?.textContent).toContain('Completed');
+  });
+
+  it('still marks the current week In progress', async () => {
+    const container = await renderWeek({ status: 'in-progress', upNextKey: '1-1' });
+
+    expect(container.querySelector('header')?.textContent).toContain('In progress');
+  });
+});
+

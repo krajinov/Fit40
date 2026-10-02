@@ -43,10 +43,12 @@ export type {
   RecentTrainingState,
 } from '@/features/dashboard/recent-training-view';
 import {
+  buildNextWorkoutView,
   nextWorkoutPreviewState,
   toNextWorkoutView,
   type NextWorkoutPreviewState,
 } from '@/features/sessions/next-workout-view';
+import { resolveRunNextOccurrence } from '@/features/enrollment/next-occurrence';
 
 export type WeekStatus = 'completed' | 'in-progress' | 'upcoming';
 
@@ -232,10 +234,41 @@ export async function buildDashboardView(
       new Set(completedIds),
       nextWeekNumber,
     );
-    nextWorkoutPreview = nextWorkoutPreviewState(
-      enrollment.nextWorkout,
-      current.nextWorkout === null ? null : toNextWorkoutView(current.nextWorkout),
-    );
+
+    // M17 final review: Up next follows the run's FIRST OPEN authored occurrence
+    // — the closure DTO's `openInProgramOrder[0]` when the read supplied it —
+    // never the completion-only `nextWorkout`, which can point at an occurrence
+    // already SETTLED as recorded not performed. The selection is the shared
+    // pure helper (`resolveRunNextOccurrence`), never recomputed here; a null
+    // closure DTO (a failed additive read) degrades to the M14 next workout
+    // exactly as before, inventing no settlement truth.
+    //
+    // The preview is resolved for that occurrence: when it is the same
+    // occurrence the use case already resolved, the DTO is reused (no second
+    // resolve); otherwise the preview is resolved for the authoritative
+    // occurrence (one bounded resolve call, mirroring the program page).
+    const runClosure = current.runClosure;
+    const nextOccurrence = resolveRunNextOccurrence(enrollment.nextWorkout, runClosure);
+    const reusedResolvedPreview =
+      nextOccurrence !== null &&
+      enrollment.nextWorkout !== null &&
+      nextOccurrence.weekNumber === enrollment.nextWorkout.weekNumber &&
+      nextOccurrence.workoutOrder === enrollment.nextWorkout.workoutOrder;
+    const previewWorkout =
+      nextOccurrence === null
+        ? null
+        : reusedResolvedPreview
+          ? current.nextWorkout === null
+            ? null
+            : toNextWorkoutView(current.nextWorkout)
+          : await buildNextWorkoutView({
+              userId,
+              programSlug: current.program.slug,
+              weekNumber: nextOccurrence.weekNumber,
+              workoutOrder: nextOccurrence.workoutOrder,
+            });
+
+    nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, previewWorkout, runClosure);
   }
 
   return {

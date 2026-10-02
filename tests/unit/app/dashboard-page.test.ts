@@ -39,6 +39,14 @@ vi.mock('@/features/dashboard/dashboard-view', () => ({
   buildDashboardView: buildViewMock,
 }));
 
+// The M17 concluded-run surface reuses `ConcludedRunCallout`, whose restart leaf
+// posts to the enrollment Server Action (which pulls the DB composition root).
+// Stubbed at the module boundary — the program-detail-page test pattern — so the
+// dashboard route stays DB-free under test.
+vi.mock('@/features/enrollment/actions/restart-program', () => ({
+  restartProgramAction: vi.fn(),
+}));
+
 import DashboardPage from '@/app/(app)/dashboard/page';
 import type { DashboardView } from '@/features/dashboard/dashboard-view';
 import type { DashboardScheduleState } from '@/application/dto/dashboard';
@@ -253,6 +261,32 @@ describe('/dashboard page (M15 Slice 5)', () => {
     expect(markup).toContain('Workouts');
     expect(markup).toContain('Recent training');
     expect(markup).toContain('Full Body A');
+  });
+
+  it('renders the factual run-closed state for a concluded run — no Start, no completion copy', async () => {
+    const concluded: NonNullable<DashboardView['currentProgram']> = {
+      program: PROGRAM_DETAIL,
+      enrollment: ENROLLED,
+      nextWorkoutPreview: {
+        status: 'concluded',
+        completedWorkouts: 3,
+        notPerformedWorkouts: 2,
+      },
+      // Even a configured schedule must not surface a Start against a settled run.
+      schedule: configuredSchedule(),
+    };
+    const markup = await renderPage(concluded);
+
+    // Honest run-level copy: concluded is not completion.
+    expect(markup).toContain('Run closed — 3 completed, 2 recorded as not performed');
+    expect(markup).not.toContain('UP NEXT');
+    expect(markup).not.toContain('Start workout');
+    expect(markup).not.toContain('Resume workout');
+    // No M14 completion surface and no /completed link for a concluded-but-incomplete run.
+    expect(markup).not.toContain('Program completed');
+    expect(markup).not.toContain('/completed');
+    // The M15 schedule card is suppressed for a settled run too.
+    expect(markup).not.toContain('aria-label="Training schedule"');
   });
 
   it('exposes no EnrollmentId anywhere in the rendered markup', async () => {

@@ -7,6 +7,7 @@ import type { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-e
 import { GetProgramBySlugUseCase } from '@/application/use-cases/get-program-by-slug';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { GetScheduledWorkoutUseCase } from '@/application/use-cases/get-scheduled-workout';
+import { GetRunClosureSummaryUseCase } from '@/application/use-cases/get-run-closure-summary';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
 
 import { makeNotPerformedRepo } from './schedule-fixtures';
@@ -201,6 +202,9 @@ function makeUseCase(
       new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, makeNotPerformedRepo()),
     ),
     scheduleUseCase,
+    // M17 final review: the run-closure read, composed beside the schedule read
+    // so the dashboard can resolve the run's first OPEN occurrence.
+    new GetRunClosureSummaryUseCase(enrollmentRepo, sessionRepo, makeNotPerformedRepo()),
   );
   return { enrollmentRepo, sessionRepo, uc };
 }

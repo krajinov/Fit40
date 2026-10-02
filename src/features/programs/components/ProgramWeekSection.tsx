@@ -5,9 +5,13 @@ import {
   ScheduledWorkoutCard,
   type ScheduledWorkoutState,
 } from '@/features/programs/components/ScheduledWorkoutCard';
+import type { ProgramWeekStatus } from '@/features/programs/week-status';
 
-/** Lifecycle of one program week for the enrolled visitor. */
-export type ProgramWeekStatus = 'completed' | 'in-progress' | 'upcoming';
+/**
+ * Lifecycle of one program week for the enrolled visitor. Re-exported from the
+ * pure status resolver (M17 final review) so importers keep one source of truth.
+ */
+export type { ProgramWeekStatus } from '@/features/programs/week-status';
 
 interface ProgramWeekSectionProps {
   readonly programSlug: string;
@@ -60,6 +64,12 @@ export function ProgramWeekSection({
           <Badge variant="done">Completed</Badge>
         ) : status === 'in-progress' ? (
           <Badge variant="accent">In progress</Badge>
+        ) : status === 'settled' ? (
+          /* Settled but not completed (M17): every authored occurrence is
+             settled, yet at least one is recorded as not performed. Factual
+             non-completion vocabulary — never "Completed", "Failed", "Missed",
+             "Skipped" or "Incomplete". */
+          <Badge>Settled</Badge>
         ) : (
           <Badge>Upcoming</Badge>
         )}

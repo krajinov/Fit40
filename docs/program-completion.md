@@ -263,7 +263,12 @@ No other performance numbers are claimed by M14.
   completion summary is unrecoverable after restart.
 - Zero-schedule divergence (`isProgramComplete` false vs legacy
   `getNextWorkout` null) is documented, not reconciled.
-- No dashboard restart control and no new dashboard data flow.
+- No dashboard restart control. Since M17 the dashboard does have one **additive**
+  closure read (`RunClosureSummaryDto`) so "Up next" follows the run's first
+  OPEN authored occurrence and a concluded-but-incomplete run shows no Start —
+  but that read changes no completion semantics, adds no restart control, and
+  the M14 completed card stays the only completion surface (see
+  [Run Closure & Not-Performed Settlement](run-closure.md)).
 - `ENROLLMENT_CHANGED` is reachable only when the current enrollment itself
   is restartable (state moved twice); the common concurrent loser observes
   `PROGRAM_NOT_COMPLETE`.

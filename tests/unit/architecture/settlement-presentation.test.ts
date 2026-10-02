@@ -238,10 +238,21 @@ describe('M17 Slice 11 — locked vocabulary', () => {
       'Run closed —',
     );
     expect(codeOf(RESTART_ACTION)).toContain("This run hasn't finished yet.");
+    // M17 final review: the settled-but-incomplete week badge.
+    expect(codeOf('src/features/programs/components/ProgramWeekSection.tsx')).toContain(
+      'Settled',
+    );
   });
 
   it('never uses workout-level settlement vocabulary in the new surfaces', () => {
-    const files = [...SETTLEMENT_SURFACES, PANEL_STATE, STATUS_VIEW];
+    const files = [
+      ...SETTLEMENT_SURFACES,
+      PANEL_STATE,
+      STATUS_VIEW,
+      // M17 final review: the week-status resolver and its badge.
+      'src/features/programs/week-status.ts',
+      'src/features/programs/components/ProgramWeekSection.tsx',
+    ];
     const banned = /\b(skipped|missed|failed|incomplete)\b/i;
 
     for (const file of files) {
@@ -299,4 +310,85 @@ describe('M17 final review — recorded identity and open/up-next truth', () => 
 });
 
 
+
+
+describe('M17 final review — recorded state across the remaining workout surfaces', () => {
+  const PROGRAM_DETAIL = 'src/features/programs/components/ProgramDetail.tsx';
+  const WEEK_STATUS = 'src/features/programs/week-status.ts';
+  const WEEK_SECTION = 'src/features/programs/components/ProgramWeekSection.tsx';
+  const DASHBOARD_VIEW = 'src/features/dashboard/dashboard-view.ts';
+  const DASHBOARD_USE_CASE = 'src/application/use-cases/get-current-program-dashboard.ts';
+  const ACTIVE_VIEW = 'src/features/sessions/active-workout-view.ts';
+  const RECORDED_PANEL = 'src/features/sessions/components/SessionRecordedPanel.tsx';
+  const SESSION_PAGE =
+    'src/app/(app)/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session/page.tsx';
+
+  it('(1) selects dashboard Up next from the closure open identity, never completion-only nextWorkout', () => {
+    const view = codeOf(DASHBOARD_VIEW);
+
+    // The view selects through the shared pure helper…
+    expect(view).toContain('resolveRunNextOccurrence(');
+    // …and the composition reads the M17 closure truth to feed it.
+    expect(codeOf(DASHBOARD_USE_CASE)).toContain('getRunClosureSummary');
+    // React/presentation never recomputes openness or closure itself.
+    expect(view).not.toContain('openInProgramOrder');
+    expect(view).not.toContain('isProgramComplete');
+    expect(view).not.toContain('isConcluded');
+    expect(view).not.toContain('resolveRunClosure');
+  });
+
+  it('(2) Program Detail week completion comes from authored completed truth, not nextOccurrence === null', () => {
+    const detail = codeOf(PROGRAM_DETAIL);
+
+    // The week status is delegated to the pure authored-truth resolver…
+    expect(detail).toContain('resolveProgramWeekStatus(');
+    // …and the old "settled run → all weeks completed" inference is gone.
+    expect(detail).not.toContain("return 'completed';");
+    // Presentation never derives a week verdict from a Domain closure call.
+    expect(detail).not.toContain('isProgramComplete');
+    expect(detail).not.toContain('isRunConcluded');
+    expect(detail).not.toContain('resolveRunClosure(');
+  });
+
+  it('(3) a recorded occurrence never counts as completed for a week badge', () => {
+    const code = codeOf(WEEK_STATUS);
+
+    // Completion is decided ONLY by the completed-occurrence ids…
+    expect(code).toContain('completedIds.has(occurrence.scheduledWorkoutId)');
+    // …the settled state keys on the recorded identity, never on completion…
+    expect(code).toContain('recordedKeys.has(occurrence.key)');
+    expect(code).toContain("'settled'");
+    // …and the factual badge exists without completion vocabulary.
+    expect(codeOf(WEEK_SECTION)).toContain('Settled');
+  });
+
+  it('(4) rowless recorded occurrences participate in week truth by authored identity', () => {
+    const detail = codeOf(PROGRAM_DETAIL);
+
+    // Each week occurrence's recorded key is its AUTHORED "week-order"…
+    expect(detail).toContain('`${week.weekNumber}-${scheduled.order}`');
+    // …and the recorded set carries both planned N items and rowless facts.
+    expect(detail).toContain('schedule.schedule.unplacedNotPerformedWorkouts');
+  });
+
+  it('(5) the active workout screen consumes notPerformedRecorded from the session use case', () => {
+    const code = codeOf(ACTIVE_VIEW);
+
+    expect(code).toContain('notPerformedRecorded');
+    expect(code).toContain("'not-performed'");
+    // The fact is read, never inferred from a missing session.
+    expect(code).toContain('sessionResult.data');
+  });
+
+  it('(6) the recorded session screen exposes no Start control', () => {
+    const code = codeOf(RECORDED_PANEL);
+
+    // Revision: it reuses the recorded CTA band and renders no start panel.
+    expect(code).toContain('ctaState="not-performed"');
+    expect(code).not.toContain('SessionStartPanel');
+    expect(code).not.toContain('StartSessionButton');
+    // The session route renders the recorded panel for the recorded state.
+    expect(codeOf(SESSION_PAGE)).toContain("screenState === 'not-performed'");
+  });
+});
 

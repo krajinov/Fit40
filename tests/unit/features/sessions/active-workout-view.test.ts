@@ -545,3 +545,114 @@ describe('active-workout-view / program-complete callout (M14)', () => {
     expect(view.programCompletion).toBeNull();
   });
 });
+
+describe('active-workout-view / M17 recorded state (final review)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function sessionResult(overrides: {
+    readonly enrolled?: boolean;
+    readonly session?: WorkoutSessionDto | null;
+    readonly notPerformedRecorded?: boolean;
+  }) {
+    return {
+      ok: true as const,
+      data: {
+        enrolled: overrides.enrolled ?? true,
+        session: overrides.session ?? null,
+        notPerformedRecorded: overrides.notPerformedRecorded ?? false,
+      },
+    };
+  }
+
+  it('(1) session null + notPerformedRecorded false → the existing NOT STARTED state', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(sessionResult({ notPerformedRecorded: false }));
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('not-started');
+    expect(view.notPerformedRecorded).toBe(false);
+    expect(view.session).toBeNull();
+    // A not-started occurrence pays no catalog read.
+    expect(exerciseDataList).not.toHaveBeenCalled();
+  });
+
+  it('(2) session null + notPerformedRecorded true → the recorded state (no session, no cards)', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(sessionResult({ notPerformedRecorded: true }));
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('not-performed');
+    expect(view.notPerformedRecorded).toBe(true);
+    expect(view.session).toBeNull();
+    expect(view.cards).toEqual([]);
+    expect(view.addableExercises).toEqual([]);
+    expect(exerciseDataList).not.toHaveBeenCalled();
+  });
+
+  it('(3) an active session keeps the existing in-progress behavior', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(
+      sessionResult({ session: sessionDto([sessionLog()]), notPerformedRecorded: false }),
+    );
+    targetsExecute.mockResolvedValue({ ok: true, data: [] });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('in-progress');
+    expect(view.notPerformedRecorded).toBe(false);
+  });
+
+  it('(4) a completed session keeps the existing completed behavior', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(
+      sessionResult({
+        session: { ...sessionDto([]), status: 'completed' },
+        notPerformedRecorded: false,
+      }),
+    );
+    targetsExecute.mockResolvedValue({ ok: true, data: [] });
+    // The optional completion read degrades to null — it never claims completion.
+    programBySlugExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'PROGRAM_NOT_FOUND', slug: 'prog-1', message: 'nope' },
+    });
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('completed');
+    expect(view.programCompletion).toBeNull();
+  });
+
+  it('(5) an unenrolled visitor stays not-enrolled — the fact is meaningless without a run', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(
+      sessionResult({ enrolled: false, notPerformedRecorded: true }),
+    );
+
+    const view = await buildActiveWorkoutView(INPUT, USER);
+    if (view === null) throw new Error('view must resolve');
+
+    expect(view.screenState).toBe('not-enrolled');
+  });
+
+  it('(7) takes the recorded fact ONLY from the session use case, never client input', async () => {
+    lookupExecute.mockResolvedValue({ ok: true, data: WORKOUT });
+    sessionExecute.mockResolvedValue(sessionResult({ notPerformedRecorded: true }));
+
+    await buildActiveWorkoutView(INPUT, USER);
+
+    // The composition input is the public route coordinates only; the recorded
+    // fact is read through the use case with the trusted user id.
+    expect(sessionExecute).toHaveBeenCalledWith({ userId: USER.id, ...INPUT });
+    expect(Object.keys(INPUT).sort()).toEqual(['programSlug', 'weekNumber', 'workoutOrder']);
+  });
+});
+

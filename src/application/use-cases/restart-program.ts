@@ -16,7 +16,10 @@
  *
  * Restartability gate: the Domain's `isRunRestartable` over the enrollment's
  * own execution truth — completed scheduled-workout ids (M14) and recorded
- * not-performed facts (M17). It is the single authoritative rule: complete OR
+ * not-performed facts (M17) — read through the ONE-snapshot closure-facts
+ * projection, never two independently mutable reads that could tear across a
+ * concurrent Undo→start→complete and manufacture a completed+recorded overlap
+ * the persisted state never held. It is the single authoritative rule: complete OR
  * concluded, so a run whose every authored occurrence is settled (completed or
  * explicitly recorded as not performed) may start over even though it is NOT
  * complete, while an open run never can (a zero-schedule program is neither, so
@@ -38,7 +41,6 @@
  */
 
 import type { IdGenerator } from '@/application/ports/id-generator';
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import {
   EnrollmentAlreadyExistsError,
   type LockedRunSettlementFacts,
@@ -46,7 +48,7 @@ import {
   type ReplaceEnrollmentOutcome,
 } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { isProgramComplete } from '@/domain/services/program-progress';
@@ -71,8 +73,7 @@ export class RestartProgramUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
-    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
+    private readonly closureFactsRepository: RunClosureFactsRepository,
     private readonly idGenerator: IdGenerator,
   ) {}
 
@@ -185,25 +186,21 @@ export class RestartProgramUseCase {
   }
 
   /**
-   * The pre-write restartability read: two bounded, enrollment-scoped
-   * projections (never session aggregates), evaluated through the shared
-   * `isRestartable` composition. This is the normal-path gate that produces the
-   * typed PROGRAM_NOT_COMPLETE error; the authoritative re-check happens under
-   * the replacement transaction's own lock.
+   * The pre-write restartability read: the SAME one-snapshot closure-facts
+   * projection the summary read uses (never session aggregates, never two
+   * independently mutable reads), evaluated through the shared `isRestartable`
+   * composition. This is the normal-path gate that produces the typed
+   * PROGRAM_NOT_COMPLETE error; the authoritative re-check happens under the
+   * replacement transaction's own lock and remains the final write-side
+   * authority — this preflight adds no lock and no retry.
    */
   private async isEnrollmentRestartable(
     program: TrainingProgram,
     enrollmentId: EnrollmentId,
   ): Promise<boolean> {
-    const [completedIds, notPerformedFacts] = await Promise.all([
-      this.sessionRepository.listCompletedScheduledWorkoutIds(enrollmentId),
-      this.notPerformedRepository.listByEnrollment(enrollmentId),
-    ]);
+    const facts = await this.closureFactsRepository.listClosureFactsByEnrollment(enrollmentId);
 
-    return this.isRestartable(program, {
-      completedIds,
-      notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
-    });
+    return this.isRestartable(program, facts);
   }
 
   /**

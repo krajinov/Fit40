@@ -45,6 +45,7 @@ import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/databa
 import { DrizzlePlannedWorkoutRepository } from '@/infrastructure/database/repositories/drizzle-planned-workout-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
 import { DrizzleRunOccurrenceWrites } from '@/infrastructure/database/repositories/drizzle-run-occurrence-writes';
 import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
@@ -166,8 +167,7 @@ function useCasesFor(harness: RaceHarness) {
     restart: new RestartProgramUseCase(
       harness.programs,
       harness.enrollments,
-      harness.sessions,
-      harness.notPerformed,
+      new DrizzleRunClosureFactsRepository(harness.db),
       new NodeIdGenerator(),
     ),
     leave: new LeaveProgramUseCase(harness.programs, harness.enrollments),
@@ -1367,7 +1367,7 @@ describe('11. statement and lock discipline — parent first, bounded, no retrie
         sessions,
         notPerformed,
       ),
-      restart: new RestartProgramUseCase(programs, enrollments, sessions, notPerformed, ids),
+      restart: new RestartProgramUseCase(programs, enrollments, new DrizzleRunClosureFactsRepository(db), ids),
       leave: new LeaveProgramUseCase(programs, enrollments),
     };
   }

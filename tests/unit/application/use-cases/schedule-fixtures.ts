@@ -42,6 +42,7 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import { vi } from 'vitest';
 
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
+import type { FollowThroughExecutionFactsRepository } from '@/application/ports/follow-through-execution-facts-repository';
 import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occurrence-execution-facts-repository';
 import type { ScheduleExecutionFactsRepository } from '@/application/ports/schedule-execution-facts-repository';
 import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
@@ -319,6 +320,7 @@ export function makeEnrollmentRepo(sequence: ReadonlyArray<ProgramEnrollment | n
       index += 1;
       return answer;
     }),
+    findById: vi.fn(async () => null),
     listByUserId: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
@@ -421,6 +423,24 @@ export function makeOccurrenceExecutionFactsRepo(
       }),
     ),
   } satisfies OccurrenceExecutionFactsRepository;
+}
+
+/**
+ * Read-only follow-through execution-facts stub (M17 snapshot read), composed
+ * over the shared in-memory session repository and the given facts so all
+ * three sets are scoped exactly like the port.
+ */
+export function makeFollowThroughExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+) {
+  return {
+    listFollowThroughExecutionFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
+      completedActivity: await sessions.listCompletedOccurrenceActivity(enrollmentId),
+      inProgressIds: await sessions.listInProgressScheduledWorkoutIds(enrollmentId),
+      notPerformedFacts: facts.filter((fact) => fact.enrollmentId === enrollmentId),
+    })),
+  } satisfies FollowThroughExecutionFactsRepository;
 }
 
 /**

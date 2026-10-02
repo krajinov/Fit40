@@ -60,6 +60,7 @@ type EnrolledView = Extract<ProgramEnrollmentViewDto, { status: 'enrolled' }>;
 function completeEnrollment(): EnrolledView {
   return {
     status: 'enrolled',
+    enrollmentId: 'enr-panel-test',
     enrolledAt: '2026-01-01T00:00:00.000Z',
     progress: { totalWorkouts: 12, completedWorkouts: 12, percentage: 100 },
     nextWorkout: null,
@@ -70,6 +71,7 @@ function completeEnrollment(): EnrolledView {
 function incompleteEnrollment(): EnrolledView {
   return {
     status: 'enrolled',
+    enrollmentId: 'enr-panel-test',
     enrolledAt: '2026-01-01T00:00:00.000Z',
     progress: { totalWorkouts: 12, completedWorkouts: 5, percentage: 42 },
     nextWorkout: { weekNumber: 1, workoutOrder: 2 },

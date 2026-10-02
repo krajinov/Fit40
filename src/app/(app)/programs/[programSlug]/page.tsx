@@ -90,9 +90,16 @@ async function readEnrollmentSchedule(
 async function readRunClosure(
   userId: string,
   program: TrainingProgram,
+  expectedEnrollmentId: string,
 ): Promise<RunClosureSummaryDto | null> {
   try {
-    const result = await getRunClosureSummaryUseCase.execute({ userId, program });
+    // Fenced to the enrollment the page already loaded: a concurrent restart
+    // cannot compose this page's old-enrollment view with a new run's closure.
+    const result = await getRunClosureSummaryUseCase.execute({
+      userId,
+      program,
+      expectedEnrollmentId,
+    });
     if (!result.ok) {
       console.error(
         `Unexpected failure reading the run closure summary for program "${program.slug}"`,
@@ -217,7 +224,7 @@ export default async function ProgramDetailPage({
       // read, not a lifecycle surface: no clock, no calendar, no `nextWorkout`
       // precondition, and nothing rendered from it yet (Slice 11 does), so the
       // M14 completion surface stays the only lifecycle state shown today.
-      runClosure = await readRunClosure(user.id, result.data.program);
+      runClosure = await readRunClosure(user.id, result.data.program, enrollment.enrollmentId);
 
       // M17 (Slice 11): the up-next affordance follows the run's AUTHORITATIVE
       // next occurrence — the closure-resolved FIRST OPEN authored occurrence

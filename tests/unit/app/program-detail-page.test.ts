@@ -150,6 +150,7 @@ const PROGRAM_DETAIL = {
 
 const ENROLLED_INCOMPLETE = {
   status: 'enrolled',
+  enrollmentId: 'enr-detail-page-a',
   enrolledAt: '2026-01-01T00:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 5, percentage: 42 },
   nextWorkout: { weekNumber: 1, workoutOrder: 2 },
@@ -158,6 +159,7 @@ const ENROLLED_INCOMPLETE = {
 
 const ENROLLED_COMPLETE = {
   status: 'enrolled',
+  enrollmentId: 'enr-detail-page-complete',
   enrolledAt: '2026-01-01T00:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 12, percentage: 100 },
   nextWorkout: null,
@@ -339,6 +341,10 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(closureInput).toMatchObject({ userId: USER_ID });
     expect(closureInput?.program).toBe(PROGRAM_AGGREGATE);
     expect(closureInput?.now).toBeUndefined();
+    // M17 fencing: the closure read is FENCED to the enrollment this page
+    // already loaded — it never re-resolves the current run, so a concurrent
+    // restart cannot compose this view with a new run's closure facts.
+    expect(closureInput?.expectedEnrollmentId).toBe('enr-detail-page-a');
 
     expect(markup).toContain('aria-label="Training schedule"');
     expect(markup).toContain('aria-label="This week"');

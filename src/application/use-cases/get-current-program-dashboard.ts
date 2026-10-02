@@ -115,7 +115,12 @@ export class GetCurrentProgramDashboardUseCase {
         now,
         programResult.data.program.slug,
       ),
-      this.readRunClosure(userId, programResult.data.program, programResult.data.program.slug),
+      this.readRunClosure(
+        userId,
+        programResult.data.program,
+        programResult.data.program.slug,
+        enrollment.enrollmentId,
+      ),
     ]);
 
     return ok({
@@ -129,22 +134,31 @@ export class GetCurrentProgramDashboardUseCase {
 
   /**
    * Reads the run's M17 closure summary (Slice 10) with the SAME already-hydrated
-   * program aggregate as the rest of this view — no second catalog lookup and no
-   * clock: conclusion is not a date consequence.
+   * program aggregate AND the SAME enrollment this view already loaded — the
+   * read is fenced to that identity (`expectedEnrollmentId`), so a concurrent
+   * restart/leave cannot compose this view's old-enrollment data with a new
+   * run's closure facts. No second catalog lookup and no clock: conclusion is
+   * not a date consequence.
    *
-   * Failure (typed rejection or unexpected throw) degrades to `null`, never to
-   * fabricated counts: a failed additive read must not invent settlement truth,
-   * and per docs/error-handling.md a caught error is always logged. A `null`
-   * DTO means there is no current enrollment (or the enrollment vanished between
-   * this use case's own reads) — absence is data.
+   * Failure (typed refusal, typed rejection or unexpected throw) degrades to
+   * `null`, never to fabricated counts: a failed additive read must not invent
+   * settlement truth, and per docs/error-handling.md a caught error is always
+   * logged. A `null` DTO means there is no current enrollment, or the expected
+   * enrollment vanished/was replaced between this view's reads — absence and
+   * staleness are both data, and the view degrades exactly the same way.
    */
   private async readRunClosure(
     userId: string,
     program: TrainingProgram,
     programSlug: string,
+    expectedEnrollmentId: string,
   ): Promise<RunClosureSummaryDto | null> {
     try {
-      const result = await this.getRunClosureSummary.execute({ userId, program });
+      const result = await this.getRunClosureSummary.execute({
+        userId,
+        program,
+        expectedEnrollmentId,
+      });
       if (!result.ok) {
         console.error(
           `Unexpected failure reading the run closure for program "${programSlug}"`,

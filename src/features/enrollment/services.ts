@@ -16,7 +16,6 @@ import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import {
   exerciseRepository,
-  notPerformedOccurrenceRepository,
   personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
@@ -85,7 +84,6 @@ export const getRunClosureSummaryUseCase = new GetRunClosureSummaryUseCase(
 export const restartProgramUseCase = new RestartProgramUseCase(
   programRepository,
   programEnrollmentRepository,
-  workoutSessionRepository,
-  notPerformedOccurrenceRepository,
+  runClosureFactsRepository,
   idGenerator,
 );

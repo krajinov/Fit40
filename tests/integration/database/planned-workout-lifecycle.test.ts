@@ -35,14 +35,12 @@ import {
 import {
   closeDatabase,
   db,
-  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
   trainingHistoryRepository,
-  workoutSessionRepository,
-} from './setup';
+  workoutSessionRepository, runClosureFactsRepository} from './setup';
 
 const OWNER = 'planned-lifecycle-owner';
 const PROGRAM_SLUG = 'strong-at-home';
@@ -57,8 +55,7 @@ function restartUseCase(): RestartProgramUseCase {
   return new RestartProgramUseCase(
     programRepository,
     programEnrollmentRepository,
-    workoutSessionRepository,
-    notPerformedOccurrenceRepository,
+    runClosureFactsRepository,
     new NodeIdGenerator(),
   );
 }

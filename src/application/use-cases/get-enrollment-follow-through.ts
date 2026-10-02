@@ -28,6 +28,11 @@
  * - `configured: true` — one fact per CURRENT planned row, summarized by the
  *   Slice 1 Domain rules. This use case never re-decides an outcome or a count.
  *
+ * The report's execution facts (completed activity, in-progress sessions and
+ * the M17 records) are mutually exclusive per occurrence, so they are read
+ * through ONE coherent snapshot port — never assembled from independent
+ * statements that could tear across a concurrent settlement transition.
+ *
  * M17 recorded-not-performed facts join this report WITHOUT changing its shape:
  * current planned rows stay the only report occurrences (a fact whose occurrence
  * has no row never becomes one), each row's facts gain `hasNotPerformedRecord` so
@@ -47,13 +52,11 @@ import {
   toUnconfiguredFollowThroughDto,
   type EnrollmentFollowThroughDto,
 } from '@/application/dto/follow-through';
+import type { FollowThroughExecutionFactsRepository } from '@/application/ports/follow-through-execution-facts-repository';
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type {
-  CompletedOccurrenceActivity,
-  WorkoutSessionRepository,
-} from '@/application/ports/workout-session-repository';
+import type { CompletedOccurrenceActivity } from '@/application/ports/workout-session-repository';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { TrainingProgram } from '@/domain/entities/training-program';
@@ -93,7 +96,12 @@ export class GetEnrollmentFollowThroughUseCase {
   constructor(
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly followThroughExecutionFactsRepository: FollowThroughExecutionFactsRepository,
+    /**
+     * The zero-planned-rows terminal path only: it composes NOTHING (its count
+     * is facts alone), so it keeps the plain fact read. Every path that
+     * composes session truth with the facts uses the snapshot port above.
+     */
     private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
   ) {}
 
@@ -139,15 +147,16 @@ export class GetEnrollmentFollowThroughUseCase {
       );
     }
 
-    // Three independent, enrollment-scoped projections read in one batch: none
-    // decides whether another should happen (the planned rows above already
-    // did), so issuing them together only shortens the read. The M17 fact read is
-    // ONE bounded statement — never one query per planned row or per occurrence.
-    const [completedActivity, inProgressIds, notPerformedFacts] = await Promise.all([
-      this.sessionRepository.listCompletedOccurrenceActivity(enrollment.id),
-      this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
-      this.notPerformedRepository.listByEnrollment(enrollment.id),
-    ]);
+    // ONE coherent snapshot: completed activity, in-progress sessions and the
+    // recorded facts are mutually exclusive per occurrence, so they are
+    // projected together — a concurrent Undo→start→complete transition can
+    // never hand the Domain BOTH the record and the completed session for one
+    // occurrence. ONE bounded statement, never one query per planned row or
+    // per occurrence.
+    const { completedActivity, inProgressIds, notPerformedFacts } =
+      await this.followThroughExecutionFactsRepository.listFollowThroughExecutionFactsByEnrollment(
+        enrollment.id,
+      );
 
     // Deliberately computed BEFORE summarization and outside it: the count is
     // "recorded facts whose occurrence has no current planned row", so it cannot

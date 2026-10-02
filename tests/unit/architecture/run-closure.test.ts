@@ -151,10 +151,16 @@ describe('M17 Slice 10 — the closure read delegates and stays calendar-free', 
     expect(code).not.toContain('weekStart');
   });
 
-  it('reads the facts through the read-only port and never a write authority', () => {
+  it('reads ONE snapshot through the closure-facts port and never a write authority', () => {
     const code = codeOf(CLOSURE_READ);
 
-    expect(code).toContain('notPerformedRepository.listByEnrollment(');
+    // ONE coherent projection supplies both fact sets: two independent reads
+    // could observe different database instants and manufacture a
+    // completed+not-performed overlap the persisted state never held.
+    expect(code).toContain('closureFactsRepository.listClosureFactsByEnrollment(');
+    expect(code).not.toContain('Promise.all(');
+    expect(code).not.toContain('listCompletedScheduledWorkoutIds(');
+    expect(code).not.toContain('notPerformedRepository');
     expect(code).not.toContain('RunOccurrenceWriteRepository');
     expect(code).not.toContain('runOccurrenceWrites');
     expect(code).not.toContain('recordNotPerformed');
@@ -216,7 +222,7 @@ describe('M17 Slice 10 — program detail loads and EXPOSES the summary only', (
     const services = codeOf(ENROLLMENT_SERVICES).replace(/\s+/g, ' ');
 
     expect(services).toMatch(
-      /new GetRunClosureSummaryUseCase\(\s*programEnrollmentRepository,\s*workoutSessionRepository,\s*notPerformedOccurrenceRepository,/,
+      /new GetRunClosureSummaryUseCase\(\s*programEnrollmentRepository,\s*runClosureFactsRepository,/,
     );
     expect(services).toMatch(
       /new RestartProgramUseCase\(\s*programRepository,\s*programEnrollmentRepository,\s*workoutSessionRepository,\s*notPerformedOccurrenceRepository,/,
@@ -281,6 +287,49 @@ describe('M17 Slice 13 — no run archive or enrollment-history table exists', (
 
   it('exports no archive-like table from the schema barrel', () => {
     expect(codeOf(SCHEMA_BARREL)).not.toMatch(/archive|history/i);
+  });
+});
+
+describe('M17 closure projection — one snapshot read owns both fact sets', () => {
+  const PORT = 'src/application/ports/run-closure-facts-repository.ts';
+  const ADAPTER =
+    'src/infrastructure/database/repositories/drizzle-run-closure-facts-repository.ts';
+
+  it('declares ONE snapshot read returning both fact sets, and no mutation surface', () => {
+    const port = codeOf(PORT);
+
+    expect(port).toContain(
+      'listClosureFactsByEnrollment(enrollmentId: EnrollmentId): Promise<RunClosureFacts>;',
+    );
+    expect(port.match(/Promise</g)).toHaveLength(1);
+    // Read-only by construction: a read model never changes the fact it reports.
+    expect(port).not.toContain('recordNotPerformed');
+    expect(port).not.toContain('undoNotPerformed');
+    expect(port).not.toContain('insert');
+    expect(port).not.toContain('delete');
+  });
+
+  it('projects both sets with ONE statement — no second statement, no transaction, no lock', () => {
+    const adapter = codeOf(ADAPTER);
+
+    // ONE statement (a UNION of both projections) takes ONE READ COMMITTED
+    // snapshot, so the two sets can never be torn across concurrent commits.
+    expect(adapter).toContain('.unionAll(');
+    expect(adapter.match(/await /g)).toHaveLength(1);
+    // A read-only projection never serializes behind a transaction or lock.
+    expect(adapter).not.toContain('transaction(');
+    expect(adapter).not.toContain(".for('");
+    expect(adapter).not.toContain('insert(');
+    expect(adapter).not.toContain('update(');
+    expect(adapter).not.toContain('delete(');
+    expect(adapter.toLowerCase()).not.toContain('repeatable');
+  });
+
+  it('wires the projection into the closure read and nothing else', () => {
+    const services = codeOf(ENROLLMENT_SERVICES);
+
+    expect(services).toContain('runClosureFactsRepository');
+    expect(services.match(/runClosureFactsRepository/g)).toHaveLength(2);
   });
 });
 

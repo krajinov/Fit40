@@ -55,6 +55,7 @@ import {
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
+  runClosureFactsRepository,
   runOccurrenceWrites,
   workoutSessionRepository,
 } from './setup';
@@ -108,8 +109,7 @@ function useCases() {
     ),
     closure: new GetRunClosureSummaryUseCase(
       programEnrollmentRepository,
-      workoutSessionRepository,
-      notPerformedOccurrenceRepository,
+      runClosureFactsRepository,
     ),
     record: new RecordNotPerformedUseCase(
       programRepository,

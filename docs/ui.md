@@ -212,13 +212,17 @@ the sign-in links; the menu performs no authorization itself.
   **first OPEN authored occurrence** — the closure read's
   `openInProgramOrder[0]` — when authoritative closure data is available, so an
   occurrence already recorded as not performed is never offered as "Up next" /
-  "Start workout". When the closure read is unavailable the M14 `nextWorkout`
+  "Start workout". The **"Program week" card shares that SAME occurrence** (one
+  resolution feeds both surfaces): its current week is the first open
+  occurrence's week, so it can never stay on a completion-only week while Up
+  next has advanced. When the closure read is unavailable the M14 `nextWorkout`
   fallback stands (graceful degradation; no settlement truth is invented). A
-  **concluded-but-incomplete** run has no Up next: it renders the factual
-  `ConcludedRunCallout` (**"Run closed — {n} completed, {m} recorded as not
-  performed"**, no restart control per the M14 dashboard decision) instead of
-  the completed card, links to no `/completed`, and suppresses the schedule
-  card.
+  **concluded-but-incomplete** run has no Up next AND no current week — the
+  "Program week" card is hidden, so no old recorded week is ever shown as
+  current: it renders the factual `ConcludedRunCallout` (**"Run closed — {n}
+  completed, {m} recorded as not performed"**, no restart control per the M14
+  dashboard decision) instead of the completed card, links to no `/completed`,
+  and suppresses the schedule card.
 
 ### Program detail structure
 
@@ -823,6 +827,15 @@ M13 integration suites in
   is settled, so it is never displayed as "Up next" or offered a Start. The M14
   `nextWorkout` is used only as the fallback when the closure read is
   unavailable (graceful degradation), and React never recomputes openness.
+- **Current-week authority (M17 final review):** the same first OPEN occurrence
+  decides the **current week** on every surface that names one — the program
+  enrollment panel (`resolveEnrolledPanelState`) and the dashboard "Program
+  week" card share the ONE `resolveRunNextOccurrence` resolution the "Up next"
+  cards use, so a week holding only a recorded occurrence is never claimed as
+  current. A **concluded-but-incomplete** run has NO current/open week: the
+  panel omits the week label and the dashboard hides the "Program week" card —
+  it never falls back to the completion-only M14 `nextWorkout`. When the closure
+  read is unavailable the exact pre-M17 fallback is preserved.
 - **Week status authority (M17):** an authored week is **Completed** only when
   EVERY authored occurrence in it has a completed session — a
   not-performed record never counts as one. A week whose authored occurrences

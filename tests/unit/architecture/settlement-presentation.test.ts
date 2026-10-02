@@ -390,5 +390,38 @@ describe('M17 final review — recorded state across the remaining workout surfa
     // The session route renders the recorded panel for the recorded state.
     expect(codeOf(SESSION_PAGE)).toContain("screenState === 'not-performed'");
   });
+
+  it('(7) Undo invalidates every nested route that renders the recorded state, from authored coordinates', () => {
+    const undo = codeOf(UNDO_ACTION);
+
+    // Both concrete nested routes that render the recorded CTA band — the
+    // workout-detail route and its session route — are invalidated, each built
+    // from the schema-validated authored coordinates (never a client path)…
+    expect(undo).toContain('workoutPathFromRoute(parsed.data)');
+    expect(undo).toContain('sessionPathFromRoute(parsed.data)');
+    // …the top-level program + dashboard targets remain…
+    expect(undo).toContain('programPathFromSlug(parsed.data.programSlug)');
+    expect(undo).toContain("revalidatePath('/dashboard')");
+    // …and no revalidation path is ever read from client form data.
+    expect(undo).not.toContain('formData.get(');
+    expect(undo).not.toContain('revalidatePath(form');
+    expect(undo).not.toContain('redirect(');
+  });
+
+  it('(8) dashboard week summaries share the ONE authoritative open occurrence with Up next; a settled run has no current week', () => {
+    const view = codeOf(DASHBOARD_VIEW);
+
+    // Up next and the weekly summaries are fed by the SAME resolved occurrence…
+    expect(view).toContain('resolveRunNextOccurrence(');
+    expect(view).toContain('nextOccurrence === null ? null : nextOccurrence.weekNumber');
+    // …the current week is selected once, and a concluded-but-incomplete run
+    // yields none (no old recorded week is shown as current).
+    expect(view).toContain('selectDashboardCurrentWeek(');
+    expect(view).toContain("nextWorkoutPreview.status === 'concluded'");
+    // React never recomputes openness or closure itself.
+    expect(view).not.toContain('openInProgramOrder');
+    expect(view).not.toContain('isProgramComplete');
+    expect(view).not.toContain('isConcluded');
+  });
 });
 

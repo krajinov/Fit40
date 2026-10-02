@@ -7,7 +7,7 @@ import { PageContainer } from '@/components/shared/PageContainer';
 import { requireUser } from '@/features/auth/current-user';
 import { getUserProfileUseCase } from '@/features/profile/services';
 import { formatDashboardDate } from '@/features/dashboard/dashboard-labels';
-import { buildDashboardView, type WeekSummary } from '@/features/dashboard/dashboard-view';
+import { buildDashboardView } from '@/features/dashboard/dashboard-view';
 import { CurrentProgramCard } from '@/features/dashboard/components/CurrentProgramCard';
 import { ConcludedRunCallout } from '@/features/enrollment/components/ConcludedRunCallout';
 import { NextWorkoutCard } from '@/features/dashboard/components/NextWorkoutCard';
@@ -43,12 +43,10 @@ export default async function DashboardPage() {
   const view = await buildDashboardView(user.id, profile, now);
 
   const currentProgram = view.currentProgram;
-  const currentWeek: WeekSummary | null =
-    currentProgram === null
-      ? null
-      : view.weekSummaries.find((week) => week.status === 'in-progress') ??
-        view.weekSummaries[view.weekSummaries.length - 1] ??
-        null;
+  // The current week is resolved ONCE in the view assembly from the SAME
+  // authoritative open occurrence as Up next — null for a concluded run, so the
+  // "Program week" card is hidden rather than showing an old recorded week.
+  const currentWeek = view.currentWeek;
 
   return (
     <PageContainer>

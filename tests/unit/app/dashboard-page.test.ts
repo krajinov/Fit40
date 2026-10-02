@@ -162,6 +162,7 @@ function view(currentProgram: DashboardView['currentProgram']): DashboardView {
     recentTraining: RECENT_TRAINING,
     weeklyInsights: LOADED_INSIGHTS,
     weekSummaries: [],
+    currentWeek: null,
   };
 }
 

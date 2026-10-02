@@ -49,12 +49,24 @@ export function sessionPathFromFormData(formData: FormData): string | null {
   });
 }
 
-function buildSessionPath(coordinates: {
+/**
+ * The authored coordinates every occurrence route uses: the public program
+ * slug plus the authored week number and workout order. Structurally identical
+ * to `SessionRoute` on the ProgramRepository port; kept named locally so both
+ * route builders below accept trusted coordinates only.
+ */
+interface OccurrenceRoute {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
-}): string {
-  return `/programs/${coordinates.programSlug}/weeks/${coordinates.weekNumber}/workouts/${coordinates.workoutOrder}/session`;
+}
+
+function buildWorkoutPath(coordinates: OccurrenceRoute): string {
+  return `/programs/${coordinates.programSlug}/weeks/${coordinates.weekNumber}/workouts/${coordinates.workoutOrder}`;
+}
+
+function buildSessionPath(coordinates: OccurrenceRoute): string {
+  return `${buildWorkoutPath(coordinates)}/session`;
 }
 
 /**
@@ -62,6 +74,18 @@ function buildSessionPath(coordinates: {
  */
 export function programPathFromSlug(programSlug: string): string {
   return `/programs/${programSlug}`;
+}
+
+/**
+ * The canonical workout-detail route path for a trusted server-resolved
+ * occurrence route (SessionRoute on the ProgramRepository port): the session
+ * route's parent. That page renders the occurrence's recorded state too (the
+ * CTA band's recorded branch), so a settlement change must invalidate it
+ * alongside the session route. Unlike sessionPathFromFormData, its inputs can
+ * never come from client fields.
+ */
+export function workoutPathFromRoute(route: SessionRoute): string {
+  return buildWorkoutPath(route);
 }
 
 /**

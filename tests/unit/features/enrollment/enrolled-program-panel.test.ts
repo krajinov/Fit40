@@ -271,6 +271,10 @@ describe('EnrolledProgramPanel / M17 closure states (Slice 11)', () => {
     expect(container.textContent).not.toContain('every workout is done');
     expect(container.querySelector('a[href$="/completed"]')).toBeNull();
     expect(container.textContent).not.toMatch(/\d+%/);
+    // M17 final review: NO current week — the recorded week (1) the M14 next
+    // workout still points at is never shown as the week the user is on.
+    expect(container.textContent).not.toContain('WEEK 1 OF 4');
+    expect(container.textContent).not.toContain('Week 1 of 4');
   });
 
   it('25. renders the open state with its counts and offers no restart', async () => {
@@ -327,5 +331,68 @@ describe('EnrolledProgramPanel / M17 closure states (Slice 11)', () => {
     expect(
       [...container.querySelectorAll('button')].some((b) => b.textContent === 'Start program again'),
     ).toBe(false);
+  });
+
+  it('F2. a concluded run shows NO current week even though the M14 next workout points at a recorded week', async () => {
+    // enrollment.nextWorkout is the RECORDED occurrence (1,2) and the panel
+    // still receives its resolved preview — but the run is concluded, so no
+    // week may be claimed as current.
+    const container = await renderPanel(
+      incompleteEnrollment(),
+      {
+        weekNumber: 1,
+        workoutOrder: 2,
+        workoutName: 'Push B',
+        metaLabel: '6 exercises · about 45 minutes',
+        sessionState: 'not-started',
+      },
+      {
+        programSlug: 'fit40-beginner-strength',
+        totalWorkouts: 12,
+        completedWorkouts: 5,
+        notPerformedWorkouts: 7,
+        openWorkouts: 0,
+        hasOpenWorkout: false,
+        openInProgramOrder: [],
+        isConcluded: true,
+        isProgramComplete: false,
+        restartAvailable: true,
+      },
+    );
+
+    expect(container.textContent).not.toContain('WEEK 1 OF 4');
+    expect(container.textContent).not.toContain('Week 1 of 4');
+    expect(container.textContent).toContain('YOUR ENROLLMENT');
+    expect(container.textContent).toContain('5 of 12 workouts completed');
+  });
+
+  it('F2b. an open run shows the first OPEN occurrence week, not the recorded M14 week', async () => {
+    const container = await renderPanel(
+      incompleteEnrollment(),
+      {
+        weekNumber: 2,
+        workoutOrder: 1,
+        workoutName: 'Push C',
+        metaLabel: '6 exercises · about 45 minutes',
+        sessionState: 'not-started',
+      },
+      {
+        programSlug: 'fit40-beginner-strength',
+        totalWorkouts: 12,
+        completedWorkouts: 4,
+        notPerformedWorkouts: 1,
+        openWorkouts: 7,
+        hasOpenWorkout: true,
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-c', weekNumber: 2, workoutOrder: 1, workoutName: 'Push C' },
+        ],
+        isConcluded: false,
+        isProgramComplete: false,
+        restartAvailable: false,
+      },
+    );
+
+    expect(container.textContent).toContain('WEEK 2 OF 4');
+    expect(container.textContent).not.toContain('WEEK 1 OF 4');
   });
 });

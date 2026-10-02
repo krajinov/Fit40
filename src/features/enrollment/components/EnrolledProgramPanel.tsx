@@ -58,18 +58,19 @@ export function EnrolledProgramPanel({
   className,
 }: EnrolledProgramPanelProps) {
   const progress = enrollment.progress;
-  const panelState = resolveEnrolledPanelState({ nextWorkout, runClosure });
-  // The current week follows the run's AUTHORITATIVE next occurrence when its
-  // preview resolved (the prop carries it), so a week holding only a recorded
-  // occurrence is never claimed as the week the user is on. A degraded
-  // ('unavailable') or absent preview falls back to the enrollment's own
-  // scheduled next workout — never the last week unless every workout is done.
-  const currentWeekNumber =
-    nextWorkout !== null && nextWorkout !== 'unavailable'
-      ? nextWorkout.weekNumber
-      : enrollment.nextWorkout === null
-        ? program.durationWeeks
-        : enrollment.nextWorkout.weekNumber;
+  const panelState = resolveEnrolledPanelState({
+    nextWorkout,
+    runClosure,
+    enrollmentNextWorkout: enrollment.nextWorkout,
+    durationWeeks: program.durationWeeks,
+  });
+  // The panel view model owns the current-week authority. It follows the run's
+  // AUTHORITATIVE first open occurrence when the closure read supplied it, keeps
+  // the last-week presentation for a complete run, is null for a concluded-but-
+  // incomplete run (no open week exists), and preserves the M14 fallback
+  // verbatim when the closure read failed — so a week holding only a recorded
+  // occurrence is never claimed as the week the user is on.
+  const currentWeekNumber = panelState.currentWeekNumber;
   const startLabel =
     nextWorkout !== null &&
     nextWorkout !== 'unavailable' &&
@@ -88,7 +89,9 @@ export function EnrolledProgramPanel({
       {/* Mobile: eyebrow + track + count (locked mobile design). */}
       <div className="flex flex-col gap-3.5 md:hidden">
         <p className="text-[11px] font-semibold tracking-wide text-accent-foreground">
-          YOUR ENROLLMENT · WEEK {currentWeekNumber} OF {program.durationWeeks}
+          {currentWeekNumber === null
+            ? 'YOUR ENROLLMENT'
+            : `YOUR ENROLLMENT · WEEK ${currentWeekNumber} OF ${program.durationWeeks}`}
         </p>
         <ProgressBar
           value={progress.percentage}
@@ -108,8 +111,9 @@ export function EnrolledProgramPanel({
               YOUR ENROLLMENT
             </p>
             <h2 className="font-display text-xl font-semibold text-foreground">
-              Week {currentWeekNumber} of {program.durationWeeks} ·{' '}
-              {progress.completedWorkouts} of {progress.totalWorkouts} workouts completed
+              {currentWeekNumber === null
+                ? `${progress.completedWorkouts} of ${progress.totalWorkouts} workouts completed`
+                : `Week ${currentWeekNumber} of ${program.durationWeeks} · ${progress.completedWorkouts} of ${progress.totalWorkouts} workouts completed`}
             </h2>
           </div>
           <LeaveProgramButton programSlug={program.slug} />

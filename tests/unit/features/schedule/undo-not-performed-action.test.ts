@@ -4,9 +4,11 @@
  * Pinned: the trusted-session UserId, authored coordinates only, and NO clock
  * anywhere in the delegated input (undo is a deletion, not an attestation);
  * the Slice 7 undo outcomes are mapped as data; the Application's contract
- * violation propagates; and a successful undo revalidates exactly the program
- * detail and the dashboard — nothing else happens in presentation (no
- * regeneration, no session creation, no redirect).
+ * violation propagates; and a successful undo revalidates exactly the bounded
+ * set of routes that render the recorded state — the program detail, the
+ * occurrence's workout-detail route and its session route (all built from the
+ * authored coordinates), plus the dashboard — never a client-supplied path
+ * (no regeneration, no session creation, no redirect).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +45,8 @@ const SESSION_USER = {
 };
 
 const PROGRAM_PATH = '/programs/fit40-beginner-strength';
+const WORKOUT_PATH = `${PROGRAM_PATH}/weeks/2/workouts/3`;
+const SESSION_PATH = `${WORKOUT_PATH}/session`;
 
 function submit(
   overrides: Readonly<Record<string, string>> = {},
@@ -129,13 +133,50 @@ describe('undoNotPerformedAction', () => {
     expect(input.now).toBeUndefined();
   });
 
-  it('revalidates the program detail and the dashboard on success, nothing else', async () => {
+  it('revalidates the exact bounded set on success: program, workout detail, session, dashboard', async () => {
     const state = await undoNotPerformedAction(submit());
 
     expect(state).toEqual({ ok: true });
-    expect(revalidatePath).toHaveBeenCalledTimes(2);
-    expect(revalidatePath).toHaveBeenCalledWith(PROGRAM_PATH);
-    expect(revalidatePath).toHaveBeenCalledWith('/dashboard');
+    // Exactly FOUR targets: the top-level program + dashboard plus the two
+    // concrete nested routes that can render the recorded state (workout detail
+    // and session). No fifth path, and nothing client-controlled.
+    expect(revalidatePath).toHaveBeenCalledTimes(4);
+    expect(new Set(vi.mocked(revalidatePath).mock.calls.map((call) => call[0]))).toEqual(
+      new Set([PROGRAM_PATH, WORKOUT_PATH, SESSION_PATH, '/dashboard']),
+    );
+  });
+
+  it('invalidates the exact workout-detail route through which Undo can be submitted', async () => {
+    await undoNotPerformedAction(submit());
+
+    expect(revalidatePath).toHaveBeenCalledWith(WORKOUT_PATH);
+  });
+
+  it('invalidates the exact session route through which Undo can be submitted', async () => {
+    await undoNotPerformedAction(submit());
+
+    expect(revalidatePath).toHaveBeenCalledWith(SESSION_PATH);
+  });
+
+  it('builds revalidation targets from authored coordinates, never from a client-supplied path', async () => {
+    await undoNotPerformedAction(
+      submit({}, [
+        ['path', '/evil'],
+        ['revalidatePath', '/evil'],
+        ['redirectTo', 'https://evil.example'],
+        ['next', '/evil'],
+        ['sessionPath', '/evil'],
+      ]),
+    );
+
+    const targets = vi.mocked(revalidatePath).mock.calls.map((call) => call[0]);
+    // A forged path field changes nothing: the set is still derived only from
+    // the Zod-validated authored coordinates.
+    expect(new Set(targets)).toEqual(
+      new Set([PROGRAM_PATH, WORKOUT_PATH, SESSION_PATH, '/dashboard']),
+    );
+    expect(targets).not.toContain('/evil');
+    expect(targets).not.toContain('https://evil.example');
   });
 
   it('maps every real Slice 7 undo outcome truthfully, without revalidating', async () => {

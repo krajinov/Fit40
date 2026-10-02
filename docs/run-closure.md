@@ -184,6 +184,15 @@ lock, over facts read under that lock:
 After Undo, a rowless occurrence is open/unplaced again — ordinary "not
 started" — until the user's next explicit regeneration.
 
+**Undo is rendered from the calendar, the workout-detail CTA band and the direct
+session URL**, so its Server Action invalidates every route that can render the
+recorded state: the owning program detail, the occurrence's workout-detail
+route and its session route, plus the dashboard. Each target is built from the
+same AUTHORED coordinates the schema already validated (program slug + week
+number + workout order); no revalidation or redirect target is ever read from
+form data, and the set is bounded and closed. Recording is submitted only from
+the program calendar, so it keeps its two targets (program detail + dashboard).
+
 ## Concurrency authority
 
 The safety model is the design — no advisory locks, no `SERIALIZABLE`
@@ -441,6 +450,7 @@ There is no toast system.
 | Session route (direct URL) | `SessionRecordedPanel` | undo form; Start suppressed (recorded dominates not-started) | "Recorded as not performed"; "It goes back to not started." | yes |
 | Scheduled workout card | `ProgramDetailSection` | status text only | "Recorded as not performed" (both planned and rowless recorded occurrences) | via detail |
 | Up-next / open affordance | `EnrolledProgramPanel`, dashboard "Up next", authored week cards | closure `openInProgramOrder[0]` when the closure DTO is present; M14 `nextWorkout` fallback only when it is null | the first OPEN authored occurrence — a recorded occurrence is never "Up next" and offers no Start | — |
+| Current week (panel + dashboard "Program week") | `EnrolledProgramPanel` (`resolveEnrolledPanelState`), dashboard view (`selectDashboardCurrentWeek`) | the SAME `resolveRunNextOccurrence` result as Up next; M14 `nextWorkout` fallback only when the closure read is null | the first OPEN occurrence's week — a recorded occurrence's week is never current; a concluded-but-incomplete run has NO current week (panel omits the label, dashboard hides the card) | — |
 | Program week badge | `ProgramWeekSection` / `resolveProgramWeekStatus` | none | "Completed" only when EVERY authored occurrence in the week is completed; a week settled by completed + recorded facts (not all completed) is "Settled"; the first-open week is "In progress"; a concluded-but-incomplete run paints no week "Completed" | — |
 | Dashboard concluded run | `dashboard/page.tsx` (`ConcludedRunCallout`) | no Start / Up next; no restart (M14 dashboard decision); no `/completed` link | "Run closed — {completed} completed, {notPerformed} recorded as not performed" | — |
 | Follow-through week row | `PlanFollowThroughSection` | none (read-only report) | "n not performed" fragment; totals line includes "n not performed"; unplaced pointer "recorded as not performed without a calendar date — see Training schedule" | via calendar |

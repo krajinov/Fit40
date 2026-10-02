@@ -305,3 +305,72 @@ describe('M17 Slice 13 — recorded facts enter generation as the settled input'
     expect([...callers].sort()).toEqual([CONFIGURE, GENERATION].sort());
   });
 });
+
+describe('M17 final review — settlement is re-checked under the reschedule lock', () => {
+  const RESCHEDULE_PORT = 'src/application/ports/planned-workout-repository.ts';
+  const DRIZZLE_PLANNED =
+    'src/infrastructure/database/repositories/drizzle-planned-workout-repository.ts';
+
+  it('makes reschedule return a typed settlement outcome, not a bare success', () => {
+    const port = codeOf(RESCHEDULE_PORT);
+
+    expect(port).toContain('PlannedWorkoutRescheduleOutcome');
+    expect(port).toContain("'recorded-not-performed'");
+    expect(port).toContain('Promise<PlannedWorkoutRescheduleOutcome>');
+  });
+
+  it('reads the fact UNDER the enrollment lock and BEFORE any planned write', () => {
+    const repo = codeOf(DRIZZLE_PLANNED);
+
+    expect(repo).toContain('notPerformedWorkouts');
+    const lockAt = repo.indexOf("for('no key update')");
+    const factAt = repo.indexOf('from(notPerformedWorkouts)');
+    const updateAt = repo.indexOf('.update(plannedWorkouts)');
+
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(factAt).toBeGreaterThan(lockAt);
+    expect(updateAt).toBeGreaterThan(factAt);
+  });
+
+  it('maps the under-lock refusal to the existing typed application error', () => {
+    const useCase = codeOf(RESCHEDULE);
+
+    expect(useCase).toContain("outcome.outcome === 'recorded-not-performed'");
+    expect(useCase).toContain('occurrenceRecordedNotPerformed(');
+    // The use case still owns no transaction: the lock lives in the repository.
+    expect(useCase).not.toContain('transaction(');
+  });
+});
+
+describe('M17 final review — recorded truth flows through the next-workout preview', () => {
+  const RESOLVE_NEXT = 'src/application/use-cases/resolve-next-workout.ts';
+  const NEXT_DTO_MODULE = 'src/application/dto/dashboard.ts';
+  const NEXT_CARD = 'src/features/dashboard/components/NextWorkoutCard.tsx';
+  const PANEL = 'src/features/enrollment/components/EnrolledProgramPanel.tsx';
+
+  it('resolves the recorded state from the user-scoped session read, never a client flag', () => {
+    const code = codeOf(RESOLVE_NEXT);
+
+    expect(code).toContain('sessionResult.data.notPerformedRecorded');
+    expect(code).toContain("'not-performed'");
+    // It depends only on use-case ports — no repository, no ORM, no query.
+    expect(code).not.toContain('Repository');
+    expect(code).not.toContain('drizzle');
+
+    // The input carries no settlement field a client could set.
+    const inputStart = code.indexOf('export interface ResolveNextWorkoutInput');
+    const input = code.slice(inputStart, code.indexOf('}', inputStart) + 1);
+    expect(input).not.toContain('notPerformed');
+    expect(input).not.toContain('recorded');
+  });
+
+  it('represents the recorded preview as an explicit state, never not-started', () => {
+    expect(codeOf(NEXT_DTO_MODULE)).toContain("'not-performed'");
+    expect(codeOf('src/features/sessions/next-workout-view.ts')).toContain("'not-performed'");
+  });
+
+  it('offers no Start/Resume on the recorded preview surfaces', () => {
+    expect(codeOf(NEXT_CARD)).toContain('Recorded as not performed');
+    expect(codeOf(PANEL)).toContain('Recorded as not performed');
+  });
+});

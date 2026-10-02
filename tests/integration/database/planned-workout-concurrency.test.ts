@@ -466,7 +466,7 @@ describe('planned-workout concurrency — reschedule vs reschedule', () => {
         pool.planned.reschedule(RUN, scheduledWorkoutIdValue(first), targetA),
         pool.planned.reschedule(RUN, scheduledWorkoutIdValue(first), targetB),
       ]);
-      expect(outcomes).toEqual([true, true]);
+      expect(outcomes).toEqual([{ outcome: 'moved' }, { outcome: 'moved' }]);
 
       const listed = await plannedWorkoutRepository.listByEnrollment(RUN);
       const moved = listed.find((row) => row.scheduledWorkoutId === first);
@@ -536,7 +536,7 @@ describe('planned-workout concurrency — reschedule vs M14 restart', () => {
       plannedDate('2026-12-01'),
     );
 
-    expect(outcome).toBe(false);
+    expect(outcome).toEqual({ outcome: 'not-moved' });
     expect(await allPlannedRows()).toEqual([]);
     expect(await plannedWorkoutRepository.listByEnrollment(enrollmentIdValue(fresh))).toEqual([]);
   });
@@ -557,7 +557,7 @@ describe('planned-workout concurrency — reschedule vs M14 restart', () => {
         scheduledWorkoutIdValue(first),
         plannedDate('2026-12-01'),
       ),
-    ).toBe(true);
+    ).toEqual({ outcome: 'moved' });
     expect((await restartUseCase().execute({ userId: OWNER, programSlug: PROGRAM_SLUG })).ok).toBe(
       true,
     );
@@ -590,7 +590,7 @@ describe('planned-workout concurrency — reschedule vs M14 restart', () => {
         ]);
 
         expect(restartOutcome.ok).toBe(true);
-        expect(typeof moveOutcome).toBe('boolean');
+        expect(['moved', 'not-moved']).toContain(moveOutcome.outcome);
         expect(await enrollmentIdsForOwner(OWNER)).toHaveLength(1);
         expect(await allPlannedRows()).toEqual([]);
       }
@@ -622,7 +622,7 @@ describe('planned-workout concurrency — reschedule vs leave', () => {
       plannedDate('2026-12-01'),
     );
 
-    expect(outcome).toBe(false);
+    expect(outcome).toEqual({ outcome: 'not-moved' });
     expect(await allPlannedRows()).toEqual([]);
   });
 
@@ -635,7 +635,7 @@ describe('planned-workout concurrency — reschedule vs leave', () => {
         scheduledWorkoutIdValue(first),
         plannedDate('2026-12-01'),
       ),
-    ).toBe(true);
+    ).toEqual({ outcome: 'moved' });
     expect(await programEnrollmentRepository.delete(RUN)).toBe(true);
 
     expect(await allPlannedRows()).toEqual([]);
@@ -669,7 +669,7 @@ describe('planned-workout concurrency — reschedule vs leave', () => {
           pool.enrollments.delete(attemptRunId),
         ]);
 
-        expect(typeof moveOutcome).toBe('boolean');
+        expect(['moved', 'not-moved']).toContain(moveOutcome.outcome);
         expect(deleted).toBe(true);
 
         // The move either returned false or was cascaded away with the run.
@@ -702,7 +702,7 @@ describe('planned-workout concurrency — reschedule vs configure', () => {
         scheduledWorkoutIdValue(first),
         plannedDate('2026-12-01'),
       ),
-    ).toBe(true);
+    ).toEqual({ outcome: 'moved' });
 
     const regenerated = plannedSetFor(run.program, run.enrollmentId, '2026-11-01');
     expect(await plannedWorkoutRepository.replaceAllForEnrollment(RUN, regenerated)).toBe(true);
@@ -720,7 +720,7 @@ describe('planned-workout concurrency — reschedule vs configure', () => {
 
     expect(
       await plannedWorkoutRepository.reschedule(RUN, scheduledWorkoutIdValue(first), target),
-    ).toBe(true);
+    ).toEqual({ outcome: 'moved' });
 
     const final = plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN));
     expect(final).toContain(`${first}@${target}`);
@@ -748,7 +748,7 @@ describe('planned-workout concurrency — reschedule vs configure', () => {
           pool.planned.replaceAllForEnrollment(RUN, regenerated),
         ]);
 
-        expect(moved).toBe(true);
+        expect(moved).toEqual({ outcome: 'moved' });
         expect(replaced).toBe(true);
 
         const final = plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN));
@@ -927,6 +927,184 @@ describe('planned-workout concurrency — parent-first locking and lock compatib
     } finally {
       await sql.end();
     }
+  });
+});
+
+describe('planned-workout concurrency — reschedule vs record-not-performed', () => {
+  let run: PlannedRunFixture;
+  const RECORDED_AT = new Date('2026-10-05T09:00:00.000Z');
+  const OTHER_OWNER = 'planned-concurrency-other-owner';
+
+  beforeEach(async () => {
+    await resetAndSeed();
+    run = await seedEnrolledRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN });
+    await plannedWorkoutRepository.replaceAllForEnrollment(
+      RUN,
+      plannedSetFor(run.program, run.enrollmentId, '2026-10-01'),
+    );
+  });
+
+  /** A peer settlement write's statement shape: the fact row, under the lock. */
+  async function insertFactRaw(
+    tx: postgres.TransactionSql,
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: string,
+  ): Promise<void> {
+    await tx`INSERT INTO not_performed_workouts (enrollment_id, scheduled_workout_id, recorded_at)
+      VALUES (${enrollmentId}, ${scheduledWorkoutId}, ${RECORDED_AT})`;
+  }
+
+  /** A reschedule's statement shape: `SET planned_date` for the occurrence. */
+  async function movePlannedRowRaw(
+    tx: postgres.TransactionSql,
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: string,
+    date: string,
+  ): Promise<void> {
+    await tx`UPDATE planned_workouts SET planned_date = ${date}
+      WHERE enrollment_id = ${enrollmentId} AND scheduled_workout_id = ${scheduledWorkoutId}`;
+  }
+
+  it('A. refuses the move when a record commits before the reschedule lock is taken', async () => {
+    const sql = postgres(getTestDatabaseUrl(), { max: 1 });
+    const { first } = occurrencesOf(run);
+    const originalLine = plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN)).find(
+      (line) => line.startsWith(`${first}@`),
+    );
+
+    try {
+      // The Move pre-read saw an OPEN occurrence; the holder then commits the
+      // record (its fact row) under the enrollment lock it already took.
+      const holder = await holdEnrollmentLock({
+        sql,
+        enrollmentId: RUN,
+        work: (tx) => insertFactRaw(tx, RUN, first),
+      });
+
+      const move = plannedWorkoutRepository.reschedule(
+        RUN,
+        scheduledWorkoutIdValue(first),
+        plannedDate('2026-12-01'),
+      );
+      // The move blocks behind the holder's lock and its not-yet-committed fact.
+      expect(await settleWithin(move, 250)).toBe(PENDING);
+
+      await holder.release();
+
+      // The record's committed fact is authoritative: the move refuses with NO
+      // planned-workout write.
+      expect(await move).toEqual({ outcome: 'recorded-not-performed' });
+
+      const listed = await plannedWorkoutRepository.listByEnrollment(RUN);
+      // Planned date unchanged, no duplicate / moved row, and N exists.
+      expect(originalLine).toBeDefined();
+      expect(plannedLines(listed)).toContain(originalLine);
+      expect(listed).toHaveLength(run.occurrenceIds.length);
+      expect(await notPerformedOccurrenceRepository.listByEnrollment(RUN)).toHaveLength(1);
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it('B. lets the record proceed after a move that owns the lock first, and the settled occurrence is never movable', async () => {
+    const sql = postgres(getTestDatabaseUrl(), { max: 1 });
+    const { first } = occurrencesOf(run);
+
+    try {
+      // The holder reproduces the reschedule's lock + UPDATE statement shape, so
+      // the move owns the enrollment lock first.
+      const holder = await holdEnrollmentLock({
+        sql,
+        enrollmentId: RUN,
+        work: (tx) => movePlannedRowRaw(tx, RUN, first, '2026-12-01'),
+      });
+
+      // The real record blocks behind the move's lock.
+      const record = runOccurrenceWrites.recordNotPerformed({
+        enrollmentId: RUN,
+        scheduledWorkoutId: scheduledWorkoutIdValue(first),
+        recordedAt: RECORDED_AT,
+      });
+      expect(await settleWithin(record, 250)).toBe(PENDING);
+
+      await holder.release();
+
+      // The record then proceeds against the authoritative post-move state.
+      expect(await record).toMatchObject({ kind: 'record' });
+
+      // Final state respects M17: the row is moved AND the fact exists, and the
+      // settled occurrence is no longer movable — never an illegal
+      // movable+settled result.
+      const listed = await plannedWorkoutRepository.listByEnrollment(RUN);
+      expect(plannedLines(listed)).toContain(`${first}@2026-12-01`);
+      expect(await notPerformedOccurrenceRepository.listByEnrollment(RUN)).toHaveLength(1);
+      expect(
+        await plannedWorkoutRepository.reschedule(
+          RUN,
+          scheduledWorkoutIdValue(first),
+          plannedDate('2026-12-20'),
+        ),
+      ).toEqual({ outcome: 'recorded-not-performed' });
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it('C. refuses immediately, with zero writes, when the occurrence is already recorded', async () => {
+    const { first } = occurrencesOf(run);
+    const before = plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN));
+
+    // Recorded before the Move starts.
+    await runOccurrenceWrites.recordNotPerformed({
+      enrollmentId: RUN,
+      scheduledWorkoutId: scheduledWorkoutIdValue(first),
+      recordedAt: RECORDED_AT,
+    });
+
+    const outcome = await plannedWorkoutRepository.reschedule(
+      RUN,
+      scheduledWorkoutIdValue(first),
+      plannedDate('2026-12-01'),
+    );
+
+    expect(outcome).toEqual({ outcome: 'recorded-not-performed' });
+    // Zero writes: the stored schedule is byte-identical.
+    expect(plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN))).toEqual(before);
+  });
+
+  it('D. isolates runs and users: another occurrence or another run never blocks this move', async () => {
+    const { first, second } = occurrencesOf(run);
+    const otherRun = await seedEnrolledRun({
+      owner: OTHER_OWNER,
+      programSlug: PROGRAM_SLUG,
+      enrollmentId: 'enr-concurrency-other-owner',
+    });
+    const otherRunId = enrollmentIdValue(otherRun.enrollmentId);
+    const otherFirst = occurrencesOf(otherRun).first;
+
+    // A fact on ANOTHER occurrence of the same run…
+    await runOccurrenceWrites.recordNotPerformed({
+      enrollmentId: RUN,
+      scheduledWorkoutId: scheduledWorkoutIdValue(second),
+      recordedAt: RECORDED_AT,
+    });
+    // …and a fact on ANOTHER user's run.
+    await runOccurrenceWrites.recordNotPerformed({
+      enrollmentId: otherRunId,
+      scheduledWorkoutId: scheduledWorkoutIdValue(otherFirst),
+      recordedAt: RECORDED_AT,
+    });
+
+    const outcome = await plannedWorkoutRepository.reschedule(
+      RUN,
+      scheduledWorkoutIdValue(first),
+      plannedDate('2026-12-01'),
+    );
+
+    expect(outcome).toEqual({ outcome: 'moved' });
+    expect(plannedLines(await plannedWorkoutRepository.listByEnrollment(RUN))).toContain(
+      `${first}@2026-12-01`,
+    );
   });
 });
 

@@ -83,7 +83,7 @@ type PanelNextWorkout =
       readonly workoutOrder: number;
       readonly workoutName: string;
       readonly metaLabel: string;
-      readonly sessionState: 'not-started' | 'in-progress';
+      readonly sessionState: 'not-started' | 'in-progress' | 'not-performed';
     }
   | 'unavailable'
   | null;
@@ -394,5 +394,29 @@ describe('EnrolledProgramPanel / M17 closure states (Slice 11)', () => {
 
     expect(container.textContent).toContain('WEEK 2 OF 4');
     expect(container.textContent).not.toContain('WEEK 1 OF 4');
+  });
+
+  it('F3. a recorded fallback occurrence renders no Start when the closure read is unavailable', async () => {
+    // Degraded closure (null): the panel falls back to the M14 next workout,
+    // which here is a RECORDED occurrence. It must state the fact and never
+    // offer a Start/Resume.
+    const container = await renderPanel(
+      incompleteEnrollment(),
+      {
+        weekNumber: 1,
+        workoutOrder: 2,
+        workoutName: 'Push B',
+        metaLabel: '6 exercises · about 45 minutes',
+        sessionState: 'not-performed',
+      },
+      null,
+    );
+
+    expect(container.textContent).toContain('Recorded as not performed');
+    expect(container.textContent).not.toContain('Start workout');
+    expect(container.textContent).not.toContain('Resume workout');
+    expect(
+      container.querySelector('a[href$="/weeks/1/workouts/2/session"]'),
+    ).toBeNull();
   });
 });

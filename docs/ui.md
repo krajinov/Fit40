@@ -827,6 +827,14 @@ M13 integration suites in
   is settled, so it is never displayed as "Up next" or offered a Start. The M14
   `nextWorkout` is used only as the fallback when the closure read is
   unavailable (graceful degradation), and React never recomputes openness.
+- **Degraded next-workout preview (M17 final review):** when the closure read
+  is unavailable, the M14 `nextWorkout` fallback occurrence may still be shown —
+  but if that occurrence is RECORDED as not performed,
+  `ResolveNextWorkoutUseCase` carries `notPerformedRecorded` into the preview as
+  session state `not-performed`: the dashboard "Up next" card and the program
+  panel render the factual **"Recorded as not performed"** state with **no
+  Start/Resume** — never `not-started`. No surface inspects a repository or
+  recomputes settlement, and no client flag can spoof it.
 - **Current-week authority (M17 final review):** the same first OPEN occurrence
   decides the **current week** on every surface that names one — the program
   enrollment panel (`resolveEnrolledPanelState`) and the dashboard "Program

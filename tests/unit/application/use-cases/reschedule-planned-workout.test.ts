@@ -352,7 +352,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A), null]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -370,7 +370,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A), enrollment(ENR_B, USER_A)]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -389,7 +389,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A)]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -519,5 +519,35 @@ describe('ReschedulePlannedWorkoutUseCase — recorded not-performed occurrences
     const result = await reschedule(harness, NEXT_WED);
 
     expect(result.ok).toBe(true);
+  });
+
+  it('refuses a record that committed after the pre-read but before the locked update', async () => {
+    // The pre-read saw NO fact — the occurrence looked OPEN — but by the time
+    // the planned repository took the enrollment lock the record had committed.
+    // The repository reports `recorded-not-performed` and writes nothing: the
+    // use case must surface the typed refusal, never a success.
+    const harness = makeHarness({
+      planned: makePlannedRepo({
+        rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
+        rescheduleResult: { outcome: 'recorded-not-performed' },
+      }),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+    const listFacts = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+
+    const result = await reschedule(harness, NEXT_WED);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({
+      code: 'OCCURRENCE_RECORDED_NOT_PERFORMED',
+      programSlug: PROGRAM_SLUG,
+      scheduledWorkoutId: OCCURRENCE_W1_1,
+    });
+    // The open pre-read ran, then the under-lock truth won.
+    expect(listFacts).toHaveBeenCalledTimes(1);
   });
 });

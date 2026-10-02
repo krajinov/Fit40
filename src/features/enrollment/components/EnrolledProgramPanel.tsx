@@ -21,7 +21,9 @@ interface EnrolledProgramPanelProps {
   /**
    * The enrollment's next workout (name, meta, session state), 'unavailable'
    * when its preview could not be resolved (a degraded state — the program
-   * is NOT complete), or null when every workout is completed.
+   * is NOT complete), or null when every workout is completed. A recorded
+   * occurrence (M17) arrives with `sessionState: 'not-performed'`: it is not
+   * startable, so the row states the fact and offers no Start.
    */
   readonly nextWorkout:
     | {
@@ -29,7 +31,7 @@ interface EnrolledProgramPanelProps {
         readonly workoutOrder: number;
         readonly workoutName: string;
         readonly metaLabel: string;
-        readonly sessionState: 'not-started' | 'in-progress';
+        readonly sessionState: 'not-started' | 'in-progress' | 'not-performed';
       }
     | 'unavailable'
     | null;
@@ -71,6 +73,12 @@ export function EnrolledProgramPanel({
   // verbatim when the closure read failed — so a week holding only a recorded
   // occurrence is never claimed as the week the user is on.
   const currentWeekNumber = panelState.currentWeekNumber;
+  // A recorded occurrence (M17) is settled execution truth: it is never
+  // startable, so the row states the fact instead of a Start/Resume CTA.
+  const nextWorkoutRecorded =
+    nextWorkout !== null &&
+    nextWorkout !== 'unavailable' &&
+    nextWorkout.sessionState === 'not-performed';
   const startLabel =
     nextWorkout !== null &&
     nextWorkout !== 'unavailable' &&
@@ -178,19 +186,27 @@ export function EnrolledProgramPanel({
             <div className="flex flex-col gap-3.5 rounded-callout border-[1.5px] border-primary bg-accent-tint p-4 md:flex-row md:items-center md:justify-between md:gap-5 md:px-5 md:py-[18px]">
               <div className="flex flex-col gap-1">
                 <p className="text-[11px] font-semibold tracking-wide text-accent-foreground md:text-xs">
-                  UP NEXT · WEEK {nextWorkout.weekNumber} · WORKOUT {nextWorkout.workoutOrder}
+                  {nextWorkoutRecorded
+                    ? `RECORDED AS NOT PERFORMED · WEEK ${nextWorkout.weekNumber} · WORKOUT ${nextWorkout.workoutOrder}`
+                    : `UP NEXT · WEEK ${nextWorkout.weekNumber} · WORKOUT ${nextWorkout.workoutOrder}`}
                 </p>
                 <p className="font-display text-lg font-bold text-foreground md:text-xl">
                   {nextWorkout.workoutName}
                 </p>
                 <p className="text-[13px] text-ink-2 md:text-sm">{nextWorkout.metaLabel}</p>
               </div>
-              <Link
-                href={`/programs/${program.slug}/weeks/${nextWorkout.weekNumber}/workouts/${nextWorkout.workoutOrder}/session`}
-                className={cn(buttonVariants(), 'w-full md:w-auto')}
-              >
-                {startLabel}
-              </Link>
+              {nextWorkoutRecorded ? (
+                <p className="text-sm font-semibold text-ink-2 md:text-[15px]">
+                  Recorded as not performed
+                </p>
+              ) : (
+                <Link
+                  href={`/programs/${program.slug}/weeks/${nextWorkout.weekNumber}/workouts/${nextWorkout.workoutOrder}/session`}
+                  className={cn(buttonVariants(), 'w-full md:w-auto')}
+                >
+                  {startLabel}
+                </Link>
+              )}
             </div>
           )}
           {/* Factual remaining work from the closure DTO (counts only — no

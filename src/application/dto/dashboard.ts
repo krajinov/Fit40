@@ -23,8 +23,14 @@ import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 export type DashboardScheduleState = ScheduleReadState;
 
 
-/** Whether the next workout's session has already been started by the user. */
-export type NextWorkoutSessionState = 'not-started' | 'in-progress';
+/**
+ * The next workout preview's startability, resolved from the user's own run:
+ * - `not-started`: no session and no not-performed record — Start is safe;
+ * - `in-progress`: the occurrence has a live session — Resume;
+ * - `not-performed`: the occurrence is settled as recorded-not-performed (M17)
+ *   — it has no session, but it must NEVER render as startable.
+ */
+export type NextWorkoutSessionState = 'not-started' | 'in-progress' | 'not-performed';
 
 /** One previewed exercise row of the next scheduled workout. */
 export interface NextWorkoutPreviewExerciseDto {

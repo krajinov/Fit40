@@ -205,7 +205,10 @@ One enrollment row is the shared mutable authority; every cross-table write
 path locks it **first**, with `SELECT … FOR NO KEY UPDATE`, before reading the
 facts it acts on:
 
-- M15 schedule regeneration (`replacePlannedWorkoutSet`);
+- M15 schedule regeneration (`replacePlannedWorkoutSet`) and manual reschedule
+  (`reschedule`, which re-checks the occurrence's not-performed fact **under the
+  lock** before its UPDATE — a record that committed after the caller's pre-read
+  refuses the move with zero planned writes);
 - M14 restart, leave and completed-session writes;
 - M17 record, undo, start and restart.
 
@@ -450,6 +453,7 @@ There is no toast system.
 | Session route (direct URL) | `SessionRecordedPanel` | undo form; Start suppressed (recorded dominates not-started) | "Recorded as not performed"; "It goes back to not started." | yes |
 | Scheduled workout card | `ProgramDetailSection` | status text only | "Recorded as not performed" (both planned and rowless recorded occurrences) | via detail |
 | Up-next / open affordance | `EnrolledProgramPanel`, dashboard "Up next", authored week cards | closure `openInProgramOrder[0]` when the closure DTO is present; M14 `nextWorkout` fallback only when it is null | the first OPEN authored occurrence — a recorded occurrence is never "Up next" and offers no Start | — |
+| Degraded next-workout preview | `ResolveNextWorkoutUseCase` → `NextWorkoutCard` / `EnrolledProgramPanel` | `GetWorkoutSessionUseCase.notPerformedRecorded` (the user-scoped read), mapped to session state `not-performed` | when the closure read is null the M14 fallback occurrence may be shown, but a RECORDED one renders "Recorded as not performed" with **no Start/Resume** — never `not-started` | — |
 | Current week (panel + dashboard "Program week") | `EnrolledProgramPanel` (`resolveEnrolledPanelState`), dashboard view (`selectDashboardCurrentWeek`) | the SAME `resolveRunNextOccurrence` result as Up next; M14 `nextWorkout` fallback only when the closure read is null | the first OPEN occurrence's week — a recorded occurrence's week is never current; a concluded-but-incomplete run has NO current week (panel omits the label, dashboard hides the card) | — |
 | Program week badge | `ProgramWeekSection` / `resolveProgramWeekStatus` | none | "Completed" only when EVERY authored occurrence in the week is completed; a week settled by completed + recorded facts (not all completed) is "Settled"; the first-open week is "In progress"; a concluded-but-incomplete run paints no week "Completed" | — |
 | Dashboard concluded run | `dashboard/page.tsx` (`ConcludedRunCallout`) | no Start / Up next; no restart (M14 dashboard decision); no `/completed` link | "Run closed — {completed} completed, {notPerformed} recorded as not performed" | — |

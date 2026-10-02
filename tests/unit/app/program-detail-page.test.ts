@@ -484,6 +484,25 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('Recorded as not performed');
   });
 
+  it('renders a recorded fallback preview with no Start when the closure read is unavailable (M17 final review)', async () => {
+    // Degraded closure (null): the page falls back to the M14 next workout
+    // (1,2), which here is a RECORDED occurrence. The preview must render the
+    // factual recorded state and never a Start/Resume.
+    closureExecute.mockResolvedValue({ ok: true, data: null });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 2,
+      sessionState: 'not-performed',
+    });
+
+    const markup = await renderPage();
+
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).not.toContain('Start workout');
+    expect(markup).not.toContain('Resume workout');
+  });
+
   it('marks a rowless recorded occurrence on its authored card with Undo and no Start', async () => {
     // (1,1) is authored but holds no current planned row; only its recorded fact
     // exists, so the M15 read reports it among the UNPLACED recorded workouts.

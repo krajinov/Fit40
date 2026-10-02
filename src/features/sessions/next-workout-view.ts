@@ -25,7 +25,12 @@ export interface NextWorkoutExercisePreview {
 /** How many exercise rows the cards preview before the "+ N more" row. */
 export const NEXT_WORKOUT_PREVIEW_COUNT = NEXT_WORKOUT_PREVIEW_LIMIT;
 
-export type NextWorkoutSessionState = 'not-started' | 'in-progress';
+/**
+ * Startability of the previewed occurrence (mirrors the application DTO):
+ * `not-performed` means the occurrence is settled as recorded-not-performed
+ * (M17), so it has no session but must never render a Start/Resume CTA.
+ */
+export type NextWorkoutSessionState = 'not-started' | 'in-progress' | 'not-performed';
 
 export interface NextWorkoutView {
   readonly programSlug: string;

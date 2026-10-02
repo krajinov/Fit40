@@ -23,6 +23,12 @@
  * past. Moving a planned workout to the date it already holds is a successful
  * no-op: no write is issued.
  *
+ * M17 final review: settlement is also re-checked UNDER the reschedule
+ * transaction's enrollment lock (the port refuses with
+ * `recorded-not-performed` and ZERO planned writes), so a record that commits
+ * between this use case's pre-read and the locked update can never leave a
+ * settled occurrence moved as ordinary open intent.
+ *
  * Calendar intent only — this use case never creates, resumes or completes a
  * session, never marks a workout complete, and never touches training history,
  * progression, records or M14 completion. A workout whose planned date has
@@ -39,6 +45,7 @@ import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-p
 import {
   PlannedDateConflictError,
   type PlannedWorkoutRepository,
+  type PlannedWorkoutRescheduleOutcome,
 } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
@@ -234,9 +241,9 @@ export class ReschedulePlannedWorkoutUseCase {
       return ok(undefined);
     }
 
-    let moved: boolean;
+    let outcome: PlannedWorkoutRescheduleOutcome;
     try {
-      moved = await this.plannedWorkoutRepository.reschedule(
+      outcome = await this.plannedWorkoutRepository.reschedule(
         enrollment.id,
         scheduledWorkoutId,
         targetDate,
@@ -253,8 +260,16 @@ export class ReschedulePlannedWorkoutUseCase {
       throw error;
     }
 
-    if (moved) {
+    if (outcome.outcome === 'moved') {
       return ok(undefined);
+    }
+
+    if (outcome.outcome === 'recorded-not-performed') {
+      // M17 final review: the occurrence was recorded as not performed after
+      // this use case's pre-read but before the transaction's lock. The
+      // under-lock settlement truth wins — the occurrence is settled, so the
+      // move is refused with zero planned-workout writes.
+      return err(occurrenceRecordedNotPerformed(program.slug, scheduledWorkoutId));
     }
 
     // The run (or the row) vanished before the update committed. Read-only:

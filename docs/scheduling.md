@@ -242,14 +242,17 @@ SELECT id FROM program_enrollments WHERE id = $1 FOR NO KEY UPDATE
   serialization and guarded-delete rules).
 - **`replaceAllForEnrollment`** is whole-set replacement: lock → zero rows
   means `false` (nothing written) → DELETE → one multi-row INSERT (empty set
-  is valid) → `true`. **`reschedule`** locks, then performs one conditional
-  UPDATE (zero rows → `false`). No retry loops exist anywhere in M15.
+  is valid) → `true`. **`reschedule`** locks, re-checks the occurrence's M17
+  not-performed fact **under that lock**, and only then runs one conditional
+  UPDATE — returning a typed outcome: `moved`, `not-moved` (zero rows, or a
+  vanished run), or `recorded-not-performed` (**zero planned writes**). No
+  retry loops exist anywhere in M15.
 - **Constraint translation:** only a violation naming exactly
   `planned_workouts_enrollment_date_unique` during `reschedule` becomes
   `PlannedDateConflictError` (the one business conflict: the target date is
   already taken). PK/unique violations during replacement and every other
   database error stay unexpected and propagate.
-- **Stale writes:** a `false` result triggers **exactly one** read-only
+- **Stale writes:** a `not-moved` result triggers **exactly one** read-only
   `findByUserAndProgram` re-check. No current enrollment **or a different
   EnrollmentId** (an M14 restart replacement) → `NOT_ENROLLED`; the same
   enrollment → `SCHEDULE_CHANGED`. Never a second write, never a retry, and a
@@ -337,7 +340,11 @@ and the authored weeks (which are unchanged), anchored at
   target today/future accepted, target in the past rejected
   (`DATE_IN_PAST`), occupied date rejected (`DATE_ALREADY_PLANNED`), same
   date = success/no-op with no write, completed/in-progress blocked, stale
-  state → typed `NOT_ENROLLED` / `SCHEDULE_CHANGED` without retry.
+  state → typed `NOT_ENROLLED` / `SCHEDULE_CHANGED` without retry. A record
+  that committed **after** the pre-read but before the locked update is
+  re-checked under the enrollment lock and refuses the move
+  (`OCCURRENCE_RECORDED_NOT_PERFORMED`) with zero planned writes, so a settled
+  occurrence is never left looking movable.
 - *Completed run:* the page renders no scheduling section at all — M14's
   completion/restart/leave surface stays the only lifecycle state. A
   **concluded-but-incomplete** run (M17) still reads planning and renders the

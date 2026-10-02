@@ -31,7 +31,7 @@ export type PanelNextWorkout =
       readonly workoutOrder: number;
       readonly workoutName: string;
       readonly metaLabel: string;
-      readonly sessionState: 'not-started' | 'in-progress';
+      readonly sessionState: 'not-started' | 'in-progress' | 'not-performed';
     }
   | 'unavailable'
   | null;

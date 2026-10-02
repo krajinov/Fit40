@@ -41,7 +41,10 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import { vi } from 'vitest';
 
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
-import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
+import type {
+  PlannedWorkoutRepository,
+  PlannedWorkoutRescheduleOutcome,
+} from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 
@@ -324,19 +327,21 @@ export function makePlannedRepo(
   options: {
     readonly rows?: ReadonlyArray<PlannedWorkout>;
     readonly replaceAllResult?: boolean;
-    readonly rescheduleResult?: boolean;
+    readonly rescheduleResult?: PlannedWorkoutRescheduleOutcome;
     readonly rescheduleError?: Error;
   } = {},
 ) {
   return {
     listByEnrollment: vi.fn(async () => options.rows ?? []),
     replaceAllForEnrollment: vi.fn(async () => options.replaceAllResult ?? true),
-    reschedule: vi.fn(async () => {
-      if (options.rescheduleError !== undefined) {
-        throw options.rescheduleError;
-      }
-      return options.rescheduleResult ?? true;
-    }),
+    reschedule: vi.fn(
+      async (): Promise<PlannedWorkoutRescheduleOutcome> => {
+        if (options.rescheduleError !== undefined) {
+          throw options.rescheduleError;
+        }
+        return options.rescheduleResult ?? { outcome: 'moved' };
+      },
+    ),
   } satisfies PlannedWorkoutRepository;
 }
 

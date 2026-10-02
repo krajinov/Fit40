@@ -237,6 +237,37 @@ describe('/dashboard page (M15 Slice 5)', () => {
     expect(markup).toContain('Choose your training days to put this program on your calendar.');
   });
 
+  it('renders a recorded fallback preview with no Start (degraded closure, M17 final review)', async () => {
+    // Unconfigured calendar: the only Start/Resume CTA this occurrence could
+    // produce is the Up next card's, so its absence proves the recorded preview
+    // is non-startable.
+    const unconfigured: DashboardScheduleState = {
+      status: 'loaded',
+      schedule: {
+        programSlug: 'fit40-beginner-strength',
+        configured: false,
+        today: '2026-02-18',
+        items: [],
+        unplacedNotPerformedWorkouts: [],
+        focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
+      },
+    };
+    const recorded: NonNullable<DashboardView['currentProgram']> = {
+      program: PROGRAM_DETAIL,
+      enrollment: ENROLLED,
+      nextWorkoutPreview: {
+        status: 'available',
+        workout: { ...NEXT_PREVIEW.workout, sessionState: 'not-performed' },
+      },
+      schedule: unconfigured,
+    };
+    const markup = await renderPage(recorded);
+
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).not.toContain('Start workout');
+    expect(markup).not.toContain('Resume workout');
+  });
+
   it('keeps the M14 completed card authoritative — no schedule section or next-workout CTA', async () => {
     const completed: DashboardView['currentProgram'] = {
       program: PROGRAM_DETAIL,

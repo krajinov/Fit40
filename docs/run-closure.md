@@ -352,6 +352,20 @@ Full detail lives in `docs/follow-through.md`; the M17 deltas are:
 
 ## Run closure denominator
 
+One `RunClosureSummary` is projected from **ONE coherent database snapshot**:
+the closure-facts projection (`RunClosureFactsRepository` —
+`listClosureFactsByEnrollment`) returns the run's completed authored
+occurrence ids and its recorded not-performed occurrence ids in a **single
+statement**.
+Two independent statements under READ COMMITTED could observe different
+database instants — a legitimate concurrent `undo → start → complete` that
+commits between them would hand the Domain one occurrence in BOTH fact sets, a
+contradiction the persisted state never held. The single-statement projection
+makes that impossible: a closure read sees exactly one of the two valid
+states, and `resolveRunClosure`'s contradiction guard stays loud for a real
+impossible snapshot only. The projection never takes the enrollment write
+lock and never runs in a transaction — one statement needs neither.
+
 `resolveRunClosure`'s denominator is the run's **authored structure**:
 `listScheduledWorkoutsInOrder` for the current program, minus completed ids
 minus not-performed ids, with open occurrences reported in **authored order**.
@@ -395,6 +409,7 @@ M17 never touched the M14 completion surface:
 | Authored week status (completed vs settled vs in-progress) from completed ids, recorded keys and the first open occurrence | Presentation | `src/features/programs/week-status.ts` |
 | Recorded session state (direct/bookmarked session URL) | Presentation | `active-workout-view.ts`, `SessionRecordedPanel.tsx` |
 | Read-only fact projection | Infrastructure | `drizzle-not-performed-occurrence-repository.ts` |
+| One-snapshot closure-facts projection (completed + not-performed sets) | Infrastructure | `drizzle-run-closure-facts-repository.ts` |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
 Presentation never decides settlement or closure: Server Actions own auth,
@@ -406,6 +421,7 @@ resolve *display* rules from computed flags only.
 | Port | Operations | Mutations allowed |
 |---|---|---|
 | `NotPerformedOccurrenceRepository` | `listByEnrollment` | **none** — read-only |
+| `RunClosureFactsRepository` | `listClosureFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
 | `RunOccurrenceWriteRepository` | `recordNotPerformed`, `undoNotPerformed`, `createSessionForOccurrence` | the three settlement/creation writes only |
 | `WorkoutSessionRepository` | `save`, `listCompletedWorkoutSessionsByEnrollment`, `findActiveSessionByScheduledWorkout`, `findActiveSessionForEnrollment`, `listActiveSessionsByEnrollment`, `listSessionsByScheduledWorkout`, `listCompletedSessionsByScheduledWorkout`, `listSessionSummaries`, `listSessionSummariesByEnrollment`, `findSessionWithDetail`, `listInProgressTrainingHistory`, `findActiveWorkoutSession` | **update only** — no create/upsert of a session row |
 | `PersonalRecordRepository` | read-side queries | **none** — read-only (M12 boundary) |
@@ -481,6 +497,7 @@ The evidence lives in the suites themselves; this is the map.
 | Integration | `not-performed-occurrence-repository.test.ts`, `not-performed-settlement.test.ts`, `session-creation-serialized.test.ts`, `not-performed-schedule.test.ts`, `follow-through-round-trip.test.ts` | port contracts, cross-table serialization, round-trip projections |
 | Integration | `not-performed-concurrency.test.ts` (race matrix + statement/lock discipline + version-pin proven by test 9c), `not-performed-lifecycle.test.ts`, `not-performed-historical-truth.test.ts` | EPQ race matrix, no-retry/lock-first discipline, leave/restart cascade truth |
 | Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
+| Integration | `run-closure-snapshot.test.ts`, `run-closure-facts-repository.test.ts` | the closure projection reads one coherent snapshot across a gated Undo→start→complete commit (deterministic `pg_locks` gates, negative control reproduces the torn two-statement read); projection port contract |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

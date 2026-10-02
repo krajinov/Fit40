@@ -41,6 +41,7 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import { vi } from 'vitest';
 
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import type {
   PlannedWorkoutRepository,
   PlannedWorkoutRescheduleOutcome,
@@ -371,5 +372,26 @@ export function makeNotPerformedRepo(facts: ReadonlyArray<NotPerformedOccurrence
       facts.filter((fact) => fact.enrollmentId === enrollmentId),
     ),
   } satisfies NotPerformedOccurrenceRepository;
+}
+
+/**
+ * Read-only closure-facts projection stub (M17 snapshot read), composed over
+ * the shared in-memory session repository and the given facts so both sets
+ * are scoped exactly like the port: the completed ids keep the in-memory
+ * projection's enrollment scoping (detached history excluded) and the
+ * recorded facts answer only for the requested enrollment.
+ */
+export function makeRunClosureFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+) {
+  return {
+    listClosureFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
+      completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
+      notPerformedIds: facts
+        .filter((fact) => fact.enrollmentId === enrollmentId)
+        .map((fact) => fact.scheduledWorkoutId),
+    })),
+  } satisfies RunClosureFactsRepository;
 }
 

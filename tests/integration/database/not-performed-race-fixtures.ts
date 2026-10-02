@@ -515,7 +515,7 @@ export async function seedCompletedOccurrenceSession(input: {
 }
 
 /** One completed, one-set session for an authored occurrence. */
-function completedOccurrenceSession(input: {
+export function completedOccurrenceSession(input: {
   readonly id: string;
   readonly owner: string;
   readonly enrollmentId: EnrollmentId;

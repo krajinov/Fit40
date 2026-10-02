@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
 import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
 import { DrizzleRunOccurrenceWrites } from '@/infrastructure/database/repositories/drizzle-run-occurrence-writes';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
@@ -31,6 +32,7 @@ export const programEnrollmentRepository = new DrizzleProgramEnrollmentRepositor
 export const plannedWorkoutRepository = new DrizzlePlannedWorkoutRepository(db);
 export const notPerformedOccurrenceRepository = new DrizzleNotPerformedOccurrenceRepository(db);
 export const runOccurrenceWrites = new DrizzleRunOccurrenceWrites(db);
+export const runClosureFactsRepository = new DrizzleRunClosureFactsRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);

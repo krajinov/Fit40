@@ -21,7 +21,7 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import {
   enrollment,
   enrollmentId,
-  makeNotPerformedRepo,
+  makeRunClosureFactsRepo,
   makeProgram,
   notPerformedFact,
   OCCURRENCES_IN_ORDER,
@@ -88,10 +88,10 @@ async function makeHarness(
     });
   }
 
-  const notPerformed = makeNotPerformedRepo(options.facts ?? []);
-  const useCase = new GetRunClosureSummaryUseCase(enrollments, sessions, notPerformed);
+  const closureFacts = makeRunClosureFactsRepo(sessions, options.facts ?? []);
+  const useCase = new GetRunClosureSummaryUseCase(enrollments, closureFacts);
 
-  return { useCase, enrollments, sessions, notPerformed };
+  return { useCase, enrollments, sessions, closureFacts };
 }
 
 type Harness = Awaited<ReturnType<typeof makeHarness>>;
@@ -318,16 +318,13 @@ describe('GetRunClosureSummaryUseCase — ordering, labels and scoping', () => {
 describe('GetRunClosureSummaryUseCase — ownership, reads and shape', () => {
   it('returns null and reads nothing when the user has no current run', async () => {
     const harness = await makeHarness({ enrolled: false });
-    const completedRead = vi.spyOn(harness.sessions, 'listCompletedScheduledWorkoutIds');
-    const factsRead = vi.spyOn(harness.notPerformed, 'listByEnrollment');
 
     const result = await harness.useCase.execute({ userId: USER_A, program: PROGRAM });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBeNull();
-    expect(completedRead).not.toHaveBeenCalled();
-    expect(factsRead).not.toHaveBeenCalled();
+    expect(harness.closureFacts.listClosureFactsByEnrollment).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed userId without touching any repository', async () => {
@@ -342,21 +339,21 @@ describe('GetRunClosureSummaryUseCase — ownership, reads and shape', () => {
     expect(enrollmentRead).not.toHaveBeenCalled();
   });
 
-  it('reads exactly two bounded execution projections — no hydration, no calendar', async () => {
+  it('reads exactly ONE coherent closure-facts projection — no hydration, no calendar', async () => {
     const harness = await makeHarness({
       completed: [OCCURRENCE_W1_1],
       facts: [notPerformedFact(ENR_A, OCCURRENCE_W1_2)],
     });
-    const completedRead = vi.spyOn(harness.sessions, 'listCompletedScheduledWorkoutIds');
     const sessionsRead = vi.spyOn(harness.sessions, 'listCompletedByEnrollment');
     const activityRead = vi.spyOn(harness.sessions, 'listCompletedOccurrenceActivity');
     const inProgressRead = vi.spyOn(harness.sessions, 'listInProgressScheduledWorkoutIds');
 
     await summarize(harness);
 
-    expect(completedRead).toHaveBeenCalledTimes(1);
-    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledTimes(1);
-    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledWith(enrollmentId(ENR_A));
+    // ONE snapshot read supplies both fact sets — the use case never
+    // coordinates two independently mutable reads.
+    expect(harness.closureFacts.listClosureFactsByEnrollment).toHaveBeenCalledTimes(1);
+    expect(harness.closureFacts.listClosureFactsByEnrollment).toHaveBeenCalledWith(enrollmentId(ENR_A));
     // No session aggregate, no record pipeline, no planning read at all.
     expect(sessionsRead).not.toHaveBeenCalled();
     expect(activityRead).not.toHaveBeenCalled();

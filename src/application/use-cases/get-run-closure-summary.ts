@@ -21,12 +21,16 @@
  *   not-performed record. Both verdicts arrive in the DTO; neither is
  *   re-decided here.
  *
- * Exactly two bounded, enrollment-scoped reads — the run's completed occurrence
- * ids and its recorded facts — issued together because neither decides whether
- * the other happens. No planned-row read, no session hydration, no catalog
- * query, and deliberately NO clock: conclusion is never a date consequence
- * (a future, today's and a past occurrence are all simply open until settled),
- * so this use case takes no `now`.
+ * Exactly one bounded, enrollment-scoped snapshot read — the run's completed
+ * occurrence ids AND its recorded facts together, through the closure-facts
+ * projection port. A single coherent snapshot is required, not optional: two
+ * independent statements could observe different database instants under READ
+ * COMMITTED and manufacture a completed+not-performed overlap the persisted
+ * state never held, which `resolveRunClosure` would (correctly) reject. No
+ * planned-row read, no session hydration, no catalog query, and deliberately
+ * NO clock: conclusion is never a date consequence (a future, today's and a
+ * past occurrence are all simply open until settled), so this use case takes
+ * no `now`.
  *
  * Semantics are never re-decided here: counts and `isConcluded` come from the
  * Domain's `resolveRunClosure`, completion from `isProgramComplete`, and
@@ -38,9 +42,8 @@
  */
 
 import { toRunClosureSummaryDto, type RunClosureSummaryDto } from '@/application/dto/run-closure';
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { isProgramComplete } from '@/domain/services/program-progress';
 import { isRunRestartable, resolveRunClosure } from '@/domain/services/run-closure';
@@ -66,8 +69,7 @@ export interface GetRunClosureSummaryInput {
 export class GetRunClosureSummaryUseCase {
   constructor(
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
-    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
+    private readonly closureFactsRepository: RunClosureFactsRepository,
   ) {}
 
   async execute(
@@ -90,23 +92,19 @@ export class GetRunClosureSummaryUseCase {
       return ok(null);
     }
 
-    // The run's own execution truth: completed occurrence ids (M14) and
-    // recorded not-performed facts (M17). Independent reads, so they are
-    // issued together; both are enrollment-scoped projections, never session
-    // aggregates and never another run's (or detached) history.
-    const [completedIds, notPerformedFacts] = await Promise.all([
-      this.sessionRepository.listCompletedScheduledWorkoutIds(enrollment.id),
-      this.notPerformedRepository.listByEnrollment(enrollment.id),
-    ]);
+    // The run's own execution truth from ONE coherent snapshot: completed
+    // occurrence ids (M14) and recorded not-performed facts (M17), projected
+    // together so a concurrent settlement transition can never manufacture an
+    // authored occurrence that appears in both sets. Both sets are
+    // enrollment-scoped projections, never session aggregates and never
+    // another run's (or detached) history.
+    const facts = await this.closureFactsRepository.listClosureFactsByEnrollment(enrollment.id);
 
     // Domain authority, evaluated exactly once each: closure over the authored
     // program, M14 completion untouched by the records, and the one
     // restartability rule composed from the two — never recomputed here.
-    const closure = resolveRunClosure(input.program, {
-      completedIds,
-      notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
-    });
-    const programComplete = isProgramComplete(input.program, completedIds);
+    const closure = resolveRunClosure(input.program, facts);
+    const programComplete = isProgramComplete(input.program, facts.completedIds);
 
     return ok(
       toRunClosureSummaryDto(input.program, closure, {

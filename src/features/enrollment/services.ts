@@ -20,6 +20,7 @@ import {
   personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
+  runClosureFactsRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
 
@@ -63,14 +64,15 @@ export const getProgramCompletionSummaryUseCase = new GetProgramCompletionSummar
 /**
  * The M17 run-closure summary of the current run (Slice 10). Composed beside
  * the enrollment read use cases: it resolves ownership the same way, reads the
- * run's own completed occurrence ids and recorded not-performed facts through
- * read-only ports, and derives every verdict from the Domain — no persistence
- * of its own, and no influence on the M14 completion summary above.
+ * run's completed occurrence ids and recorded not-performed facts through ONE
+ * coherent snapshot port (the closure-facts projection — never two independent
+ * statements that could tear across a concurrent settlement transition), and
+ * derives every verdict from the Domain — no persistence of its own, and no
+ * influence on the M14 completion summary above.
  */
 export const getRunClosureSummaryUseCase = new GetRunClosureSummaryUseCase(
   programEnrollmentRepository,
-  workoutSessionRepository,
-  notPerformedOccurrenceRepository,
+  runClosureFactsRepository,
 );
 
 /**

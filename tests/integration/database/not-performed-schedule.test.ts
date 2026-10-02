@@ -30,7 +30,9 @@ import {
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
+  occurrenceExecutionFactsRepository,
   resetAndSeed,
+  scheduleExecutionFactsRepository,
   runOccurrenceWrites,
   workoutSessionRepository,
 } from './setup';
@@ -47,8 +49,7 @@ const RECORDED_AT = '2026-09-23T08:00:00.000Z';
 const scheduleUseCase = new GetEnrollmentScheduleUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
-  workoutSessionRepository,
-  notPerformedOccurrenceRepository,
+  scheduleExecutionFactsRepository,
 );
 
 const configureUseCase = new ConfigureTrainingDaysUseCase(
@@ -61,9 +62,8 @@ const configureUseCase = new ConfigureTrainingDaysUseCase(
 
 const sessionUseCase = new GetWorkoutSessionUseCase(
   programRepository,
-  workoutSessionRepository,
   programEnrollmentRepository,
-  notPerformedOccurrenceRepository,
+  occurrenceExecutionFactsRepository,
 );
 
 afterAll(async () => {

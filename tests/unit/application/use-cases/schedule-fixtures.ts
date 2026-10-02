@@ -32,6 +32,7 @@ import {
   createUserId,
   createWorkoutId,
   type EnrollmentId,
+  type ScheduledWorkoutId,
   type WorkoutId,
 } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
@@ -41,6 +42,8 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import { vi } from 'vitest';
 
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
+import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occurrence-execution-facts-repository';
+import type { ScheduleExecutionFactsRepository } from '@/application/ports/schedule-execution-facts-repository';
 import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import type {
   PlannedWorkoutRepository,
@@ -395,3 +398,47 @@ export function makeRunClosureFactsRepo(
   } satisfies RunClosureFactsRepository;
 }
 
+
+/**
+ * Read-only occurrence-execution-facts stub (M17 snapshot read), composed
+ * over the shared in-memory session repository and the given facts so both
+ * halves are scoped exactly like the port: the session keeps the in-memory
+ * projection's enrollment scoping and the record answers only for the
+ * requested run and occurrence.
+ */
+export function makeOccurrenceExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+) {
+  return {
+    findOccurrenceExecutionFacts: vi.fn(
+      async (enrollmentId: EnrollmentId, scheduledWorkoutId: ScheduledWorkoutId) => ({
+        session: await sessions.findByEnrollmentAndScheduledWorkout(enrollmentId, scheduledWorkoutId),
+        notPerformedRecorded: facts.some(
+          (fact) =>
+            fact.enrollmentId === enrollmentId && fact.scheduledWorkoutId === scheduledWorkoutId,
+        ),
+      }),
+    ),
+  } satisfies OccurrenceExecutionFactsRepository;
+}
+
+/**
+ * Read-only schedule-execution-facts stub (M17 snapshot read), composed over
+ * the shared in-memory session repository and the given facts so all three
+ * sets are scoped exactly like the port: the session projections keep the
+ * in-memory scoping (detached history excluded) and the recorded facts
+ * answer only for the requested enrollment.
+ */
+export function makeScheduleExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+) {
+  return {
+    listScheduleExecutionFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
+      completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
+      inProgressIds: await sessions.listInProgressScheduledWorkoutIds(enrollmentId),
+      notPerformedFacts: facts.filter((fact) => fact.enrollmentId === enrollmentId),
+    })),
+  } satisfies ScheduleExecutionFactsRepository;
+}

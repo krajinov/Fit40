@@ -44,7 +44,13 @@ projections only: `listCompletedScheduledWorkoutIds` (existing) and
 Since M17 the configure read additionally loads the run's
 `not_performed_workouts` facts (a third, fact-only read) and hands them to
 generation as settled input — recording a workout never rewrites a
-`planned_workouts` row itself.
+`planned_workouts` row itself. The schedule READ is different: session
+execution truth (completed + in-progress projections) and the
+not-performed settlement facts are mutually exclusive per occurrence, so
+the calendar read projects them from ONE coherent database snapshot
+(`ScheduleExecutionFactsRepository`, a single statement) — never from
+independent statements that could tear across a concurrent settlement
+transition (see `docs/run-closure.md` for the general invariant).
 
 ## Persistence (`planned_workouts`, migration 0013)
 

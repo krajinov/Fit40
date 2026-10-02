@@ -10,7 +10,7 @@ import { GetScheduledWorkoutUseCase } from '@/application/use-cases/get-schedule
 import { GetRunClosureSummaryUseCase } from '@/application/use-cases/get-run-closure-summary';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
 
-import { makeNotPerformedRepo, makeRunClosureFactsRepo } from './schedule-fixtures';
+import { makeOccurrenceExecutionFactsRepo, makeRunClosureFactsRepo } from './schedule-fixtures';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
@@ -199,7 +199,7 @@ function makeUseCase(
     new GetProgramEnrollmentUseCase(enrollmentRepo, sessionRepo),
     new ResolveNextWorkoutUseCase(
       new GetScheduledWorkoutUseCase(programRepo, exerciseRepo),
-      new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, makeNotPerformedRepo()),
+      new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, makeOccurrenceExecutionFactsRepo(sessionRepo)),
     ),
     scheduleUseCase,
     // M17 final review: the run-closure read, composed beside the schedule read

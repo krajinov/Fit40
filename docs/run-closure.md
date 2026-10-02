@@ -366,6 +366,20 @@ states, and `resolveRunClosure`'s contradiction guard stays loud for a real
 impossible snapshot only. The projection never takes the enrollment write
 lock and never runs in a transaction — one statement needs neither.
 
+This is the general M17 read invariant, not a closure-only rule: **any read
+model that combines mutually exclusive session execution state and
+not-performed settlement state must project those facts from one coherent
+database snapshot.** Three projections share it:
+
+| Read model | Port | Snapshot mechanism |
+|---|---|---|
+| Run closure summary | `RunClosureFactsRepository` | ONE statement (`UNION ALL`) |
+| Occurrence session detail | `OccurrenceExecutionFactsRepository` | ONE bounded, read-only REPEATABLE READ transaction (the session aggregate spans several rows, so one statement cannot hydrate it) |
+| Enrollment schedule execution facts | `ScheduleExecutionFactsRepository` | ONE statement (`UNION ALL`) |
+
+None of them takes the enrollment write lock, retries, or serializes behind
+the write side: a coherent read needs exactly one snapshot, nothing more.
+
 `resolveRunClosure`'s denominator is the run's **authored structure**:
 `listScheduledWorkoutsInOrder` for the current program, minus completed ids
 minus not-performed ids, with open occurrences reported in **authored order**.
@@ -410,6 +424,8 @@ M17 never touched the M14 completion surface:
 | Recorded session state (direct/bookmarked session URL) | Presentation | `active-workout-view.ts`, `SessionRecordedPanel.tsx` |
 | Read-only fact projection | Infrastructure | `drizzle-not-performed-occurrence-repository.ts` |
 | One-snapshot closure-facts projection (completed + not-performed sets) | Infrastructure | `drizzle-run-closure-facts-repository.ts` |
+| One-snapshot occurrence execution facts (session + record) | Infrastructure | `drizzle-occurrence-execution-facts-repository.ts` |
+| One-snapshot schedule execution facts (completed + in-progress + records) | Infrastructure | `drizzle-schedule-execution-facts-repository.ts` |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
 Presentation never decides settlement or closure: Server Actions own auth,
@@ -422,6 +438,8 @@ resolve *display* rules from computed flags only.
 |---|---|---|
 | `NotPerformedOccurrenceRepository` | `listByEnrollment` | **none** — read-only |
 | `RunClosureFactsRepository` | `listClosureFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
+| `OccurrenceExecutionFactsRepository` | `findOccurrenceExecutionFacts` | **none** — read-only; ONE read-only REPEATABLE READ transaction, one snapshot |
+| `ScheduleExecutionFactsRepository` | `listScheduleExecutionFactsByEnrollment` | **none** — read-only; ONE statement, one snapshot |
 | `RunOccurrenceWriteRepository` | `recordNotPerformed`, `undoNotPerformed`, `createSessionForOccurrence` | the three settlement/creation writes only |
 | `WorkoutSessionRepository` | `save`, `listCompletedWorkoutSessionsByEnrollment`, `findActiveSessionByScheduledWorkout`, `findActiveSessionForEnrollment`, `listActiveSessionsByEnrollment`, `listSessionsByScheduledWorkout`, `listCompletedSessionsByScheduledWorkout`, `listSessionSummaries`, `listSessionSummariesByEnrollment`, `findSessionWithDetail`, `listInProgressTrainingHistory`, `findActiveWorkoutSession` | **update only** — no create/upsert of a session row |
 | `PersonalRecordRepository` | read-side queries | **none** — read-only (M12 boundary) |
@@ -498,6 +516,7 @@ The evidence lives in the suites themselves; this is the map.
 | Integration | `not-performed-concurrency.test.ts` (race matrix + statement/lock discipline + version-pin proven by test 9c), `not-performed-lifecycle.test.ts`, `not-performed-historical-truth.test.ts` | EPQ race matrix, no-retry/lock-first discipline, leave/restart cascade truth |
 | Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
 | Integration | `run-closure-snapshot.test.ts`, `run-closure-facts-repository.test.ts` | the closure projection reads one coherent snapshot across a gated Undo→start→complete commit (deterministic `pg_locks` gates, negative control reproduces the torn two-statement read); projection port contract |
+| Integration | `occurrence-session-snapshot.test.ts`, `schedule-execution-snapshot.test.ts` | the occurrence and schedule projections read one coherent snapshot across a gated abandoned-session → record transition (deterministic `pg_locks` gates, negative controls reproduce the torn multi-statement reads); regression states unchanged |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

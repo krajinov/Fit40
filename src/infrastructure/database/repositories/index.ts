@@ -8,6 +8,7 @@
 import { db } from '../client';
 import { DrizzleExerciseRepository } from './drizzle-exercise-repository';
 import { DrizzleNotPerformedOccurrenceRepository } from './drizzle-not-performed-occurrence-repository';
+import { DrizzleOccurrenceExecutionFactsRepository } from './drizzle-occurrence-execution-facts-repository';
 import { DrizzlePersonalRecordRepository } from './drizzle-personal-record-repository';
 import { DrizzleRunOccurrenceWrites } from './drizzle-run-occurrence-writes';
 import { DrizzlePlannedWorkoutRepository } from './drizzle-planned-workout-repository';
@@ -15,6 +16,7 @@ import { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment
 import { DrizzleProgramRepository } from './drizzle-program-repository';
 import { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 import { DrizzleRunClosureFactsRepository } from './drizzle-run-closure-facts-repository';
+import { DrizzleScheduleExecutionFactsRepository } from './drizzle-schedule-execution-facts-repository';
 import { DrizzleSessionRepository } from './drizzle-session-repository';
 import { DrizzleTrainingHistoryRepository } from './drizzle-training-history-repository';
 import { DrizzleUserRepository } from './drizzle-user-repository';
@@ -33,6 +35,8 @@ export const plannedWorkoutRepository = new DrizzlePlannedWorkoutRepository(db);
 export const notPerformedOccurrenceRepository = new DrizzleNotPerformedOccurrenceRepository(db);
 export const runOccurrenceWrites = new DrizzleRunOccurrenceWrites(db);
 export const runClosureFactsRepository = new DrizzleRunClosureFactsRepository(db);
+export const scheduleExecutionFactsRepository = new DrizzleScheduleExecutionFactsRepository(db);
+export const occurrenceExecutionFactsRepository = new DrizzleOccurrenceExecutionFactsRepository(db);
 export const trainingHistoryRepository = new DrizzleTrainingHistoryRepository(db);
 export const personalRecordRepository = new DrizzlePersonalRecordRepository(db);
 
@@ -45,6 +49,8 @@ export { DrizzleProgramEnrollmentRepository } from './drizzle-program-enrollment
 export { DrizzleProgramRepository } from './drizzle-program-repository';
 export { DrizzleRegistrationRepository } from './drizzle-registration-repository';
 export { DrizzleRunClosureFactsRepository } from './drizzle-run-closure-facts-repository';
+export { DrizzleScheduleExecutionFactsRepository } from './drizzle-schedule-execution-facts-repository';
+export { DrizzleOccurrenceExecutionFactsRepository } from './drizzle-occurrence-execution-facts-repository';
 export { DrizzleSessionRepository } from './drizzle-session-repository';
 export { DrizzleTrainingHistoryRepository } from './drizzle-training-history-repository';
 export { DrizzleUserRepository } from './drizzle-user-repository';

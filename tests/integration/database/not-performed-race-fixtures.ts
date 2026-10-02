@@ -18,7 +18,7 @@
  *    exercised through the real use cases and repositories alongside.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -222,6 +222,60 @@ export function createGate(): { readonly opened: Promise<void>; readonly open: (
       if (open !== null) open();
     },
   };
+}
+
+/** Tables a snapshot gate may lock (a compile-time closed set). */
+export type SnapshotGateTable = 'workout_sessions' | 'not_performed_workouts';
+
+/**
+ * A test-only gate: a dedicated transaction whose `LOCK TABLE … IN ACCESS
+ * EXCLUSIVE MODE` request makes any plain read of that table queue behind it
+ * (PostgreSQL grants locks in request order). Its REQUEST is verified through
+ * `waitForPendingLock` by the caller before anything is allowed to proceed.
+ */
+export function holdTableWriteGate(
+  db: Database,
+  table: SnapshotGateTable,
+): {
+  readonly granted: Promise<void>;
+  readonly release: () => Promise<void>;
+} {
+  const granted = createGate();
+  const released = createGate();
+  const done = db.transaction(async (tx) => {
+    // `table` is a closed union of literal table names, never user input.
+    await tx.execute(sql`LOCK TABLE ${sql.raw(table)} IN ACCESS EXCLUSIVE MODE`);
+    granted.open();
+    await released.opened;
+  });
+  return {
+    granted: granted.opened,
+    release: async () => {
+      released.open();
+      await done;
+    },
+  };
+}
+
+/**
+ * Waits until a PENDING (ungranted) lock request of `mode` on `table` is
+ * visible in `pg_locks` — the gate is armed. Deterministic: the request was
+ * already dispatched, so the database MUST publish it; each poll is a
+ * database round-trip, never a sleep.
+ */
+export async function waitForPendingLock(
+  client: postgres.Sql,
+  table: SnapshotGateTable,
+  mode: 'AccessExclusiveLock' | 'AccessShareLock',
+): Promise<void> {
+  for (let attempt = 0; attempt < 2000; attempt += 1) {
+    const rows = await client<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM pg_locks
+      WHERE granted = false AND mode = ${mode} AND relation = ${table}::regclass
+    `;
+    if (Number.parseInt(rows[0]?.count ?? '0', 10) >= 1) return;
+  }
+  throw new Error(`no pending ${mode} on ${table}: the gate never armed`);
 }
 
 export const PENDING = 'pending' as const;

@@ -21,21 +21,21 @@ import {
   programEnrollmentRepository,
   programRepository,
   runOccurrenceWrites,
+  scheduleExecutionFactsRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
 
 /**
  * The run's training calendar (planned dates, statuses and focus). Read-only:
  * the caller passes the program aggregate it already loaded, so one request
- * hydrates the program exactly once. The recorded-not-performed facts are read
- * through the read-only `NotPerformedOccurrenceRepository` — this read never
- * touches the write authority.
+ * hydrates the program exactly once. The session execution truth and the
+ * recorded-not-performed facts come from ONE coherent snapshot port — this
+ * read never touches the write authority.
  */
 export const getEnrollmentScheduleUseCase = new GetEnrollmentScheduleUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
-  workoutSessionRepository,
-  notPerformedOccurrenceRepository,
+  scheduleExecutionFactsRepository,
 );
 
 /**

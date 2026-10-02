@@ -7,11 +7,14 @@
  *
  * The program aggregate is supplied by the caller (the `GetProgramEnrollmentUseCase`
  * convention): a request that already loaded the program hydrates it exactly
- * once. Every other fact comes from four bounded, enrollment-scoped reads —
- * the run's planned rows (calendar intent), its completed occurrence ids, its
- * in-progress occurrence ids, and its recorded-not-performed facts (M17
- * execution settlement). No per-item read is issued, no session aggregate,
- * exercise log or set log is hydrated, and nothing is written.
+ * once. Every other fact comes from two bounded, enrollment-scoped reads —
+ * the run's planned rows (calendar intent) and its execution truth (completed
+ * occurrence ids, in-progress occurrence ids and recorded-not-performed facts)
+ * projected from ONE coherent database snapshot. Session execution truth and
+ * settlement facts are mutually exclusive per occurrence, so they are never
+ * assembled from independent statements that could tear across a concurrent
+ * `recordNotPerformed` transition. No per-item read is issued, no session
+ * aggregate, exercise log or set log is hydrated, and nothing is written.
  *
  * The three facts are kept strictly separate: a planned row is calendar intent,
  * a not-performed fact is execution truth, and the authored occurrence is
@@ -44,10 +47,9 @@ import type {
   ScheduleFocusDto,
   UnplacedNotPerformedWorkoutDto,
 } from '@/application/dto/schedule';
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type { ScheduleExecutionFactsRepository } from '@/application/ports/schedule-execution-facts-repository';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { TrainingProgram } from '@/domain/entities/training-program';
@@ -87,8 +89,7 @@ export class GetEnrollmentScheduleUseCase {
   constructor(
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
-    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
+    private readonly scheduleExecutionFactsRepository: ScheduleExecutionFactsRepository,
   ) {}
 
   async execute(
@@ -113,15 +114,17 @@ export class GetEnrollmentScheduleUseCase {
 
     const today = plannedDateFromInstant(input.now);
 
-    // FOUR independent, enrollment-scoped projections read in one batch. None of
-    // them hydrates sessions, logs or the exercise catalog, and the fact read is
-    // ONE bounded statement (never one query per planned row or per occurrence).
-    const [plannedRows, completedIds, inProgressIds, notPerformedFacts] = await Promise.all([
+    // Two enrollment-scoped reads in one batch: the planned rows (calendar
+    // intent — the documented intent-vs-execution cosmetic window is
+    // unchanged) and the execution truth from ONE coherent snapshot, so a
+    // concurrent settlement transition can never pair a stale in-progress
+    // session with the fresh record. No session aggregate, log or catalog
+    // hydration, and never one query per planned row or per occurrence.
+    const [plannedRows, executionFacts] = await Promise.all([
       this.plannedWorkoutRepository.listByEnrollment(enrollment.id),
-      this.sessionRepository.listCompletedScheduledWorkoutIds(enrollment.id),
-      this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
-      this.notPerformedRepository.listByEnrollment(enrollment.id),
+      this.scheduleExecutionFactsRepository.listScheduleExecutionFactsByEnrollment(enrollment.id),
     ]);
+    const { completedIds, inProgressIds, notPerformedFacts } = executionFacts;
 
     if (plannedRows.length === 0) {
       // No current calendar — but a recorded fact is execution truth and is

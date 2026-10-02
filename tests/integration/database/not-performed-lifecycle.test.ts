@@ -56,6 +56,7 @@ import {
   programRepository,
   resetAndSeed,
   runClosureFactsRepository,
+  scheduleExecutionFactsRepository,
   runOccurrenceWrites,
   workoutSessionRepository,
 } from './setup';
@@ -98,8 +99,7 @@ function useCases() {
     schedule: new GetEnrollmentScheduleUseCase(
       programEnrollmentRepository,
       plannedWorkoutRepository,
-      workoutSessionRepository,
-      notPerformedOccurrenceRepository,
+      scheduleExecutionFactsRepository,
     ),
     followThrough: new GetEnrollmentFollowThroughUseCase(
       programEnrollmentRepository,

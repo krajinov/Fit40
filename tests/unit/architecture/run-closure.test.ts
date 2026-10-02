@@ -283,3 +283,74 @@ describe('M17 Slice 13 — no run archive or enrollment-history table exists', (
     expect(codeOf(SCHEMA_BARREL)).not.toMatch(/archive|history/i);
   });
 });
+
+describe('M17 final review — restartability is revalidated under the replacement authority', () => {
+  const PORT = 'src/application/ports/program-enrollment-repository.ts';
+  const DRIZZLE_REPO =
+    'src/infrastructure/database/repositories/drizzle-program-enrollment-repository.ts';
+
+  it('requires the replacement to be authorized by a restartability decision over locked facts', () => {
+    const port = codeOf(PORT);
+
+    // The primitive takes the decision and the facts it is evaluated over…
+    expect(port).toContain('isStillRestartable: RestartabilityDecision,');
+    expect(port).toContain('notPerformedIds: ReadonlyArray<ScheduledWorkoutId>;');
+    // …and can refuse specifically on restartability.
+    expect(port).toContain("readonly kind: 'not-restartable'");
+  });
+
+  it('locks the expected enrollment, reads the CURRENT facts, decides, and only then deletes', () => {
+    const full = codeOf(DRIZZLE_REPO);
+    // Scope to the replacement method itself: the class also has a plain
+    // `delete` method earlier in the file.
+    const code = full.slice(full.indexOf('async replaceExpectedWithNew('));
+    const lock = code.indexOf(".for('no key update')");
+    const completedRead = code.indexOf('workoutSessions.scheduledWorkoutId');
+    const factRead = code.indexOf('notPerformedWorkouts.scheduledWorkoutId');
+    const decision = code.indexOf('isStillRestartable({');
+    const del = code.indexOf('.delete(programEnrollments)');
+
+    expect(lock).toBeGreaterThan(0);
+    // Facts are read UNDER the lock…
+    expect(completedRead).toBeGreaterThan(lock);
+    expect(factRead).toBeGreaterThan(lock);
+    expect(decision).toBeGreaterThan(completedRead);
+    expect(decision).toBeGreaterThan(factRead);
+    // …and the delete happens ONLY after the decision.
+    expect(del).toBeGreaterThan(decision);
+  });
+
+  it('refuses with ZERO writes when the decision fails (the refusal returns before any delete)', () => {
+    const full = codeOf(DRIZZLE_REPO);
+    const code = full.slice(full.indexOf('async replaceExpectedWithNew('));
+    const refuse = code.indexOf("return { kind: 'not-restartable' }");
+    const del = code.indexOf('.delete(programEnrollments)');
+
+    expect(refuse).toBeGreaterThan(0);
+    expect(del).toBeGreaterThan(refuse);
+  });
+
+  it('adds no retry loop, no advisory lock and no SERIALIZABLE requirement', () => {
+    const repo = codeOf(DRIZZLE_REPO).toLowerCase();
+    const useCase = codeOf(RESTART);
+
+    expect(repo).not.toContain('advisory');
+    expect(repo).not.toContain('serializable');
+    expect(useCase.toLowerCase()).not.toContain('advisory');
+    expect(useCase.toLowerCase()).not.toContain('serializable');
+    // No retry loop wraps the replacement.
+    expect(useCase).not.toContain('while (');
+    expect(useCase).not.toContain('for (');
+  });
+
+  it('maps the locked refusal to the existing PROGRAM_NOT_COMPLETE and passes the SAME Domain rule', () => {
+    const useCase = codeOf(RESTART);
+
+    expect(useCase).toContain("outcome.kind === 'not-restartable'");
+    expect(useCase).toContain('programNotComplete(program.slug)');
+    // The decision handed to the write is the shared Domain composition, never
+    // a constant or a second formula.
+    expect(useCase).toContain('(facts) => this.isRestartable(program, facts)');
+    expect(useCase).not.toContain('complete || concluded');
+  });
+});

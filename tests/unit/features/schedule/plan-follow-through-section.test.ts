@@ -75,7 +75,7 @@ function report(overrides: Partial<ConfiguredFollowThroughDto> = {}): Configured
 }
 
 function unconfigured(): EnrollmentFollowThroughDto {
-  return { programSlug: 'prog-1', today: TODAY, configured: false };
+  return { programSlug: 'prog-1', today: TODAY, configured: false, notPerformedUnplaced: 0 };
 }
 
 function render(dto: EnrollmentFollowThroughDto): HTMLElement {

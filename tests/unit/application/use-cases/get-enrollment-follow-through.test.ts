@@ -152,13 +152,21 @@ describe('GetEnrollmentFollowThroughUseCase', () => {
     const dto = await readFollowThrough(harness);
 
     // No zero week and no zero totals ship for a run with no calendar: the
-    // unconfigured variant carries neither.
-    expect(dto).toEqual({ programSlug: PROGRAM_SLUG, today: MON, configured: false });
+    // unconfigured variant carries neither. It DOES carry the factual unplaced
+    // count, which is zero here because the run has no recorded facts at all.
+    expect(dto).toEqual({
+      programSlug: PROGRAM_SLUG,
+      today: MON,
+      configured: false,
+      notPerformedUnplaced: 0,
+    });
     expect(dto !== null && 'weeks' in dto).toBe(false);
     expect(dto !== null && 'totals' in dto).toBe(false);
-    // The planned rows had to be read to learn that; the session reads could not
-    // have changed the answer, so they are not issued.
+    // The planned rows had to be read to learn that. The fact read IS issued
+    // (every recorded fact would be unplaced with zero rows) but the session
+    // reads could not change any count, so they are not issued.
     expect(plannedRead).toHaveBeenCalledTimes(1);
+    expect(harness.notPerformed.listByEnrollment).toHaveBeenCalledTimes(1);
     expect(completedRead).not.toHaveBeenCalled();
     expect(inProgressRead).not.toHaveBeenCalled();
   });
@@ -789,16 +797,92 @@ describe('GetEnrollmentFollowThroughUseCase — recorded not-performed facts (Sl
     expect(theirs.notPerformedUnplaced).toBe(1);
   });
 
-  it('reads no recorded facts for a run with no calendar', async () => {
-    const harness = makeHarness([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]);
+  it('reports rowless recorded facts for a run with no planned rows, still unconfigured', async () => {
+    // Slice 9 correction: with ZERO planned rows every recorded fact is
+    // unplaced, so the count is factual run truth even though the run has no
+    // calendar to report on. No week and no total is fabricated.
+    const harness = makeHarness([
+      notPerformedFact(ENR_A, OCCURRENCE_W1_1),
+      notPerformedFact(ENR_A, OCCURRENCE_W2_1),
+      notPerformedFact(ENR_A, OCCURRENCE_W2_3),
+    ]);
     await enrolledRun(harness);
     const factsRead = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+    const completedRead = vi.spyOn(harness.sessions, 'listCompletedOccurrenceActivity');
+    const inProgressRead = vi.spyOn(harness.sessions, 'listInProgressScheduledWorkoutIds');
 
     const dto = await readFollowThrough(harness);
 
-    // The unconfigured variant has no count to fill (published shape unchanged),
-    // so the read could not change the answer and is not issued.
-    expect(dto).toEqual({ programSlug: PROGRAM_SLUG, today: MON, configured: false });
+    expect(dto).toEqual({
+      programSlug: PROGRAM_SLUG,
+      today: MON,
+      configured: false,
+      notPerformedUnplaced: 3,
+    });
+    expect(dto !== null && 'weeks' in dto).toBe(false);
+    expect(dto !== null && 'totals' in dto).toBe(false);
+    // One bounded fact read; no session read can change the count without rows.
+    expect(factsRead).toHaveBeenCalledTimes(1);
+    expect(completedRead).not.toHaveBeenCalled();
+    expect(inProgressRead).not.toHaveBeenCalled();
+  });
+  it("does not count another run's recorded facts when the calendar is empty", async () => {
+    const harness = makeHarness([notPerformedFact(ENR_B, OCCURRENCE_W1_1)]);
+    await enrolledRun(harness, ENR_A, USER_A);
+    await enrolledRun(harness, ENR_B, USER_B);
+
+    // ENR_A has no planned rows and no facts of its own: zero unplaced.
+    const mine = await readFollowThrough(harness, USER_A);
+    expect(mine).toEqual({
+      programSlug: PROGRAM_SLUG,
+      today: MON,
+      configured: false,
+      notPerformedUnplaced: 0,
+    });
+
+    // ENR_B's own fact is counted only for ENR_B's owner.
+    const theirs = await readFollowThrough(harness, USER_B);
+    expect(theirs).toEqual({
+      programSlug: PROGRAM_SLUG,
+      today: MON,
+      configured: false,
+      notPerformedUnplaced: 1,
+    });
+  });
+
+  it('reports no run (and reads no facts) when the user has no enrollment', async () => {
+    const harness = makeHarness([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]);
+    const factsRead = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+
+    // No run at all: the established `ok(null)` convention holds, and no count
+    // is fabricated for a run that does not exist.
+    expect(await readFollowThrough(harness)).toBeNull();
     expect(factsRead).not.toHaveBeenCalled();
+  });
+
+  it('moves a fact between placed and unplaced exactly as its planned row appears or disappears', async () => {
+    const harness = makeHarness([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]);
+    await enrolledRun(harness);
+
+    // No row for the recorded occurrence: unplaced, and the run is unconfigured.
+    const unplaced = await readFollowThrough(harness);
+    expect(unplaced?.configured).toBe(false);
+    expect(unplaced?.notPerformedUnplaced).toBe(1);
+
+    // Add a row well OUTSIDE the eight-week horizon (2026-06-01 precedes the
+    // horizon start of 2026-08-03). The occurrence is now placed, so it leaves
+    // the unplaced count even though no reported week carries its date: the
+    // count is a row difference, never a horizon consequence.
+    await configure(harness, [planned(ENR_A, OCCURRENCE_W1_1, '2026-06-01')]);
+    const placed = await readConfigured(harness);
+    expect(placed.weeks).toHaveLength(0);
+    expect(placed.totals.planned).toBe(0);
+    expect(placed.notPerformedUnplaced).toBe(0);
+
+    // Remove the row again: the fact is unplaced once more.
+    await configure(harness, []);
+    const removed = await readFollowThrough(harness);
+    expect(removed?.configured).toBe(false);
+    expect(removed?.notPerformedUnplaced).toBe(1);
   });
 });

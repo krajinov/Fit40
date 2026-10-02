@@ -115,12 +115,15 @@ describe('M17 Slice 8 — the M15 calendar only READS the not-performed facts', 
 });
 
 describe('M17 Slice 9 — the M16 report READS the facts and never writes them', () => {
-  it('reads the run facts once, through the read-only port', () => {
+  it('reads the run facts through the read-only port, once per terminal path', () => {
     const code = codeOf(FOLLOW_THROUGH_READ);
 
-    // Exactly two reads: the planned rows, then the fact projection.
-    expect(code.match(/listByEnrollment\(/g)).toHaveLength(2);
-    expect(code).toContain('notPerformedRepository.listByEnrollment(');
+    // The planned-row intent read: exactly one.
+    expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(1);
+    // The fact projection: ONE read per terminal path — the no-calendar path
+    // (so a rowless fact is still counted) and the configured path. Never one
+    // query per row or per fact, and always the READ-ONLY port.
+    expect(code.match(/notPerformedRepository\.listByEnrollment\(/g)).toHaveLength(2);
     // Never the mutation authority, and never one of its writes.
     expect(code).not.toContain('RunOccurrenceWriteRepository');
     expect(code).not.toContain('runOccurrenceWrites');
@@ -132,6 +135,27 @@ describe('M17 Slice 9 — the M16 report READS the facts and never writes them',
     expect(code).not.toContain('insert(');
     expect(code).not.toContain('delete(');
     expect(code).not.toContain('transaction(');
+  });
+
+  it('reads N facts for an ACTIVE enrollment even when there are no planned rows', () => {
+    const code = codeOf(FOLLOW_THROUGH_READ);
+    const zeroRowBranch = code.indexOf('if (plannedRows.length === 0)');
+    const factReadInBranch = code.indexOf('notPerformedRepository.listByEnrollment(', zeroRowBranch);
+    const unconfiguredBuild = code.indexOf('toUnconfiguredFollowThroughDto(', zeroRowBranch);
+
+    // The no-calendar path is NOT a fact-read short-circuit: it reads the run's
+    // facts so a rowless record is still counted, and only then builds the
+    // unconfigured DTO.
+    expect(zeroRowBranch).toBeGreaterThan(0);
+    expect(factReadInBranch).toBeGreaterThan(zeroRowBranch);
+    expect(unconfiguredBuild).toBeGreaterThan(factReadInBranch);
+
+    // The unconfigured DTO exposes the factual count (never a synthesized zero
+    // beside a variant that claims there is nothing to report).
+    const dto = codeOf(FOLLOW_THROUGH_DTO);
+    const start = dto.indexOf('export interface UnconfiguredFollowThroughDto');
+    const body = dto.slice(start, dto.indexOf('}\n', start));
+    expect(body).toContain('readonly notPerformedUnplaced: number;');
   });
 
   it('holds the 8-week horizon constant and never widens it for a fact', () => {

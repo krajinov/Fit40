@@ -59,13 +59,17 @@ export function EnrolledProgramPanel({
 }: EnrolledProgramPanelProps) {
   const progress = enrollment.progress;
   const panelState = resolveEnrolledPanelState({ nextWorkout, runClosure });
-  // The current week comes from the enrollment's own scheduled next workout
-  // (application truth), so a preview that fails to resolve still shows the
-  // week the user is actually on — never the last week.
+  // The current week follows the run's AUTHORITATIVE next occurrence when its
+  // preview resolved (the prop carries it), so a week holding only a recorded
+  // occurrence is never claimed as the week the user is on. A degraded
+  // ('unavailable') or absent preview falls back to the enrollment's own
+  // scheduled next workout — never the last week unless every workout is done.
   const currentWeekNumber =
-    enrollment.nextWorkout === null
-      ? program.durationWeeks
-      : enrollment.nextWorkout.weekNumber;
+    nextWorkout !== null && nextWorkout !== 'unavailable'
+      ? nextWorkout.weekNumber
+      : enrollment.nextWorkout === null
+        ? program.durationWeeks
+        : enrollment.nextWorkout.weekNumber;
   const startLabel =
     nextWorkout !== null &&
     nextWorkout !== 'unavailable' &&

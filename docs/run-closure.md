@@ -85,6 +85,19 @@ deliberately allowed to disagree, and none is derivable from another.
   Complete runs and concluded runs are restartable; an open run is not, so
   "start over" can never discard outstanding work. Restartability is not
   completion and must never be described as it.
+- **Revalidated under the replacement's own authority.** Restartability is
+  checked twice, and the SECOND check is authoritative: the Application gate
+  (`isEnrollmentRestartable`) produces the typed `PROGRAM_NOT_COMPLETE` for the
+  normal path, and the **same** Domain rule is handed into the atomic
+  replacement (`replaceExpectedWithNew`), which re-evaluates it over the
+  **current** settlement facts **under the expected enrollment row's
+  `FOR NO KEY UPDATE` lock** before it deletes or inserts anything. A run that
+  was settled when the Application read it — but had a settlement undone (an
+  `Undo` reopening it) before the replacement acquired that lock — is therefore
+  refused there with **zero writes**, and the final delete/replace never relies
+  on the Application pre-read. A refused replacement returns the existing
+  `PROGRAM_NOT_COMPLETE`; no new error code, no persisted flag and no retry
+  exist. See [Restart vs Undo ordering](#restart-vs-undo-ordering).
 
 Worked example — 30 authored occurrences, all by the user's own actions:
 
@@ -211,6 +224,27 @@ application use case never calls `WorkoutSessionRepository.create` itself.
 Nothing outside `workout-session-writes.ts` inserts a session row, and the
 production `WorkoutSessionRepository.save` is update-only.
 
+### Restart vs Undo ordering
+
+M14's restart replacement is one of the writers on that same enrollment row, and
+since the final-review correction it too re-reads the run's facts under the lock
+and re-evaluates restartability there before any delete or insert. Two orderings
+are therefore both correct, and both are proven on real PostgreSQL:
+
+- **Undo acquires the enrolment lock first.** Restart's pre-read saw a settled,
+  restartable run; Undo deletes the concluding fact and commits; restart's
+  replacement then owns the row, re-reads the facts, sees the run **open** and
+  refuses `PROGRAM_NOT_COMPLETE` — **zero writes**, the old enrollment untouched,
+  no fresh run created.
+- **The replacement acquires the lock first.** It re-reads the settled facts,
+  deletes the old run and inserts the fresh one in one commit; the Undo queued
+  behind it then finds the old run gone and returns `run-vanished`, so it can
+  never mutate the fresh run (whose settlement set is empty by construction).
+
+A stale restart is therefore never applied from its pre-read, and an Undo never
+outlives the run it addressed. Neither ordering needs a retry, a second read
+outside the transaction, or a stronger isolation level.
+
 ### The guarded delete pins the session version (Slice 12)
 
 The record transaction performs, under the lock: diagnostic reads → Domain
@@ -295,7 +329,11 @@ Full detail lives in `docs/follow-through.md`; the M17 deltas are:
   a completed occurrence with no row stays history-only and is never
   injected. `notPerformedUnplaced` is the **row-set difference** between
   recorded facts and **all** current planned rows — horizon-independent, and
-  not a report of unperformed work.
+  not a report of unperformed work. With **zero** current planned rows (an
+  unconfigured run) the read still issues the fact read and reports
+  `notPerformedUnplaced` = the run's recorded-fact count, while the run stays
+  `configured: false` — no week, no total and no invented date is produced for
+  a fact alone.
 - The M16 spine remains the current planned rows; M16 never appends an
   occurrence solely for the fact, holds the 8-week horizon constant, and adds
   no adherence percentage or second report.
@@ -340,6 +378,8 @@ M17 never touched the M14 completion surface:
 | Record/undo/start orchestration with caller-supplied `now` | Application | `record-not-performed`, `undo-not-performed`, `start-workout-session` use cases |
 | Closure read + restart gate orchestration | Application | `get-run-closure-summary`, `restart-program` use cases |
 | Enrollment-locked transaction: diagnostic reads, decision invocation, guarded delete, fact insert, session insert | Infrastructure | `src/infrastructure/database/repositories/drizzle-run-occurrence-writes.ts` |
+| Enrollment-locked replacement: own the expected row, read the current settlement facts, re-evaluate the caller's restartability decision, then compare-and-replace | Infrastructure | `drizzle-program-enrollment-repository.ts` (`replaceExpectedWithNew`) |
+| Up-next/open affordance selection (closure `openInProgramOrder` first open; M14 `nextWorkout` only as the degraded fallback) | Presentation | `src/features/enrollment/next-occurrence.ts`, `ProgramDetail.tsx`, program-detail page |
 | Read-only fact projection | Infrastructure | `drizzle-not-performed-occurrence-repository.ts` |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
@@ -396,7 +436,8 @@ There is no toast system.
 | Calendar slot `completed` | `ScheduleWeekView` | no settlement control | "Completed" | — |
 | Unplaced recorded list | `ProgramScheduleSection` | per-row undo form, no date | heading "Recorded as not performed"; body "These workouts are recorded as not performed and have no calendar date right now." | yes |
 | Workout detail CTA band | `WorkoutStartPanel` (`ctaState: 'not-performed'`) | undo form; Start suppressed | "Recorded as not performed"; "It goes back to not started." | yes |
-| Scheduled workout card | `ProgramDetailSection` | status text only | "Recorded as not performed" | via detail |
+| Scheduled workout card | `ProgramDetailSection` | status text only | "Recorded as not performed" (both planned and rowless recorded occurrences) | via detail |
+| Up-next / open affordance | `EnrolledProgramPanel`, authored week cards | closure `openInProgramOrder[0]` when the closure DTO is present; M14 `nextWorkout` fallback only when it is null | the first OPEN authored occurrence — a recorded occurrence is never "Up next" and offers no Start | — |
 | Follow-through week row | `PlanFollowThroughSection` | none (read-only report) | "n not performed" fragment; totals line includes "n not performed"; unplaced pointer "recorded as not performed without a calendar date — see Training schedule" | via calendar |
 | Concluded run panel | `EnrolledProgramPanel` (`ConcludedRunCallout`) | restart button iff `restartAvailable`; never links `/completed` | "Run closed — {completed} completed, {notPerformed} recorded as not performed" (both counts always rendered) | — |
 | Restart refusal | Restart form | — | `PROGRAM_NOT_COMPLETE` → "This run hasn't finished yet." | — |
@@ -419,6 +460,7 @@ The evidence lives in the suites themselves; this is the map.
 | Architecture | `tests/unit/architecture/run-closure.test.ts`, `session-creation-authority.test.ts`, `schedule-not-performed.test.ts`, `settlement-presentation.test.ts`, `follow-through.test.ts` + the Slice 13 final-guard suite | port shapes, mutation authority, verdicts unpersisted, no bulk/confirm, no run archive |
 | Integration | `not-performed-occurrence-repository.test.ts`, `not-performed-settlement.test.ts`, `session-creation-serialized.test.ts`, `not-performed-schedule.test.ts`, `follow-through-round-trip.test.ts` | port contracts, cross-table serialization, round-trip projections |
 | Integration | `not-performed-concurrency.test.ts` (race matrix + statement/lock discipline + version-pin proven by test 9c), `not-performed-lifecycle.test.ts`, `not-performed-historical-truth.test.ts` | EPQ race matrix, no-retry/lock-first discipline, leave/restart cascade truth |
+| Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

@@ -16,7 +16,10 @@
  * `configured` is a discriminated union rather than a flag beside always-present
  * counts: a run with no planned rows has nothing to reconcile, so its variant
  * carries no week list and no totals at all. That makes "unconfigured, but here
- * are some zero counts" unrepresentable instead of merely forbidden.
+ * are some zero counts" unrepresentable instead of merely forbidden. The one
+ * number that variant DOES carry is `notPerformedUnplaced` — the run's recorded
+ * facts with no current planned row — because that count is execution truth
+ * independent of the calendar, not a zero synthesized from a missing one.
  */
 
 import type { FollowThroughSummary, FollowThroughWeek } from '@/domain/services/follow-through-week';
@@ -63,6 +66,14 @@ export interface UnconfiguredFollowThroughDto {
   /** The UTC calendar date this report was read for (the request clock's day). */
   readonly today: string;
   readonly configured: false;
+  /**
+   * Recorded occurrences of this run with no current planned row. With zero
+   * planned rows EVERY recorded fact is unplaced, and the count is still
+   * factual execution truth: the run stays unconfigured (no weeks, no totals,
+   * no fabricated dates) while the rowless settlements remain visible and
+   * undoable. Labelled detail for them lives in the M15 calendar read.
+   */
+  readonly notPerformedUnplaced: number;
 }
 
 /**
@@ -98,8 +109,9 @@ export type EnrollmentFollowThroughDto = UnconfiguredFollowThroughDto | Configur
 export function toUnconfiguredFollowThroughDto(
   programSlug: string,
   today: PlannedDate,
+  notPerformedUnplaced: number,
 ): UnconfiguredFollowThroughDto {
-  return { programSlug, today, configured: false };
+  return { programSlug, today, configured: false, notPerformedUnplaced };
 }
 
 /**

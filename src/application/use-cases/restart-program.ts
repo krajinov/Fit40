@@ -20,7 +20,11 @@
  * concluded, so a run whose every authored occurrence is settled (completed or
  * explicitly recorded as not performed) may start over even though it is NOT
  * complete, while an open run never can (a zero-schedule program is neither, so
- * it stays not restartable). Preview state, dashboard state, persisted status,
+ * it stays not restartable). The same rule is handed INTO the replacement write
+ * and re-evaluated there over the CURRENT facts under the enrollment lock, so a
+ * run that was settled at the pre-read but had a settlement undone before the
+ * replacement acquired authority is refused — the final delete/replace never
+ * relies on this pre-read. Preview state, dashboard state, persisted status,
  * the completion-summary DTO and client input are never consulted, and no
  * `complete || concluded` expression is ever written here — the verdict belongs
  * to the Domain.
@@ -37,7 +41,9 @@ import type { IdGenerator } from '@/application/ports/id-generator';
 import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import {
   EnrollmentAlreadyExistsError,
+  type LockedRunSettlementFacts,
   type ProgramEnrollmentRepository,
+  type ReplaceEnrollmentOutcome,
 } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
@@ -117,12 +123,18 @@ export class RestartProgramUseCase {
     }
 
     // The ONE write. The expected id is the enrollment this use case loaded,
-    // so a stale request can never replace or delete a newer enrollment.
-    let replaced: boolean;
+    // so a stale request can never replace or delete a newer enrollment. The
+    // restartability decision is passed INTO the replacement so it is
+    // re-evaluated under that write's own enrollment-lock authority: a run that
+    // was settled at the pre-read above but had a settlement undone (an Undo
+    // reopening it) before the replacement acquired the lock is refused there,
+    // with zero writes — never replaced from the stale pre-read.
+    let outcome: ReplaceEnrollmentOutcome;
     try {
-      replaced = await this.enrollmentRepository.replaceExpectedWithNew(
+      outcome = await this.enrollmentRepository.replaceExpectedWithNew(
         enrollment.id,
         freshResult.data,
+        (facts) => this.isRestartable(program, facts),
       );
     } catch (error) {
       if (error instanceof EnrollmentAlreadyExistsError) {
@@ -133,7 +145,15 @@ export class RestartProgramUseCase {
       throw error;
     }
 
-    if (replaced) {
+    if (outcome.kind === 'not-restartable') {
+      // The run stopped being restartable between the pre-read and the
+      // replacement's authority acquiring (e.g. Undo reopened it): nothing was
+      // written and the old enrollment remains. Same typed outcome an open run
+      // gets at the gate — the error vocabulary is unchanged.
+      return err(programNotComplete(program.slug));
+    }
+
+    if (outcome.kind === 'replaced') {
       return ok(undefined);
     }
 
@@ -143,15 +163,33 @@ export class RestartProgramUseCase {
   }
 
   /**
-   * The Domain's restartability rule over the enrollment's own execution
-   * truth: completed occurrence ids (M14) and recorded not-performed facts
-   * (M17), read together because neither decides whether the other happens —
-   * two bounded, enrollment-scoped projections, never session aggregates.
+   * The Domain's restartability rule over one set of run-scoped settlement
+   * facts: completed occurrence ids (M14) and recorded not-performed facts
+   * (M17), read together because neither decides whether the other happens.
    *
    * The verdict itself is `isRunRestartable` composing `isProgramComplete` and
    * `isRunConcluded`; this method never writes a `complete || concluded`
    * expression of its own, so Application cannot grow a second restartability
-   * policy beside the Domain's.
+   * policy beside the Domain's. It is the SAME composition the pre-read uses
+   * and the SAME one handed to the replacement transaction — one rule, one
+   * widened meaning.
+   */
+  private isRestartable(program: TrainingProgram, facts: LockedRunSettlementFacts): boolean {
+    return isRunRestartable({
+      programComplete: isProgramComplete(program, facts.completedIds),
+      runConcluded: isRunConcluded(program, {
+        completedIds: facts.completedIds,
+        notPerformedIds: facts.notPerformedIds,
+      }),
+    });
+  }
+
+  /**
+   * The pre-write restartability read: two bounded, enrollment-scoped
+   * projections (never session aggregates), evaluated through the shared
+   * `isRestartable` composition. This is the normal-path gate that produces the
+   * typed PROGRAM_NOT_COMPLETE error; the authoritative re-check happens under
+   * the replacement transaction's own lock.
    */
   private async isEnrollmentRestartable(
     program: TrainingProgram,
@@ -162,12 +200,9 @@ export class RestartProgramUseCase {
       this.notPerformedRepository.listByEnrollment(enrollmentId),
     ]);
 
-    return isRunRestartable({
-      programComplete: isProgramComplete(program, completedIds),
-      runConcluded: isRunConcluded(program, {
-        completedIds,
-        notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
-      }),
+    return this.isRestartable(program, {
+      completedIds,
+      notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
     });
   }
 

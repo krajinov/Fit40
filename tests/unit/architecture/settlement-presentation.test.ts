@@ -260,5 +260,43 @@ describe('M17 Slice 11 — locked vocabulary', () => {
   });
 });
 
+describe('M17 final review — recorded identity and open/up-next truth', () => {
+  const PROGRAM_DETAIL = 'src/features/programs/components/ProgramDetail.tsx';
+  const PAGE = 'src/app/(app)/programs/[programSlug]/page.tsx';
+  const NEXT_OCCURRENCE = 'src/features/enrollment/next-occurrence.ts';
+
+  it('builds the recorded authored identity from BOTH planned N items and rowless unplaced N facts', () => {
+    const code = codeOf(PROGRAM_DETAIL);
+
+    // Planned not-performed rows and rowless recorded occurrences both feed the
+    // SAME recorded key set — a rowless record is never left looking startable.
+    expect(code).toContain("item.status === 'not-performed'");
+    expect(code).toContain('schedule.schedule.unplacedNotPerformedWorkouts');
+    expect(code).toContain('recordedKeys.add(');
+    // The recorded fact is read from those DTOs, never inferred from a missing
+    // session or a fabricated date.
+    expect(code).not.toContain('plannedDate');
+  });
+
+  it('selects the up-next occurrence from the closure open identity, not completion-only nextWorkout', () => {
+    const detail = codeOf(PROGRAM_DETAIL);
+    const page = codeOf(PAGE);
+    const helper = codeOf(NEXT_OCCURRENCE);
+
+    // Both the view and the page route the next occurrence through the shared
+    // helper…
+    expect(detail).toContain('resolveRunNextOccurrence(');
+    expect(page).toContain('resolveRunNextOccurrence(');
+    // …which reads the Application's authored-run truth, never recomputing it.
+    expect(helper).toContain('openInProgramOrder[0]');
+    expect(helper).toContain('isProgramComplete');
+    expect(helper).toContain('isConcluded');
+    // React never recomputes openness itself.
+    expect(detail).not.toContain('openInProgramOrder');
+    expect(detail).not.toContain('isProgramComplete');
+    expect(detail).not.toContain('isConcluded');
+  });
+});
+
 
 

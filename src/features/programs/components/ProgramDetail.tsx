@@ -4,6 +4,10 @@ import type { ProgramDetailDto } from '@/application/dto/program';
 import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
+import {
+  resolveRunNextOccurrence,
+  type NextOccurrenceCoordinates,
+} from '@/features/enrollment/next-occurrence';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
@@ -53,27 +57,32 @@ interface ProgramDetailProps {
 }
 
 /**
- * Derives a week's status from the enrollment: weeks before the next
- * incomplete workout are completed, its own week is in progress, later ones
- * upcoming. A null next workout (everything complete) marks all weeks
- * completed. Anonymous or not-enrolled visitors see every week upcoming.
+ * Derives a week's status from the run's AUTHORITATIVE next occurrence (M17
+ * `resolveRunNextOccurrence`): weeks before it are completed, its own week is in
+ * progress, later ones upcoming. A null next occurrence (settled run) marks all
+ * weeks completed. Anonymous or not-enrolled visitors see every week upcoming.
+ *
+ * The next occurrence is the closure-resolved FIRST OPEN authored occurrence
+ * when the closure read supplied it, so a week holding only a recorded
+ * occurrence is never painted "in progress" (M17 Slice 11 correction).
  */
 function weekStatus(
   weekNumber: number,
-  enrollment: ProgramEnrollmentViewDto | null,
+  enrolled: boolean,
+  nextOccurrence: NextOccurrenceCoordinates | null,
 ): ProgramWeekStatus {
-  if (enrollment === null || enrollment.status !== 'enrolled') {
+  if (!enrolled) {
     return 'upcoming';
   }
 
-  const next = enrollment.nextWorkout;
-  if (next === null) {
+  if (nextOccurrence === null) {
     return 'completed';
   }
-  if (weekNumber < next.weekNumber) {
+
+  if (weekNumber < nextOccurrence.weekNumber) {
     return 'completed';
   }
-  if (weekNumber === next.weekNumber) {
+  if (weekNumber === nextOccurrence.weekNumber) {
     return 'in-progress';
   }
   return 'upcoming';
@@ -93,14 +102,27 @@ export function ProgramDetail({
   followThrough,
   runClosure,
 }: ProgramDetailProps) {
-  const completedIds =
-    enrollment !== null && enrollment.status === 'enrolled'
-      ? new Set<string>(enrollment.completedScheduledWorkoutIds)
-      : new Set<string>();
-  // Occurrences the M15 read already resolved as `not-performed`, addressed by
-  // the same route key the up-next preview uses. Facts are only ever read from
-  // that DTO: when the schedule read failed or the visitor is anonymous the set
-  // stays empty and nothing is inferred from a missing session (M17 Slice 11).
+  const enrolled = enrollment !== null && enrollment.status === 'enrolled';
+  const completedIds = enrolled
+    ? new Set<string>(enrollment.completedScheduledWorkoutIds)
+    : new Set<string>();
+
+  // The run's AUTHORITATIVE next occurrence (M17 Slice 11 correction): the
+  // closure-resolved FIRST OPEN authored occurrence when the closure read
+  // supplied it, else the M14 next workout. Selecting it here is composition,
+  // never a recomputation of openness — `openInProgramOrder` is Domain truth.
+  const nextOccurrence = enrolled
+    ? resolveRunNextOccurrence(enrollment.nextWorkout, runClosure)
+    : null;
+
+  // Occurrences the run has already settled as recorded-not-performed,
+  // addressed by the same route key the up-next preview uses. Built from BOTH
+  // sources of authored settlement truth: the M15 read's `not-performed` items
+  // (recorded occurrences that currently hold a planned row) AND the rowless
+  // `unplacedNotPerformedWorkouts` (recorded occurrences whose planned row is
+  // gone). Inferring from a missing session is never done — the fact is only
+  // ever read from those DTOs, so a degraded/absent read leaves the set empty
+  // (M17 Slice 11).
   const recordedKeys = new Set<string>();
   if (schedule !== null && schedule.status === 'loaded') {
     for (const item of schedule.schedule.items) {
@@ -108,13 +130,15 @@ export function ProgramDetail({
         recordedKeys.add(`${item.weekNumber}-${item.workoutOrder}`);
       }
     }
+    for (const unplaced of schedule.schedule.unplacedNotPerformedWorkouts) {
+      recordedKeys.add(`${unplaced.weekNumber}-${unplaced.workoutOrder}`);
+    }
   }
+
   const upNextKey =
-    enrollment !== null &&
-    enrollment.status === 'enrolled' &&
-    enrollment.nextWorkout !== null
-      ? `${enrollment.nextWorkout.weekNumber}-${enrollment.nextWorkout.workoutOrder}`
-      : null;
+    nextOccurrence === null
+      ? null
+      : `${nextOccurrence.weekNumber}-${nextOccurrence.workoutOrder}`;
 
   const availableWorkout =
     nextWorkoutPreview !== null && nextWorkoutPreview.status === 'available'
@@ -197,7 +221,7 @@ export function ProgramDetail({
             key={week.weekNumber}
             programSlug={program.slug}
             week={week}
-            status={weekStatus(week.weekNumber, enrollment)}
+            status={weekStatus(week.weekNumber, enrolled, nextOccurrence)}
             completedIds={completedIds}
             recordedKeys={recordedKeys}
             upNextKey={upNextKey}

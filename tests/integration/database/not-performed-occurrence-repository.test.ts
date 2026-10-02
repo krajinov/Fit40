@@ -176,9 +176,12 @@ describe('DrizzleNotPerformedOccurrenceRepository — reads on PostgreSQL', () =
     const replaced = await programEnrollmentRepository.replaceExpectedWithNew(
       RUN,
       replacement(OWNER, run.program.id, REPLACEMENT_RUN),
+      // Lifecycle-cascade suite: the restartability gate is exercised by the
+      // restart/race suites, so this call always passes it.
+      () => true,
     );
 
-    expect(replaced).toBe(true);
+    expect(replaced.kind).toBe('replaced');
     expect(await countFacts(RUN)).toBe(0);
     expect(await notPerformedOccurrenceRepository.listByEnrollment(RUN)).toEqual([]);
     expect(await notPerformedOccurrenceRepository.listByEnrollment(REPLACEMENT_RUN)).toEqual([]);

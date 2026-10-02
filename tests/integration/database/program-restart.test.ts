@@ -15,6 +15,7 @@ import postgres from 'postgres';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { ScheduledWorkout, TrainingProgram } from '@/domain/entities/training-program';
 import {
@@ -56,6 +57,14 @@ import {
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
 import { countFacts, insertFact } from './not-performed-fixtures';
+import {
+  createGate,
+  createRaceHarness,
+  holdEnrollmentLock,
+  PENDING,
+  replaceEnrollmentRaw,
+  settleWithin,
+} from './not-performed-race-fixtures';
 import { insertSession } from './session-fixtures';
 
 const RUNNER = 'restart-runner';
@@ -604,6 +613,141 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
       ),
     ).toHaveLength(11);
     expect(await countFacts(mixed.enrollmentId)).toBe(0);
+  });
+
+  it('H. refuses a restart reopened by a concurrent Undo before the replacement takes authority', async () => {
+    await resetAndSeed();
+    // 11 completed + 1 recorded = all 12 authored: CONCLUDED but incomplete, so
+    // restartable at the pre-read. The single record is the fact Undo removes.
+    const mixed = await seedMixedRun({ completed: 11, recorded: 1 });
+    const recordedOccurrence = requireOccurrence(listOccurrences(mixed.program), 11);
+
+    const harness = createRaceHarness();
+    try {
+      // Deterministic gate: the restart's restartability pre-read CAPTURES the
+      // settled facts, then HOLDS until the Undo has committed — so the Undo is
+      // guaranteed to take authority after the pre-read and before the
+      // replacement's lock. No sleep is used.
+      const preReadCaptured = createGate();
+      const releasePreRead = createGate();
+      const gatedNotPerformed: NotPerformedOccurrenceRepository = {
+        async listByEnrollment(enrollmentId) {
+          const facts = await harness.notPerformed.listByEnrollment(enrollmentId);
+          preReadCaptured.open();
+          await releasePreRead.opened;
+          return facts;
+        },
+      };
+
+      const useCase = new RestartProgramUseCase(
+        harness.programs,
+        harness.enrollments,
+        harness.sessions,
+        gatedNotPerformed,
+        new NodeIdGenerator(),
+      );
+
+      const restart = useCase.execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+      // Step 1: the restart has read the settled (restartable) facts.
+      await preReadCaptured.opened;
+
+      // Step 2-3: Undo acquires the enrollment lock, deletes the final fact and
+      // commits — reopening the run BEFORE the replacement owns the lock.
+      const undo = await harness.writes.undoNotPerformed({
+        enrollmentId: enrollmentIdValue(mixed.enrollmentId),
+        scheduledWorkoutId: scheduledWorkoutId(recordedOccurrence.id),
+      });
+      expect(undo.kind).toBe('undo');
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+
+      // Step 4-6: the restart continues into its replacement, which acquires the
+      // same enrollment and observes the run is now OPEN.
+      releasePreRead.open();
+      const result = await restart;
+
+      // Step 7: refused with the existing typed outcome.
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+
+      // Step 8-10: no write happened — the OLD enrollment remains, no fresh one
+      // exists, and the completed sessions / facts are otherwise correct.
+      const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(mixed.enrollmentId);
+      expect(rows[0]?.enrolledAt.toISOString()).toBe('2026-01-20T00:00:00.000Z');
+      expect(
+        await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+          enrollmentIdValue(mixed.enrollmentId),
+        ),
+      ).toHaveLength(11);
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+    } finally {
+      await harness.end();
+    }
+  });
+
+  it('I. lets the replacement win: a queued Undo cannot mutate the fresh run', async () => {
+    await resetAndSeed();
+    const mixed = await seedMixedRun({ completed: 11, recorded: 1 });
+    const recordedOccurrence = requireOccurrence(listOccurrences(mixed.program), 11);
+    const expected = enrollmentIdValue(mixed.enrollmentId);
+    const freshId = 'enr-race-fresh';
+
+    const harness = createRaceHarness();
+    try {
+      // The replacement OWNS the enrollment lock first: the holder takes it and
+      // runs the documented raw M14 replacement statement shape (delete the
+      // expected run, insert the fresh one) under it.
+      const holder = await holdEnrollmentLock({
+        db: harness.db,
+        enrollmentId: expected,
+        work: (tx) =>
+          replaceEnrollmentRaw(tx, {
+            expectedId: expected,
+            nextId: freshId,
+            owner: RUNNER,
+            programId: mixed.program.id,
+          }),
+      });
+
+      // The REAL Undo authority queues behind the held lock...
+      const undoPromise = harness.writes.undoNotPerformed({
+        enrollmentId: expected,
+        scheduledWorkoutId: scheduledWorkoutId(recordedOccurrence.id),
+      });
+      // ...and is provably blocked (not merely fast).
+      expect(await settleWithin(undoPromise, 150)).toBe(PENDING);
+
+      // Release: the replacement commits atomically, then the queued Undo runs.
+      await holder.release();
+      const undo = await undoPromise;
+
+      // The queued Undo finds the old run VANISHED and writes nothing — it can
+      // never mutate the fresh run, whose settlement set is empty by
+      // construction.
+      expect(undo.kind).toBe('run-vanished');
+
+      // Old gone, fresh present, facts cascaded away with the old run.
+      const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+      expect(rows.map((row) => row.id)).toEqual([freshId]);
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+      expect(await countFacts(freshId)).toBe(0);
+
+      // The completed sessions survive detached, exactly as M14 does.
+      const sessions = await sessionRowsFor(mixed.sessionIds);
+      expect(sessions.every((session) => session.enrollmentId === null)).toBe(true);
+
+      // The existing stale outcome remains correct: a restart request that still
+      // expected the vanished run observes the FRESH (open) run instead.
+      const stale = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+      expect(stale.ok).toBe(false);
+      if (stale.ok) return;
+      expect(stale.error.code).toBe('PROGRAM_NOT_COMPLETE');
+    } finally {
+      await harness.end();
+    }
   });
 });
 

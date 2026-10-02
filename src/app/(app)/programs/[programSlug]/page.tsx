@@ -25,6 +25,7 @@ import {
   nextWorkoutPreviewState,
   type NextWorkoutPreviewState,
 } from '@/features/sessions/next-workout-view';
+import { resolveRunNextOccurrence } from '@/features/enrollment/next-occurrence';
 
 interface ProgramDetailPageProps {
   readonly params: Promise<{ readonly programSlug: string }>;
@@ -218,16 +219,25 @@ export default async function ProgramDetailPage({
       // M14 completion surface stays the only lifecycle state shown today.
       runClosure = await readRunClosure(user.id, result.data.program);
 
+      // M17 (Slice 11): the up-next affordance follows the run's AUTHORITATIVE
+      // next occurrence — the closure-resolved FIRST OPEN authored occurrence
+      // when the closure read supplied it — never merely the first occurrence
+      // without a completed session, which can be a recorded-not-performed
+      // settlement that must not be offered a Start. The preview is resolved for
+      // that occurrence with the page's existing single resolve call (no new DB
+      // read); a null closure DTO degrades to the M14 next workout exactly as
+      // before.
+      const nextOccurrence = resolveRunNextOccurrence(enrollment.nextWorkout, runClosure);
       const workout =
-        enrollment.nextWorkout === null
+        nextOccurrence === null
           ? null
           : await buildNextWorkoutView({
               userId: user.id,
               programSlug: result.data.program.slug,
-              weekNumber: enrollment.nextWorkout.weekNumber,
-              workoutOrder: enrollment.nextWorkout.workoutOrder,
+              weekNumber: nextOccurrence.weekNumber,
+              workoutOrder: nextOccurrence.workoutOrder,
             });
-      nextWorkoutPreview = nextWorkoutPreviewState(enrollment.nextWorkout, workout);
+      nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, workout);
 
       // M15 (Slice 6) + M16 (Slice 5): one server-owned request clock,
       // captured here at the page boundary and shared by both section reads —

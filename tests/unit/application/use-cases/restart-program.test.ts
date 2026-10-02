@@ -422,7 +422,7 @@ describe('RestartProgramUseCase — the replacement', () => {
       .spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew')
       .mockImplementation(async () => {
         await harness.enrollmentRepo.delete(enid(OLD_ENROLLMENT));
-        return false;
+        return { kind: 'stale' };
       });
 
     const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
@@ -444,7 +444,7 @@ describe('RestartProgramUseCase — the replacement', () => {
       .spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew')
       .mockImplementation(async () => {
         await seedReplacementEnrollment(harness.enrollmentRepo, completed, 'enr-fresh');
-        return false;
+        return { kind: 'stale' };
       });
 
     const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
@@ -471,7 +471,7 @@ describe('RestartProgramUseCase — the replacement', () => {
           'enr-fresh-again',
           allScheduledIds(),
         );
-        return false;
+        return { kind: 'stale' };
       });
 
     const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
@@ -491,7 +491,7 @@ describe('RestartProgramUseCase — the replacement', () => {
     // real interleavings are covered by the PostgreSQL suite.
     const replaceSpy = vi
       .spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew')
-      .mockResolvedValue(false);
+      .mockResolvedValue({ kind: 'stale' });
     const createSpy = vi.spyOn(harness.enrollmentRepo, 'create');
     const deleteSpy = vi.spyOn(harness.enrollmentRepo, 'delete');
 
@@ -591,6 +591,57 @@ describe('RestartProgramUseCase — M17 Slice 10 restartability', () => {
     expect(harness.sessionRepo.listCompletedOccurrenceActivity).not.toHaveBeenCalled();
   });
 
+  it('hands the replacement a decision that re-evaluates the Domain rule over the locked facts', async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      notPerformedFacts: [notPerformedFact(OLD_ENROLLMENT, SCHED_B)],
+    });
+    const replaceSpy = vi.spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew');
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+    expect(result.ok).toBe(true);
+
+    // The third argument is a DECISION, not a constant: the same Domain rule
+    // must answer for the facts it is handed under the write's authority.
+    const decision = replaceSpy.mock.calls[0]?.[2];
+    expect(typeof decision).toBe('function');
+    // Settled facts (A completed, B recorded) → restartable.
+    expect(
+      decision?.({ completedIds: [scheduledId(SCHED_A)], notPerformedIds: [scheduledId(SCHED_B)] }),
+    ).toBe(true);
+    // The SAME facts minus the record leave B open → not restartable. This is
+    // exactly the state Undo produces before the replacement acquires authority.
+    expect(decision?.({ completedIds: [scheduledId(SCHED_A)], notPerformedIds: [] })).toBe(false);
+  });
+
+  it('maps a replacement refused under its own authority (run reopened) to PROGRAM_NOT_COMPLETE, zero writes', async () => {
+    const harness = await makeHarness({
+      completedByEnrollment: { [OLD_ENROLLMENT]: [scheduledId(SCHED_A)] },
+      notPerformedFacts: [notPerformedFact(OLD_ENROLLMENT, SCHED_B)],
+    });
+    // The pre-read saw a settled run, but by the time the replacement took
+    // authority an Undo had reopened it, so the primitive refuses with ZERO
+    // writes. The real interleaving is proven by the PostgreSQL race suite.
+    const replaceSpy = vi
+      .spyOn(harness.enrollmentRepo, 'replaceExpectedWithNew')
+      .mockResolvedValue({ kind: 'not-restartable' });
+    const createSpy = vi.spyOn(harness.enrollmentRepo, 'create');
+    const deleteSpy = vi.spyOn(harness.enrollmentRepo, 'delete');
+
+    const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
+    // No second write and no stale re-check side effects: the refusal is final.
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    // The old enrollment is still the current one.
+    const owned = await harness.enrollmentRepo.findByUserAndProgram(uid('user-a'), pid(PROGRAM_ID));
+    expect(owned?.id).toBe(OLD_ENROLLMENT);
+  });
+
   it('refuses an open run with PROGRAM_NOT_COMPLETE and writes nothing', async () => {
     const harness = await makeHarness({
       // SCHED_B is open: one completed plus one open is neither complete nor
@@ -654,7 +705,7 @@ describe('RestartProgramUseCase — M17 Slice 10 restartability', () => {
           'enr-fresh-again',
           [scheduledId(SCHED_A)],
         );
-        return false;
+        return { kind: 'stale' };
       });
 
     const result = await harness.useCase.execute({ userId: 'user-a', programSlug: PROGRAM_SLUG });

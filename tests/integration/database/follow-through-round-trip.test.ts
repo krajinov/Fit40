@@ -20,7 +20,10 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { ConfiguredFollowThroughDto } from '@/application/dto/follow-through';
+import type {
+  ConfiguredFollowThroughDto,
+  UnconfiguredFollowThroughDto,
+} from '@/application/dto/follow-through';
 import {
   FOLLOW_THROUGH_WEEK_COUNT,
   GetEnrollmentFollowThroughUseCase,
@@ -217,6 +220,20 @@ async function readReport(
   if (!result.ok) throw new Error(result.error.message);
   if (result.data === null || !result.data.configured) {
     throw new Error('expected a configured follow-through report');
+  }
+  return result.data;
+}
+
+/** Runs the real read and asserts the no-calendar (unconfigured) report came back. */
+async function readUnconfiguredReport(
+  owner: string,
+  program: TrainingProgram,
+): Promise<UnconfiguredFollowThroughDto> {
+  const result = await makeUseCase().execute({ userId: owner, program, now: NOW });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.message);
+  if (result.data === null || result.data.configured) {
+    throw new Error('expected an unconfigured follow-through report');
   }
   return result.data;
 }
@@ -691,6 +708,62 @@ describe('M17 Slice 9 — recorded facts in the M16 report over real PostgreSQL'
     const otherDto = await readReport(OTHER_OWNER, other.program);
     expect(otherDto.totals.planned).toBe(1);
     expect(otherDto.totals.notPerformed).toBe(0);
+    expect(otherDto.notPerformedUnplaced).toBe(1);
+  });
+
+  it('counts every rowless recorded fact for a run with no planned rows, still no calendar', async () => {
+    const run = await seedRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN });
+    const other = await seedRun({
+      owner: OTHER_OWNER,
+      programSlug: OTHER_PROGRAM_SLUG,
+      enrollmentId: OTHER_RUN,
+    });
+
+    const [first, second, third] = run.occurrenceIds;
+    const otherFirst = other.occurrenceIds[0];
+    if (
+      first === undefined ||
+      second === undefined ||
+      third === undefined ||
+      otherFirst === undefined
+    ) {
+      throw new Error('expected the seeded programs to author several occurrences');
+    }
+
+    // RUN holds NO planned rows at all, so every recorded fact is unplaced.
+    await insertFact({
+      enrollmentId: RUN,
+      scheduledWorkoutId: first,
+      recordedAt: '2026-09-16T18:00:00.000Z',
+    });
+    await insertFact({
+      enrollmentId: RUN,
+      scheduledWorkoutId: second,
+      recordedAt: '2026-09-20T18:00:00.000Z',
+    });
+    await insertFact({
+      enrollmentId: RUN,
+      scheduledWorkoutId: third,
+      recordedAt: '2026-09-24T18:00:00.000Z',
+    });
+    // Another run's rowless fact must never be counted for RUN.
+    await insertFact({
+      enrollmentId: OTHER_RUN,
+      scheduledWorkoutId: otherFirst,
+      recordedAt: '2026-09-24T18:00:00.000Z',
+    });
+
+    const dto = await readUnconfiguredReport(OWNER, run.program);
+
+    // Still no calendar: no week, no total and no fabricated date — but the
+    // factual unplaced count is exposed.
+    expect(dto.configured).toBe(false);
+    expect(dto.notPerformedUnplaced).toBe(3);
+    expect('weeks' in dto).toBe(false);
+    expect('totals' in dto).toBe(false);
+
+    // Run-scoped: the other run's rowless fact belongs only to its own owner.
+    const otherDto = await readUnconfiguredReport(OTHER_OWNER, other.program);
     expect(otherDto.notPerformedUnplaced).toBe(1);
   });
 });

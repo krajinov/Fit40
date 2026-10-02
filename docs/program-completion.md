@@ -223,8 +223,11 @@ No other performance numbers are claimed by M14.
   secondary "Choose another program" → `/programs`.
 - **EnrolledProgramPanel** — complete enrollment only: "View completion
   summary" → the route, plus the shared restart button; Leave preserved.
-  Incomplete enrollments keep their existing up-next/progress behavior and
-  never see completion controls.
+  Incomplete enrollments keep their progress behavior and never see completion
+  controls. (Since M17 the incomplete run's **up-next** affordance follows the
+  run closure's first OPEN authored occurrence, not merely the first
+  non-completed one — a recorded occurrence is settled and is never shown as up
+  next. See [Run Closure & Not-Performed Settlement](run-closure.md).)
 - **Session Completed** — the `programCompletion` callout ("Program complete"
   → summary) renders only when the server-resolved enrollment view says
   complete. The program/enrollment resolution runs **only** for

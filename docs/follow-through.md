@@ -180,7 +180,10 @@ projection of one occurrence follows exactly three rows:
   whether it ever had one. It is **horizon-independent** — the 8-week window
   never affects it — and it counts unplaced *records*, not unperformed work.
   An occurrence with neither a row nor a fact contributes nothing to the
-  report.
+  report. With **no planned rows at all** every recorded occurrence is
+  unplaced, so the read still issues the fact read and the unconfigured variant
+  reports that count — the no-calendar state exposes the fact, never a
+  fabricated week or a synthesized zero.
 - The M16 spine remains the current planned rows: an occurrence is never
   appended to a week solely because it holds a fact, and the horizon constant
   stays `FOLLOW_THROUGH_WEEK_COUNT = 8`.
@@ -284,7 +287,10 @@ Framing and copy (locked):
   line (M15's two UTC lines are unchanged and still the only ones);
 - `configured: false` (a run with no planned rows) renders **no M16 section at
   all** — no empty card, no zero weeks, no setup CTA. **M15 owns schedule
-  configuration**;
+  configuration**. The DTO still carries the factual `notPerformedUnplaced`
+  count (every recorded occurrence is unplaced with no rows), so a rowless
+  record is never hidden — but the section does not render it, and no calendar
+  is invented for it;
 - `ok(null)` (not enrolled), a completed run, and a failed read likewise render
   nothing; a failed read is logged and degrades this section only, never into
   `configured: false` or fabricated weeks.

@@ -19,9 +19,12 @@
  * Three authoritative outcomes:
  * - `ok(null)` — the user is not enrolled in this program: there is no run,
  *   hence no report, and no downstream read is issued.
- * - `configured: false` — a run exists but has no planned rows yet: there is
- *   nothing to reconcile, so the fact reads are not issued (they could not
- *   change the result) and no zero week is fabricated.
+ * - `configured: false` — a run exists but has no planned rows yet: there is no
+ *   calendar to reconcile, so no week and no total is fabricated. The run's
+ *   recorded not-performed facts ARE read, because with zero planned rows every
+ *   one of them is unplaced and their count is execution truth independent of
+ *   the calendar; the session projections are not issued (they could not change
+ *   the result).
  * - `configured: true` — one fact per CURRENT planned row, summarized by the
  *   Slice 1 Domain rules. This use case never re-decides an outcome or a count.
  *
@@ -119,7 +122,21 @@ export class GetEnrollmentFollowThroughUseCase {
     const plannedRows = await this.plannedWorkoutRepository.listByEnrollment(enrollment.id);
     const today = plannedDateFromInstant(input.now);
     if (plannedRows.length === 0) {
-      return ok(toUnconfiguredFollowThroughDto(input.program.slug, today));
+      // No current calendar: no week and no total is fabricated, and no planned
+      // row is invented. But the run's recorded not-performed facts are still
+      // execution truth — with zero planned rows EVERY one of them is unplaced,
+      // so the factual count is reported. Only the fact read is issued: the
+      // session projections could change no count here. This stays the
+      // unconfigured variant (no weeks, no totals, no dates) — a fact does not
+      // configure the calendar.
+      const notPerformedFacts = await this.notPerformedRepository.listByEnrollment(enrollment.id);
+      return ok(
+        toUnconfiguredFollowThroughDto(
+          input.program.slug,
+          today,
+          countUnplacedFacts(notPerformedFacts, plannedRows),
+        ),
+      );
     }
 
     // Three independent, enrollment-scoped projections read in one batch: none

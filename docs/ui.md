@@ -787,6 +787,19 @@ M13 integration suites in
   button renders iff `restartAvailable`, and the callout never links to
   `/completed` — completion semantics stay unreachable for concluded-but-
   incomplete runs.
+- **Authored card identity (corrected):** a recorded occurrence is shown as
+  **"Recorded as not performed"** with **Undo** (never a Start, never "Up
+  next") on its authored week card whether it currently holds a planned row OR
+  is **rowless** — the recorded identity is built from both the M15
+  `not-performed` items and the rowless `unplacedNotPerformedWorkouts`
+  projection, so a rowless record needs no fabricated planned date to suppress
+  Start.
+- **Up-next authority:** the panel/up-next affordance follows the run's
+  **first OPEN authored occurrence** from the closure DTO's `openInProgramOrder`
+  when the closure read is available — an occurrence recorded as not performed
+  is settled, so it is never displayed as "Up next" or offered a Start. The M14
+  `nextWorkout` is used only as the fallback when the closure read is
+  unavailable (graceful degradation), and React never recomputes openness.
 - **Restart refusal copy:** the typed `PROGRAM_NOT_COMPLETE` error renders as
   **"This run hasn't finished yet."** — restartability (complete OR
   concluded), never phrased as completion.

@@ -127,6 +127,22 @@ const PROGRAM_DETAIL = {
           order: 1,
           estimatedDurationMinutes: 30,
         },
+        {
+          scheduledWorkoutId: 'sw-2',
+          workoutId: 'wo-2',
+          workoutName: 'Lower Body B',
+          workoutSlug: 'lower-body-b',
+          order: 2,
+          estimatedDurationMinutes: 45,
+        },
+        {
+          scheduledWorkoutId: 'sw-3',
+          workoutId: 'wo-3',
+          workoutName: 'Conditioning C',
+          workoutSlug: 'conditioning-c',
+          order: 3,
+          estimatedDurationMinutes: 25,
+        },
       ],
     },
   ],
@@ -200,7 +216,12 @@ async function renderPage(): Promise<string> {
 /** The M16 follow-through DTO: one open week with one past-due occurrence. */
 function followThroughDto(configured = true) {
   if (!configured) {
-    return { programSlug: SLUG, today: '2026-09-23', configured: false as const };
+    return {
+      programSlug: SLUG,
+      today: '2026-09-23',
+      configured: false as const,
+      notPerformedUnplaced: 0,
+    };
   }
 
   return {
@@ -233,7 +254,10 @@ function followThroughDto(configured = true) {
 
 /**
  * The M17 Slice 10 run-closure DTO: six authored occurrences, four completed,
- * one recorded, one still open — concluded false, so the page merely carries it.
+ * one recorded, one still open — concluded false, so the page resolves the
+ * up-next affordance from its first open occurrence (Slice 11). The open
+ * occurrence coincides with the M14 next workout by default; the divergence case
+ * is exercised with an override.
  */
 function runClosureDto(overrides: Record<string, unknown> = {}) {
   return {
@@ -244,7 +268,7 @@ function runClosureDto(overrides: Record<string, unknown> = {}) {
     openWorkouts: 1,
     hasOpenWorkout: true,
     openInProgramOrder: [
-      { scheduledWorkoutId: 'sw-6', weekNumber: 2, workoutOrder: 3, workoutName: 'Cardio' },
+      { scheduledWorkoutId: 'sw-2', weekNumber: 1, workoutOrder: 2, workoutName: 'Cardio' },
     ],
     isConcluded: false,
     isProgramComplete: false,
@@ -367,13 +391,14 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('Program completed — every workout is done.');
   });
 
-  it('exposes the closure summary to the detail view without rendering any of it (Slice 11 owns the states)', async () => {
+  it('carries the closure summary without rendering its counts or open-occurrence labels', async () => {
     const markup = await renderPage();
 
     // Loaded once, for the enrolled run, through the composed use case.
     expect(closureExecute).toHaveBeenCalledTimes(1);
-    // Nothing of the DTO reaches the markup: no counts, no open occurrence
-    // labels, no verdict copy — this slice only wires the read.
+    // Only the open occurrence's IDENTITY (its public coordinates) drives the
+    // up-next selection; the DTO's counts, open-occurrence labels and verdict
+    // copy never reach the markup (Slice 11 renders none of that).
     expect(markup).not.toContain('Cardio');
     expect(markup).not.toContain('4 completed');
     expect(markup).not.toContain('concluded');
@@ -412,6 +437,156 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
   });
 
+  it('resolves the up-next affordance from the closure FIRST OPEN occurrence, never a recorded M14 next', async () => {
+    // The M14 next workout (1,1) is recorded as not performed; the run's first
+    // OPEN authored occurrence is (1,2). The up-next preview must be resolved
+    // for the OPEN occurrence — the recorded one must not be offered a Start.
+    enrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: { ...ENROLLED_INCOMPLETE, nextWorkout: { weekNumber: 1, workoutOrder: 1 } },
+    });
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            plannedDate: '2026-09-23',
+            status: 'not-performed',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 2,
+      workoutName: 'Lower Body B',
+    });
+
+    const markup = await renderPage();
+
+    // The preview was resolved for the OPEN occurrence (1,2), never the recorded
+    // M14 next (1,1).
+    expect(resolveNextExecute).toHaveBeenCalledTimes(1);
+    expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 2,
+    });
+    // The panel offers the OPEN occurrence as up next, and the recorded card is
+    // stated as recorded (never as up next).
+    expect(markup).toContain('UP NEXT · WEEK 1 · WORKOUT 2');
+    expect(markup).toContain('Recorded as not performed');
+  });
+
+  it('marks a rowless recorded occurrence on its authored card with Undo and no Start', async () => {
+    // (1,1) is authored but holds no current planned row; only its recorded fact
+    // exists, so the M15 read reports it among the UNPLACED recorded workouts.
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        unplacedNotPerformedWorkouts: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            recordedAtIso: '2026-09-24T18:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    const markup = await renderPage();
+
+    // The rowless fact is stated on the authored card with Undo, its detail link
+    // survives and — because the card is recorded — no Start / up-next state is
+    // produced for it (no fabricated planned date is needed to suppress it).
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
+  });
+
+  it('shows rowless-recorded B as recorded while the later OPEN C is Up next (A/B/C chain)', async () => {
+    // Authored A=(1,1) completed, B=(1,2) recorded with NO planned row, C=(1,3)
+    // open. The M14 next is B (the first non-completed), which must NOT be shown
+    // as up next; the closure's first OPEN authored occurrence is C.
+    enrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...ENROLLED_INCOMPLETE,
+        completedScheduledWorkoutIds: ['sw-1'],
+        nextWorkout: { weekNumber: 1, workoutOrder: 2 },
+      },
+    });
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-3',
+            weekNumber: 1,
+            workoutOrder: 3,
+            workoutName: 'Conditioning C',
+            plannedDate: '2026-09-25',
+            status: 'planned',
+          },
+        ],
+        unplacedNotPerformedWorkouts: [
+          {
+            scheduledWorkoutId: 'sw-2',
+            weekNumber: 1,
+            workoutOrder: 2,
+            workoutName: 'Lower Body B',
+            recordedAtIso: '2026-09-24T18:00:00.000Z',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: runClosureDto({
+        openInProgramOrder: [
+          {
+            scheduledWorkoutId: 'sw-3',
+            weekNumber: 1,
+            workoutOrder: 3,
+            workoutName: 'Conditioning C',
+          },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 3,
+      workoutName: 'Conditioning C',
+    });
+
+    const markup = await renderPage();
+
+    // B's rowless record is stated on its authored card, with Undo.
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    // C — the first OPEN occurrence — is the resolved up-next / Start target.
+    expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 3,
+    });
+    expect(markup).toContain('UP NEXT · WEEK 1 · WORKOUT 3');
+    expect(markup).toContain(
+      'href="/programs/fit40-beginner-strength/weeks/1/workouts/3/session"',
+    );
+  });
+
   it('degrades a failed run-closure read to a null DTO (logged), never to fabricated counts', async () => {
     closureExecute.mockResolvedValue({
       ok: false,
@@ -428,6 +603,12 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
       // Still the incomplete M14 surface: a failed closure read never becomes
       // a completion claim.
       expect(markup).not.toContain('View completion summary');
+      // Degraded read → no closure truth is invented: the up-next affordance
+      // keeps the M14 next workout (1,2).
+      expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+        weekNumber: 1,
+        workoutOrder: 2,
+      });
     } finally {
       consoleError.mockRestore();
     }

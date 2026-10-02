@@ -12,7 +12,7 @@ import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createU
 import { ProgramGoal } from '@/domain/types/program';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
-import { makeNotPerformedRepo, notPerformedFact } from './schedule-fixtures';
+import { makeOccurrenceExecutionFactsRepo, notPerformedFact } from './schedule-fixtures';
 
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
@@ -51,9 +51,9 @@ function makeUseCase() {
   const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
-  const notPerformed = makeNotPerformedRepo();
-  const uc = new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo, notPerformed);
-  return { sessionRepo, enrollmentRepo, notPerformed, uc };
+  const occurrenceFacts = makeOccurrenceExecutionFactsRepo(sessionRepo);
+  const uc = new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, occurrenceFacts);
+  return { sessionRepo, enrollmentRepo, occurrenceFacts, uc };
 }
 
 const INPUT = { programSlug: 'prog-1', weekNumber: 1, workoutOrder: 1 } as const;
@@ -104,7 +104,7 @@ describe('GetWorkoutSessionUseCase', () => {
 
   it('returns PROGRAM_NOT_FOUND', async () => {
     const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
-    const uc = new GetWorkoutSessionUseCase(programRepo, new InMemoryWorkoutSessionRepository(), new InMemoryProgramEnrollmentRepository(), makeNotPerformedRepo());
+    const uc = new GetWorkoutSessionUseCase(programRepo, new InMemoryProgramEnrollmentRepository(), makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository()));
     const r = await uc.execute({ ...INPUT, programSlug: 'missing', userId: 'user-a' });
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -120,22 +120,23 @@ describe('GetWorkoutSessionUseCase', () => {
     };
     const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
     await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
-    const notPerformed = makeNotPerformedRepo([notPerformedFact('enr-a', 'sched-wo1')]);
-    const uc = new GetWorkoutSessionUseCase(
-      programRepo,
+    const occurrenceFacts = makeOccurrenceExecutionFactsRepo(
       new InMemoryWorkoutSessionRepository(),
-      enrollmentRepo,
-      notPerformed,
+      [notPerformedFact('enr-a', 'sched-wo1')],
     );
+    const uc = new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, occurrenceFacts);
 
     const r = await uc.execute({ ...INPUT, userId: 'user-a' });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data).toEqual({ enrolled: true, session: null, notPerformedRecorded: true });
-    // ONE bounded, enrollment-scoped fact read.
-    expect(notPerformed.listByEnrollment).toHaveBeenCalledTimes(1);
-    expect(notPerformed.listByEnrollment).toHaveBeenCalledWith(enid('enr-a'));
+    // ONE coherent snapshot read supplies session state and settlement state.
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).toHaveBeenCalledTimes(1);
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).toHaveBeenCalledWith(
+      enid('enr-a'),
+      swid('sched-wo1'),
+    );
   });
 
   it('reports the record independently of the session state', async () => {
@@ -145,9 +146,8 @@ describe('GetWorkoutSessionUseCase', () => {
 
     const useCase = new GetWorkoutSessionUseCase(
       { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(seedProgram().program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() },
-      sessionRepo,
       enrollmentRepo,
-      makeNotPerformedRepo([notPerformedFact('enr-a', 'sched-wo1')]),
+      makeOccurrenceExecutionFactsRepo(sessionRepo, [notPerformedFact('enr-a', 'sched-wo1')]),
     );
 
     const r = await useCase.execute({ ...INPUT, userId: 'user-a' });
@@ -169,9 +169,8 @@ describe('GetWorkoutSessionUseCase', () => {
     await seedEnrollment(enrollmentRepo, 'enr-b', 'user-b', 'p1');
     const uc = new GetWorkoutSessionUseCase(
       programRepo,
-      new InMemoryWorkoutSessionRepository(),
       enrollmentRepo,
-      makeNotPerformedRepo([
+      makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository(), [
         notPerformedFact('enr-b', 'sched-wo1'),
         notPerformedFact('enr-a', 'sched-wo1'),
       ]),
@@ -197,9 +196,10 @@ describe('GetWorkoutSessionUseCase', () => {
     await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
     const useCase = new GetWorkoutSessionUseCase(
       { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(seedProgram().program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() },
-      new InMemoryWorkoutSessionRepository(),
       enrollmentRepo,
-      makeNotPerformedRepo([notPerformedFact('enr-a', 'sched-other')]),
+      makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository(), [
+        notPerformedFact('enr-a', 'sched-other'),
+      ]),
     );
 
     const r = await useCase.execute({ ...INPUT, userId: 'user-a', workoutOrder: 1 });

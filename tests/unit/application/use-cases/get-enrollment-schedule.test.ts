@@ -14,7 +14,7 @@ import {
   FRI,
   LAST_FRI,
   LAST_WED,
-  makeNotPerformedRepo,
+  makeScheduleExecutionFactsRepo,
   makeProgram,
   notPerformedFact,
   MON,
@@ -46,14 +46,9 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const enrollments = new InMemoryProgramEnrollmentRepository();
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
-  const notPerformed = makeNotPerformedRepo(facts);
-  const useCase = new GetEnrollmentScheduleUseCase(
-    enrollments,
-    plannedWorkouts,
-    sessions,
-    notPerformed,
-  );
-  return { enrollments, plannedWorkouts, sessions, notPerformed, useCase };
+  const executionFacts = makeScheduleExecutionFactsRepo(sessions, facts);
+  const useCase = new GetEnrollmentScheduleUseCase(enrollments, plannedWorkouts, executionFacts);
+  return { enrollments, plannedWorkouts, sessions, executionFacts, useCase };
 }
 
 type Harness = ReturnType<typeof makeHarness>;
@@ -272,8 +267,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      sessions,
-      makeNotPerformedRepo(),
+      makeScheduleExecutionFactsRepo(sessions),
     );
 
     const result = await useCase.execute({ userId: USER_A, program: PROGRAM, now: NOW });
@@ -300,8 +294,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      sessions,
-      makeNotPerformedRepo(),
+      makeScheduleExecutionFactsRepo(sessions),
     );
 
     await expect(
@@ -611,16 +604,17 @@ describe('GetEnrollmentScheduleUseCase — rowless facts, horizons and undo', ()
     await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
       planned(ENR_A, OCCURRENCE_W1_2, MON),
     ]);
-    const listFacts = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+    const readFacts = harness.executionFacts.listScheduleExecutionFactsByEnrollment;
     const replaceAll = vi.spyOn(harness.plannedWorkouts, 'replaceAllForEnrollment');
     const reschedule = vi.spyOn(harness.plannedWorkouts, 'reschedule');
     const save = vi.spyOn(harness.sessions, 'save');
 
     const schedule = await readConfigured(harness);
 
-    // ONE bounded, enrollment-scoped fact read — never per row or per fact.
-    expect(listFacts).toHaveBeenCalledTimes(1);
-    expect(listFacts).toHaveBeenCalledWith(enrollmentId(ENR_A));
+    // ONE coherent snapshot read supplies all execution facts — never per
+    // row or per fact, and never a second session/fact statement.
+    expect(readFacts).toHaveBeenCalledTimes(1);
+    expect(readFacts).toHaveBeenCalledWith(enrollmentId(ENR_A));
     expect(schedule.unplacedNotPerformedWorkouts).toHaveLength(2);
     expect(replaceAll).not.toHaveBeenCalled();
     expect(reschedule).not.toHaveBeenCalled();

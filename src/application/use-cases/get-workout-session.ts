@@ -10,15 +10,17 @@
  * This is also the workout detail surface's own read, so it reports the
  * occurrence's M17 not-performed fact as well (`notPerformedRecorded`): the
  * detail header must be able to refuse Start for a settled occurrence without
- * inferring settlement from the absence or state of a session. The fact is read
- * through ONE bounded, enrollment-scoped statement — the same read the calendar
- * uses — and never becomes a second settlement truth here.
+ * inferring settlement from the absence or state of a session. The session
+ * state and the settlement state are mutually exclusive truths of the SAME
+ * occurrence, so they are read through ONE coherent snapshot port — never two
+ * independent statements, which could pair the old abandoned session with the
+ * freshly committed record while `recordNotPerformed` replaces one with the
+ * other atomically.
  */
 
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
+import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occurrence-execution-facts-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
 import { createUserId } from '@/domain/types/ids';
@@ -55,9 +57,8 @@ export interface WorkoutSessionView {
 export class GetWorkoutSessionUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
-    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
+    private readonly occurrenceExecutionFactsRepository: OccurrenceExecutionFactsRepository,
   ) {}
 
   async execute(
@@ -105,23 +106,19 @@ export class GetWorkoutSessionUseCase {
       return ok({ enrolled: false, session: null, notPerformedRecorded: false });
     }
 
-    // The occurrence's session state and its settlement fact are independent
-    // truths read together: ONE session lookup and ONE bounded, enrollment-scoped
-    // fact read (never a per-occurrence query).
-    const [session, notPerformedFacts] = await Promise.all([
-      this.sessionRepository.findByEnrollmentAndScheduledWorkout(
-        enrollment.id,
-        occurrence.scheduled.id,
-      ),
-      this.notPerformedRepository.listByEnrollment(enrollment.id),
-    ]);
+    // The occurrence's session state and its settlement state from ONE
+    // coherent snapshot: mutually exclusive truths of the same occurrence, so
+    // a concurrent record/undo transition can never pair the old session with
+    // the fresh record (or erase both).
+    const facts = await this.occurrenceExecutionFactsRepository.findOccurrenceExecutionFacts(
+      enrollment.id,
+      occurrence.scheduled.id,
+    );
 
     return ok({
       enrolled: true,
-      session: session === null ? null : toWorkoutSessionDto(session),
-      notPerformedRecorded: notPerformedFacts.some(
-        (fact) => fact.scheduledWorkoutId === occurrence.scheduled.id,
-      ),
+      session: facts.session === null ? null : toWorkoutSessionDto(facts.session),
+      notPerformedRecorded: facts.notPerformedRecorded,
     });
   }
 }

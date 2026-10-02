@@ -41,21 +41,36 @@ function codeOf(relativePath: string): string {
 
 describe('M17 Slice 8 — the M15 calendar only READS the not-performed facts', () => {
   it('reads the run facts through the read-only port and nothing else', () => {
-    for (const file of M15_READERS) {
+    // The mutation/configuration paths keep the one sanctioned fact read on
+    // the read model port.
+    for (const file of [CONFIGURE, RESCHEDULE]) {
       const code = codeOf(file);
 
-      // The one sanctioned read, on the read model port.
       expect(code, `${file} does not read the facts`).toContain(
         'notPerformedRepository.listByEnrollment(',
       );
-      // Never the mutation authority, and never one of its writes.
+    }
+    // The two pure read surfaces take ONE coherent snapshot instead: session
+    // execution truth and settlement facts are mutually exclusive per
+    // occurrence, so they must never be assembled from independently mutable
+    // reads that could tear across a concurrent settlement transition.
+    for (const file of [SCHEDULE_READ, DETAIL_READ]) {
+      const code = codeOf(file);
+
+      expect(code, `${file} coordinates two independently mutable reads`).not.toContain(
+        'notPerformedRepository',
+      );
+    }
+    // Every M15 reader: never the mutation authority, never one of its
+    // writes, no persistence, no SQL, no transaction.
+    for (const file of M15_READERS) {
+      const code = codeOf(file);
+
       expect(code).not.toContain('RunOccurrenceWriteRepository');
       expect(code).not.toContain('runOccurrenceWrites');
       expect(code).not.toContain('recordNotPerformed');
       expect(code).not.toContain('undoNotPerformed');
       expect(code).not.toContain('createSessionForOccurrence');
-      // No persistence, no SQL, no clock-free policy: these are reads plus one
-      // planning write through the existing port.
       expect(code).not.toContain('drizzle');
       expect(code).not.toContain("from '../schema'");
       expect(code).not.toContain('transaction(');
@@ -111,6 +126,77 @@ describe('M17 Slice 8 — the M15 calendar only READS the not-performed facts', 
     // The record/undo use cases take the write authority; the reads never do.
     expect(services).toContain('recordNotPerformedUseCase = new RecordNotPerformedUseCase');
     expect(services).toContain('undoNotPerformedUseCase = new UndoNotPerformedUseCase');
+  });
+});
+
+describe('M17 snapshot reads — execution truth and settlement facts are ONE coherent snapshot', () => {
+  const OCCURRENCE_ADAPTER =
+    'src/infrastructure/database/repositories/drizzle-occurrence-execution-facts-repository.ts';
+  const SCHEDULE_ADAPTER =
+    'src/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository.ts';
+  const SCHEDULE_SERVICES = 'src/features/schedule/services.ts';
+  const SESSION_SERVICES = 'src/features/sessions/services.ts';
+
+  it('the schedule read takes ONE snapshot for session execution truth and settlement facts', () => {
+    const code = codeOf(SCHEDULE_READ);
+
+    expect(code).toContain(
+      'scheduleExecutionFactsRepository.listScheduleExecutionFactsByEnrollment(',
+    );
+    expect(code.match(/listScheduleExecutionFactsByEnrollment\(/g)).toHaveLength(1);
+    // Never the retired independently mutable projections.
+    expect(code).not.toContain('listCompletedScheduledWorkoutIds(');
+    expect(code).not.toContain('listInProgressScheduledWorkoutIds(');
+    // Calendar intent stays the separate, documented read.
+    expect(code).toContain('plannedWorkoutRepository.listByEnrollment(');
+  });
+
+  it('the occurrence detail read takes ONE snapshot for session and settlement state', () => {
+    const code = codeOf(DETAIL_READ);
+
+    expect(code).toContain(
+      'occurrenceExecutionFactsRepository.findOccurrenceExecutionFacts(',
+    );
+    expect(code.match(/findOccurrenceExecutionFacts\(/g)).toHaveLength(1);
+    expect(code).not.toContain('Promise.all(');
+    expect(code).not.toContain('findByEnrollmentAndScheduledWorkout(');
+  });
+
+  it('the schedule projection is ONE statement — no transaction, no lock, no writes', () => {
+    const adapter = codeOf(SCHEDULE_ADAPTER);
+
+    expect(adapter).toContain('.unionAll(');
+    expect(adapter.match(/await /g)).toHaveLength(1);
+    expect(adapter).not.toContain('transaction(');
+    expect(adapter).not.toContain(".for('");
+    expect(adapter).not.toContain('insert(');
+    expect(adapter).not.toContain('update(');
+    expect(adapter).not.toContain('delete(');
+  });
+
+  it('the occurrence projection is ONE bounded read-only REPEATABLE READ transaction', () => {
+    const adapter = codeOf(OCCURRENCE_ADAPTER);
+
+    expect(adapter.match(/transaction\(/g)).toHaveLength(1);
+    expect(adapter).toContain("isolationLevel: 'repeatable read'");
+    expect(adapter).toContain("accessMode: 'read only'");
+    expect(adapter).not.toContain('serializable');
+    expect(adapter).not.toContain(".for('");
+    expect(adapter).not.toContain('insert(');
+    expect(adapter).not.toContain('update(');
+    expect(adapter).not.toContain('delete(');
+  });
+
+  it('wires the snapshot ports into the schedule and session composition roots', () => {
+    const schedule = codeOf(SCHEDULE_SERVICES).replace(/\s+/g, ' ');
+    expect(schedule).toMatch(
+      /new GetEnrollmentScheduleUseCase\(\s*programEnrollmentRepository,\s*plannedWorkoutRepository,\s*scheduleExecutionFactsRepository,/,
+    );
+
+    const sessions = codeOf(SESSION_SERVICES).replace(/\s+/g, ' ');
+    expect(sessions).toMatch(
+      /new GetWorkoutSessionUseCase\(\s*programRepository,\s*programEnrollmentRepository,\s*occurrenceExecutionFactsRepository,/,
+    );
   });
 });
 

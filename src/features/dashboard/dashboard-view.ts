@@ -77,6 +77,17 @@ export interface DashboardProgramView {
    * `nextWorkoutPreview` as before.
    */
   readonly schedule: DashboardScheduleState;
+  /**
+   * The run's AUTHORITATIVE current week, resolved ONCE by the view assembly
+   * from the same open occurrence Up next uses — never re-derived by a
+   * component from the completion-only `enrollment.nextWorkout`, which would
+   * disagree with Up next / the weekly summaries whenever a recorded
+   * occurrence precedes the first open one.
+   *
+   * `null` for a concluded-but-incomplete run (no open week exists), so the
+   * card can never paint an old RECORDED week as current.
+   */
+  readonly currentWeek: WeekSummary | null;
 }
 
 /**
@@ -330,6 +341,9 @@ export async function buildDashboardView(
             enrollment: current.enrollment,
             nextWorkoutPreview,
             schedule: current.schedule,
+            // The SAME authoritative week the assembly already resolved for Up
+            // next and the weekly summaries — passed through, never recomputed.
+            currentWeek,
           },
     recentTraining,
     weeklyInsights,

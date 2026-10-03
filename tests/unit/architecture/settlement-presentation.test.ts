@@ -446,3 +446,67 @@ describe('M17 final review — recorded state across the remaining workout surfa
   });
 });
 
+/**
+ * M17 — the restart action invalidates the SAME closed nested-route set as
+ * every other enrollment action: both occurrence-route templates, so a
+ * previously visited workout-detail route cannot keep showing the old run's
+ * "Recorded as not performed" band (hiding the fresh run's Start) after a
+ * restart, exactly as its session route is invalidated.
+ */
+describe('M17 — the restart action invalidates both occurrence-route templates', () => {
+  const RESTART_ACTION = 'src/features/enrollment/actions/restart-program.ts';
+
+  it('revalidates the canonical workout-detail and session templates beside the existing set', () => {
+    const code = codeOf(RESTART_ACTION);
+
+    // Both nested templates come from the shared canonical constant module —
+    // never an ad-hoc string, never a client-supplied path.
+    expect(code).toContain('WORKOUT_PAGE_PATH_TEMPLATE');
+    expect(code).toContain("revalidatePath(WORKOUT_PAGE_PATH_TEMPLATE, 'page')");
+    expect(code).toContain("revalidatePath(SESSION_PAGE_PATH_TEMPLATE, 'page')");
+    // The top-level targets are unchanged, and nothing oversized is added.
+    expect(code).toContain("revalidatePath('/programs')");
+    expect(code).toContain("revalidatePath('/dashboard')");
+    expect(code).not.toContain("revalidatePath('/')");
+    expect(code).not.toContain('revalidatePath(form');
+    expect(code.match(/revalidatePath\(/g)).toHaveLength(6);
+  });
+});
+
+/**
+ * M17 - the CurrentProgramCard heading consumes the application-resolved
+ * current week; presentation never re-derives it from the completion-only
+ * `enrollment.nextWorkout`.
+ */
+describe('M17 - the dashboard current week is resolved once, in the view assembly', () => {
+  const CARD = 'src/features/dashboard/components/CurrentProgramCard.tsx';
+  const DASHBOARD_VIEW = 'src/features/dashboard/dashboard-view.ts';
+  const DASHBOARD_PAGE = 'src/app/(app)/dashboard/page.tsx';
+
+  it('the card reads the authoritative week and never derives it from enrollment.nextWorkout', () => {
+    const card = codeOf(CARD);
+
+    // It consumes the view's resolved week...
+    expect(card).toContain('currentWeek');
+    expect(card).toContain('currentWeek?.weekNumber');
+    // ...and never reads `enrollment.nextWorkout` to compute a week.
+    expect(card).not.toContain('enrollment.nextWorkout');
+    expect(card).not.toContain('nextWorkout.weekNumber');
+  });
+
+  it('the view model carries the authoritative week on the current program', () => {
+    const view = codeOf(DASHBOARD_VIEW);
+
+    // The interface exposes it and the assembly passes the SAME resolved value
+    // through - never a second derivation.
+    expect(view).toContain('readonly currentWeek: WeekSummary | null;');
+    expect(view).toContain('selectDashboardCurrentWeek(');
+  });
+
+  it('the page passes the resolved week to the card instead of the card deriving it', () => {
+    const page = codeOf(DASHBOARD_PAGE);
+
+    expect(page).toContain('view.currentWeek');
+    expect(page).toContain('<CurrentProgramCard');
+  });
+});

@@ -34,6 +34,20 @@ import {
 export const SESSION_PAGE_PATH_TEMPLATE =
   '/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session';
 
+/**
+ * The workout-detail route as a dynamic template — the session route's parent,
+ * paired with the 'page' revalidation type in callers.
+ *
+ * Same rationale as `SESSION_PAGE_PATH_TEMPLATE`: a form that carries only the
+ * program slug cannot name a concrete occurrence, yet EVERY occurrence route of
+ * that program can render settlement or enrollment state (the recorded CTA band
+ * with Undo, or a stale join/Start prompt). `revalidatePath(template, 'page')`
+ * invalidates every concrete URL matching the template, so a previously visited
+ * workout-detail route is invalidated alongside its session route.
+ */
+export const WORKOUT_PAGE_PATH_TEMPLATE =
+  '/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]';
+
 export function sessionPathFromFormData(formData: FormData): string | null {
   const slug = programSlugSchema.safeParse(formData.get('programSlug'));
   const week = weekNumberSchema.safeParse(formData.get('weekNumber'));

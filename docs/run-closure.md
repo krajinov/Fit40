@@ -384,14 +384,24 @@ reads — while the authoritative re-check inside the locked replacement
 transaction stays the final write-side authority.
 
 A second invariant governs composition: **a run-level read composed into an
-already-loaded run must be fenced to that exact `ProgramEnrollmentId`.** The
-dashboard and Program Detail pass their loaded enrollment's id as the closure
-read's `expectedEnrollmentId`; if that enrollment was replaced or deleted
-mid-composition (restart, leave), the read returns the typed
-`ENROLLMENT_CHANGED` refusal instead of silently switching to the new run — a
-parent view can never mix one enrollment generation's data with another's
-facts. The standalone read convention (resolve the current enrollment) is
-unchanged when no expected id is supplied.
+already-loaded run must be fenced to that exact `ProgramEnrollmentId` — and the
+fence itself must be atomic.** The dashboard and Program Detail pass their
+loaded enrollment's id as the closure read's `expectedEnrollmentId`; identity
+validation and fact projection then come from ONE statement
+(`RunClosureFactsRepository.findFencedClosureFactsByEnrollment`, anchored on
+`program_enrollments` with the trusted `user_id` / `program_id` in the same
+predicate), not from a by-identity check followed by an independent facts read.
+Two calls would leave a window in which a restart/leave commits between them:
+the second would observe a run that no longer exists, and its empty fact sets
+would be misread as the OLD authored program being fully open. One statement
+makes the answer exactly one of the two coherent states — the expected run with
+its own facts, or a `matched: false` projection rendered as the typed
+`ENROLLMENT_CHANGED` refusal. A parent view can therefore never mix one
+enrollment generation's data with another's facts, and never mistake a vanished
+run for a fresh one. The enrollment port deliberately exposes no by-identity
+read, so the two-call composition is structurally impossible. The standalone read
+convention (resolve the current enrollment) is unchanged when no expected id is
+supplied.
 
 None of the snapshot reads takes the enrollment write lock, retries, or
 serializes behind the write side: a coherent read needs exactly one snapshot,
@@ -444,7 +454,7 @@ M17 never touched the M14 completion surface:
 | One-snapshot occurrence execution facts (session + record) | Infrastructure | `drizzle-occurrence-execution-facts-repository.ts` |
 | One-snapshot schedule execution facts (completed + in-progress + records) | Infrastructure | `drizzle-schedule-execution-facts-repository.ts` |
 | One-snapshot follow-through execution facts (completed activity + in-progress + records) | Infrastructure | `drizzle-follow-through-execution-facts-repository.ts` |
-| Enrollment-identity fencing for composed closure reads (`expectedEnrollmentId` → `findById` + ownership verification) | Application (use case) / Infrastructure (by-identity read) | `get-run-closure-summary.ts`, `ProgramEnrollmentRepository.findById` |
+| Enrollment-identity fencing for composed closure reads (`expectedEnrollmentId` → ONE statement establishing the run AND its facts) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-run-closure-facts-repository.ts` (`findFencedClosureFactsByEnrollment`), `get-run-closure-summary.ts` |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
 Presentation never decides settlement or closure: Server Actions own auth,
@@ -537,7 +547,7 @@ The evidence lives in the suites themselves; this is the map.
 | Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
 | Integration | `run-closure-snapshot.test.ts`, `run-closure-facts-repository.test.ts` | the closure projection reads one coherent snapshot across a gated Undo→start→complete commit (deterministic `pg_locks` gates, negative control reproduces the torn two-statement read); projection port contract |
 | Integration | `occurrence-session-snapshot.test.ts`, `schedule-execution-snapshot.test.ts` | the occurrence and schedule projections read one coherent snapshot across a gated abandoned-session → record transition (deterministic `pg_locks` gates, negative controls reproduce the torn multi-statement reads); regression states unchanged |
-| Integration | `follow-through-snapshot.test.ts`, `restart-preflight-snapshot.test.ts`, `run-closure-enrollment-fencing.test.ts` | the follow-through projection and the restart preflight read one coherent snapshot across the gated Undo→start→complete transition (negative controls reproduce the torn reads); the fenced closure read refuses `ENROLLMENT_CHANGED` when the loaded enrollment was replaced, instead of switching generations |
+| Integration | `follow-through-snapshot.test.ts`, `restart-preflight-snapshot.test.ts`, `run-closure-enrollment-fencing.test.ts` | the follow-through projection and the restart preflight read one coherent snapshot across the gated Undo→start→complete transition (negative controls reproduce the torn reads); the fenced closure projection reads identity + facts from one statement, so a leave committing while it is in flight yields `matched: false` (`ENROLLMENT_CHANGED`) and never a matched-but-empty false-open run (the retired two-call composition is the negative control) |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

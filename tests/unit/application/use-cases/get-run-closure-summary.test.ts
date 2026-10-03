@@ -88,7 +88,7 @@ async function makeHarness(
     });
   }
 
-  const closureFacts = makeRunClosureFactsRepo(sessions, options.facts ?? []);
+  const closureFacts = makeRunClosureFactsRepo(sessions, options.facts ?? [], enrollments);
   const useCase = new GetRunClosureSummaryUseCase(enrollments, closureFacts);
 
   return { useCase, enrollments, sessions, closureFacts };
@@ -413,7 +413,7 @@ describe('GetRunClosureSummaryUseCase — enrollment identity fencing', () => {
     // DIFFERENT id becomes the current run of the same (user, program) pair.
     await harness.enrollments.delete(enrollmentId(ENR_A));
     await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
-    const factsRead = harness.closureFacts.listClosureFactsByEnrollment;
+    const fencedRead = harness.closureFacts.findFencedClosureFactsByEnrollment;
 
     const result = await harness.useCase.execute({
       userId: USER_A,
@@ -426,14 +426,16 @@ describe('GetRunClosureSummaryUseCase — enrollment identity fencing', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
-    // No facts read is ever issued for the vanished expected enrollment.
-    expect(factsRead).not.toHaveBeenCalled();
+    // Identity and facts are ONE statement: the fenced projection refused, and
+    // no independent facts read was issued for the vanished enrollment.
+    expect(fencedRead).toHaveBeenCalledTimes(1);
+    expect(harness.closureFacts.listClosureFactsByEnrollment).not.toHaveBeenCalled();
   });
 
   it('refuses when the expected enrollment belongs to another user, reading no facts', async () => {
     const harness = await makeHarness();
     // ENR_B is a real, current enrollment — but it is USER_B's run.
-    const factsRead = harness.closureFacts.listClosureFactsByEnrollment;
+    const fencedRead = harness.closureFacts.findFencedClosureFactsByEnrollment;
 
     const result = await harness.useCase.execute({
       userId: USER_A,
@@ -441,12 +443,13 @@ describe('GetRunClosureSummaryUseCase — enrollment identity fencing', () => {
       expectedEnrollmentId: ENR_B,
     });
 
-    // The id alone never authorizes: ownership is verified against the
-    // trusted (user, program) pair before any fact is read.
+    // The id alone never authorizes: ownership is verified in the SAME
+    // statement as the facts, so a foreign run resolves not-matched.
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
-    expect(factsRead).not.toHaveBeenCalled();
+    expect(fencedRead).toHaveBeenCalledTimes(1);
+    expect(harness.closureFacts.listClosureFactsByEnrollment).not.toHaveBeenCalled();
   });
 
   it('keeps resolving the CURRENT enrollment when no expected id is supplied', async () => {

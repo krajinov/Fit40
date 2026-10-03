@@ -225,7 +225,10 @@ export function createGate(): { readonly opened: Promise<void>; readonly open: (
 }
 
 /** Tables a snapshot gate may lock (a compile-time closed set). */
-export type SnapshotGateTable = 'workout_sessions' | 'not_performed_workouts';
+export type SnapshotGateTable =
+  | 'workout_sessions'
+  | 'not_performed_workouts'
+  | 'program_enrollments';
 
 /**
  * A test-only gate: a dedicated transaction whose `LOCK TABLE … IN ACCESS

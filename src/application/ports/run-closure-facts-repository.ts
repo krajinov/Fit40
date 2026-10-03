@@ -38,9 +38,47 @@
  */
 
 import type { RunClosureFacts } from '@/domain/services/run-closure';
-import type { EnrollmentId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, UserId } from '@/domain/types/ids';
+
+/**
+ * The FENCED projection: whether the caller's expected enrollment still exists
+ * as the trusted (user, program) pair's run, and — only when it does — that
+ * run's execution facts.
+ *
+ * `matched: false` means the expected enrollment is gone, replaced, or does not
+ * belong to the trusted pair. It is NEVER reported as `matched: true` with
+ * empty fact sets: that shape is how a vanished run used to be misread as a
+ * fresh, fully-open one.
+ */
+export type FencedRunClosureFacts =
+  | { readonly matched: true; readonly facts: RunClosureFacts }
+  | { readonly matched: false };
 
 export interface RunClosureFactsRepository {
   /** Both execution-fact sets of one run, read from ONE database snapshot. */
   listClosureFactsByEnrollment(enrollmentId: EnrollmentId): Promise<RunClosureFacts>;
+
+  /**
+   * The fenced variant: the caller already loaded a specific enrollment and is
+   * composing this summary into that run's view, so identity and facts must be
+   * established from ONE coherent snapshot.
+   *
+   * Validating the expected enrollment with a read and THEN reading its facts
+   * is two statements, and a restart/leave committing between them makes the
+   * second observe a run that no longer exists — empty facts for the vanished
+   * id, which the summary would render as an open run with the OLD authored
+   * structure. ONE statement removes that window: it anchors on
+   * `program_enrollments` (verifying the id AND the trusted `userId` /
+   * `programId` in the same predicate) and projects the facts from that same
+   * snapshot, so the answer is exactly one of the two coherent states.
+   *
+   * `expectedEnrollmentId` is data for composition, never client-substitutable
+   * authority: unauthorized ids resolve `matched: false` rather than another
+   * user's facts.
+   */
+  findFencedClosureFactsByEnrollment(
+    expectedEnrollmentId: EnrollmentId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedRunClosureFacts>;
 }

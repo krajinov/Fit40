@@ -294,21 +294,50 @@ describe('M17 Slice 13 — no run archive or enrollment-history table exists', (
 });
 
 describe('M17 — composed run-level reads are fenced by ProgramEnrollmentId', () => {
-  it('the closure read resolves the CURRENT enrollment only on the standalone path', () => {
+  it('the fenced path is ONE atomic projection - never a by-id check plus a facts read', () => {
     const code = codeOf(CLOSURE_READ);
 
-    // The fenced path: exactly the caller's expected enrollment, or the typed
-    // refusal — never a silent switch to the current run.
     expect(code).toContain('expectedEnrollmentId?: string;');
-    expect(code).toContain('resolveFencedEnrollment(');
+    expect(code).toContain('summarizeFenced(');
     expect(code).toContain("code: 'ENROLLMENT_CHANGED'");
-    // Current-enrollment resolution happens exactly once: the standalone path.
+    expect(code).toContain('findFencedClosureFactsByEnrollment(');
+    // The fenced path must NOT compose two mutable reads: no by-identity
+    // enrollment lookup, and no independent facts read beside the projection.
+    expect(code).not.toContain('findById(');
+    expect(code.match(/listClosureFactsByEnrollment\(/g)).toHaveLength(1);
+    // That single remaining facts read is the STANDALONE path's (guarded by the
+    // current-enrollment resolution, which happens exactly once).
     expect(code.match(/findByUserAndProgram\(/g)).toHaveLength(1);
-    // The fenced path resolves by identity, then verifies (user, program)
-    // ownership against the trusted pair.
-    expect(code).toContain('findById(');
-    expect(code).toContain('enrollment.userId !== userId');
-    expect(code).toContain('enrollment.programId !== programId');
+    expect(code).toContain('resolveCurrentEnrollment(');
+  });
+
+  it('the fenced projection is ONE statement anchored on the enrollment row', () => {
+    const adapter = codeOf('src/infrastructure/database/repositories/drizzle-run-closure-facts-repository.ts');
+    const fenced = adapter.slice(adapter.indexOf('async findFencedClosureFactsByEnrollment('));
+
+    // ONE statement: the anchor row (the expected enrollment, verified against
+    // the trusted user + program in the SAME predicate) UNION ALL the facts.
+    expect(fenced.match(/await /g)).toHaveLength(1);
+    expect(fenced.match(/\.unionAll\(/g)).toHaveLength(2);
+    expect(fenced).toContain('programEnrollments');
+    expect(fenced).toContain('programEnrollments.userId');
+    expect(fenced).toContain('programEnrollments.programId');
+    // The explicit not-matched answer, never a matched-but-empty fact set.
+    expect(fenced).toContain('matched: false');
+    // Read-only: no transaction, no lock, no write, no SERIALIZABLE.
+    expect(fenced).not.toContain('transaction(');
+    expect(fenced).not.toContain(".for('");
+    expect(fenced).not.toContain('insert(');
+    expect(fenced).not.toContain('update(');
+    expect(fenced).not.toContain('delete(');
+    expect(fenced.toLowerCase()).not.toContain('serializable');
+  });
+
+  it('exposes no by-identity enrollment read for Composition to misuse', () => {
+    // The fenced projection OWNS the identity check, so the enrollment port
+    // deliberately offers no `findById` for a use case to pair with a facts
+    // read; the two-call composition is structurally impossible.
+    expect(codeOf('src/application/ports/program-enrollment-repository.ts')).not.toContain('findById(');
   });
 
   it('the dashboard fences the closure read to the enrollment it already loaded', () => {
@@ -341,13 +370,18 @@ describe('M17 closure projection — one snapshot read owns both fact sets', () 
   const ADAPTER =
     'src/infrastructure/database/repositories/drizzle-run-closure-facts-repository.ts';
 
-  it('declares ONE snapshot read returning both fact sets, and no mutation surface', () => {
+  it('declares two snapshot reads returning the fact sets, and no mutation surface', () => {
     const port = codeOf(PORT);
 
+    // Both are ONE-snapshot reads of the same facts: the enrollment-scoped
+    // projection and the fenced variant that also establishes the expected
+    // enrollment in the SAME statement.
     expect(port).toContain(
       'listClosureFactsByEnrollment(enrollmentId: EnrollmentId): Promise<RunClosureFacts>;',
     );
-    expect(port.match(/Promise</g)).toHaveLength(1);
+    expect(port).toContain('expectedEnrollmentId: EnrollmentId,');
+    expect(port).toContain('): Promise<FencedRunClosureFacts>;');
+    expect(port.match(/Promise</g)).toHaveLength(2);
     // Read-only by construction: a read model never changes the fact it reports.
     expect(port).not.toContain('recordNotPerformed');
     expect(port).not.toContain('undoNotPerformed');
@@ -358,10 +392,12 @@ describe('M17 closure projection — one snapshot read owns both fact sets', () 
   it('projects both sets with ONE statement — no second statement, no transaction, no lock', () => {
     const adapter = codeOf(ADAPTER);
 
-    // ONE statement (a UNION of both projections) takes ONE READ COMMITTED
-    // snapshot, so the two sets can never be torn across concurrent commits.
-    expect(adapter).toContain('.unionAll(');
-    expect(adapter.match(/await /g)).toHaveLength(1);
+    // Each read is ONE statement (a UNION of both projections) taking ONE READ
+    // COMMITTED snapshot, so the two sets can never be torn across concurrent
+    // commits — and the fenced read additionally pins the enrollment identity
+    // in that same statement.
+    expect(adapter.match(/\.unionAll\(/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(adapter.match(/await /g)).toHaveLength(2);
     // A read-only projection never serializes behind a transaction or lock.
     expect(adapter).not.toContain('transaction(');
     expect(adapter).not.toContain(".for('");

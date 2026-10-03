@@ -161,12 +161,18 @@ function makeClosureFactsRepo(
   completedByEnrollment: Record<string, ReadonlyArray<ScheduledWorkoutId>>,
   notPerformedFacts: ReadonlyArray<NotPerformedOccurrence> = [],
 ) {
+  const factsFor = async (enrollmentId: EnrollmentId) => ({
+    completedIds: completedByEnrollment[enrollmentId] ?? [],
+    notPerformedIds: notPerformedFacts
+      .filter((fact) => fact.enrollmentId === enrollmentId)
+      .map((fact) => fact.scheduledWorkoutId),
+  });
+
   return {
-    listClosureFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
-      completedIds: completedByEnrollment[enrollmentId] ?? [],
-      notPerformedIds: notPerformedFacts
-        .filter((fact) => fact.enrollmentId === enrollmentId)
-        .map((fact) => fact.scheduledWorkoutId),
+    listClosureFactsByEnrollment: vi.fn(factsFor),
+    findFencedClosureFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
+      matched: true as const,
+      facts: await factsFor(enrollmentId),
     })),
   } satisfies RunClosureFactsRepository;
 }

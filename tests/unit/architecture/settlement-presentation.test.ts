@@ -510,3 +510,30 @@ describe('M17 - the dashboard current week is resolved once, in the view assembl
     expect(page).toContain('<CurrentProgramCard');
   });
 });
+/**
+ * M17 — the leave action invalidates the SAME canonical occurrence-route
+ * templates as restart: leaving cascades the run's recorded-not-performed facts
+ * with the enrollment, so a previously visited workout-detail route must not
+ * keep rendering the recorded band + Undo (an Undo that would only produce
+ * NOT_ENROLLED) once the run is gone.
+ */
+describe('M17 — the leave action invalidates both occurrence-route templates', () => {
+  const LEAVE_ACTION = 'src/features/enrollment/actions/leave-program.ts';
+
+  it('revalidates the canonical workout-detail and session templates beside the existing set', () => {
+    const code = codeOf(LEAVE_ACTION);
+
+    // Both nested templates come from the shared canonical constant module —
+    // never an ad-hoc string, never a client-supplied path.
+    expect(code).toContain('WORKOUT_PAGE_PATH_TEMPLATE');
+    expect(code).toContain("revalidatePath(WORKOUT_PAGE_PATH_TEMPLATE, 'page')");
+    expect(code).toContain("revalidatePath(SESSION_PAGE_PATH_TEMPLATE, 'page')");
+    // The top-level targets are unchanged, and nothing oversized is added.
+    expect(code).toContain("revalidatePath('/programs')");
+    expect(code).not.toContain("revalidatePath('/')");
+    expect(code).not.toContain('revalidatePath(form');
+    expect(code).not.toContain("revalidatePath('/programs', 'layout')");
+    // Exactly the closed set of FOUR targets.
+    expect(code.match(/revalidatePath\(/g)).toHaveLength(4);
+  });
+});

@@ -408,6 +408,27 @@ describe('M17 final review — recorded state across the remaining workout surfa
     expect(undo).not.toContain('redirect(');
   });
 
+  it('(7b) Recording invalidates the SAME bounded nested-route set as Undo, from authored coordinates', () => {
+    const record = codeOf(RECORD_ACTION);
+
+    // Recording settles an occurrence, so a previously visited occurrence route
+    // must stop offering Start: the workout-detail route and its session route
+    // are invalidated exactly as Undo's are, each built from the
+    // schema-validated authored coordinates (never a client path)…
+    expect(record).toContain('workoutPathFromRoute(parsed.data)');
+    expect(record).toContain('sessionPathFromRoute(parsed.data)');
+    // …the top-level program + dashboard targets remain…
+    expect(record).toContain('programPathFromSlug(parsed.data.programSlug)');
+    expect(record).toContain("revalidatePath('/dashboard')");
+    // …and no revalidation path is ever read from client form data, nor built
+    // by an ad-hoc template, nor replaced by an oversized invalidation.
+    expect(record).not.toContain('revalidatePath(form');
+    expect(record).not.toContain('revalidatePath(`');
+    expect(record).not.toContain("revalidatePath('/')");
+    // Both settlement actions revalidate the identical closed set of FOUR.
+    expect(record.match(/revalidatePath\(/g)).toHaveLength(4);
+    expect(codeOf(UNDO_ACTION).match(/revalidatePath\(/g)).toHaveLength(4);
+  });
   it('(8) dashboard week summaries share the ONE authoritative open occurrence with Up next; a settled run has no current week', () => {
     const view = codeOf(DASHBOARD_VIEW);
 

@@ -20,13 +20,21 @@ import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lo
 import { getNextExerciseTargetsUseCase } from '@/features/sessions/services';
 import { getWorkoutSessionUseCase } from '@/features/sessions/services';
 import {
+  resolveWorkoutCtaState,
+  type WorkoutCtaState as ResolvedWorkoutCtaState,
+} from '@/features/sessions/workout-cta-state';
+import {
   EMPTY_WORKOUT_TARGET,
   mapExerciseTargetsToViews,
   type WorkoutExerciseTargetView,
 } from '@/features/sessions/workout-target-views';
 
-/** How the CTA band presents the occurrence to the current visitor. */
-export type WorkoutCtaState = 'anonymous' | 'not-enrolled' | 'start' | 'resume' | 'completed';
+/**
+ * How the CTA band presents the occurrence. Re-exported from the pure view
+ * module (M17 Slice 11) so existing importers keep one source of truth.
+ */
+export type WorkoutCtaState = ResolvedWorkoutCtaState;
+export { resolveWorkoutCtaState } from '@/features/sessions/workout-cta-state';
 
 export interface WorkoutDetailView {
   readonly workout: ScheduledWorkoutDetailDto;
@@ -36,6 +44,11 @@ export interface WorkoutDetailView {
   readonly hasRecommendations: boolean;
   /** CTA state for the start panel (see {@link WorkoutCtaState}). */
   readonly ctaState: WorkoutCtaState;
+  /**
+   * The user-scoped not-performed fact for this occurrence (M17 Slice 8).
+   * Presentation reads it as data — it is never derived from session absence.
+   */
+  readonly notPerformedRecorded: boolean;
 }
 
 /**
@@ -117,6 +130,7 @@ export async function buildWorkoutDetailView(
       targets: workout.workout.exercises.map(() => EMPTY_WORKOUT_TARGET),
       hasRecommendations: false,
       ctaState: 'anonymous',
+      notPerformedRecorded: false,
     };
   }
 
@@ -134,18 +148,19 @@ export async function buildWorkoutDetailView(
   }
 
   const session = sessionResult.data.session;
-  const ctaState: WorkoutCtaState = !sessionResult.data.enrolled
-    ? 'not-enrolled'
-    : session === null
-      ? 'start'
-      : session.status === 'completed'
-        ? 'completed'
-        : 'resume';
+  const notPerformedRecorded = sessionResult.data.notPerformedRecorded;
+  const ctaState: WorkoutCtaState = resolveWorkoutCtaState({
+    enrolled: sessionResult.data.enrolled,
+    notPerformedRecorded,
+    sessionStatus:
+      session === null ? 'none' : session.status === 'completed' ? 'completed' : 'in-progress',
+  });
 
   return {
     workout,
     targets,
     hasRecommendations: targets.some((target) => target.block !== null),
     ctaState,
+    notPerformedRecorded,
   };
 }

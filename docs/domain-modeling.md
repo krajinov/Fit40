@@ -29,6 +29,7 @@ Entities have **identity** and **lifecycle**. Two entities with the same data bu
 | `ExerciseLog` | Log of performing one exercise in a session | `ExerciseLogId` |
 | `SetLog` | Log of a single set (weight, reps, RPE) | `SetLogId` |
 | `PlannedWorkout` | A planned calendar date for one occurrence of a run (M15) | Composite: `(EnrollmentId, ScheduledWorkoutId)` — no surrogate id |
+| `NotPerformedOccurrence` | A run-scoped settlement fact: the user attested they did not perform one authored occurrence (M17) | Composite: `(EnrollmentId, ScheduledWorkoutId)` — no surrogate id |
 
 ### Entity Rules
 

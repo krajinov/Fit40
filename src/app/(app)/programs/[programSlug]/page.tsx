@@ -5,10 +5,14 @@ import type { Metadata } from 'next';
 import { PageContainer } from '@/components/shared/PageContainer';
 import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
+import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { getCurrentUser } from '@/features/auth/current-user';
-import { getProgramEnrollmentUseCase } from '@/features/enrollment/services';
+import {
+  getProgramEnrollmentUseCase,
+  getRunClosureSummaryUseCase,
+} from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
 import { ProgramDetail } from '@/features/programs/components/ProgramDetail';
 import { programSlugSchema } from '@/features/programs/schemas/program-routes-schema';
@@ -21,6 +25,7 @@ import {
   nextWorkoutPreviewState,
   type NextWorkoutPreviewState,
 } from '@/features/sessions/next-workout-view';
+import { resolveRunNextOccurrence } from '@/features/enrollment/next-occurrence';
 
 interface ProgramDetailPageProps {
   readonly params: Promise<{ readonly programSlug: string }>;
@@ -67,6 +72,54 @@ async function readEnrollmentSchedule(
       error,
     );
     return { status: 'unavailable' };
+  }
+}
+
+/**
+ * Reads the run's M17 closure summary (Slice 10) with the SAME already-hydrated
+ * program aggregate — no second catalog lookup and no request clock: conclusion
+ * is not a date consequence, so this read deliberately takes no `now`.
+ *
+ * The summary is loaded for EVERY enrolled run — complete, concluded-but-
+ * incomplete or open — because it is factual state, not a rendered one (Slice
+ * 11 renders from it; this page exposes the DTO only). It is additive and
+ * read-only, so a failure (or a `null` DTO, meaning the enrollment vanished
+ * between this page's own reads) is logged and passed on as null: never a
+ * fabricated summary, and never a reason to take down program detail.
+ */
+async function readRunClosure(
+  userId: string,
+  program: TrainingProgram,
+  expectedEnrollmentId: string,
+): Promise<RunClosureSummaryDto | null> {
+  try {
+    // Fenced to the enrollment the page already loaded: a concurrent restart
+    // cannot compose this page's old-enrollment view with a new run's closure.
+    const result = await getRunClosureSummaryUseCase.execute({
+      userId,
+      program,
+      expectedEnrollmentId,
+    });
+    if (!result.ok) {
+      console.error(
+        `Unexpected failure reading the run closure summary for program "${program.slug}"`,
+        result.error,
+      );
+      return null;
+    }
+    if (result.data === null) {
+      console.error(
+        `Run closure summary for program "${program.slug}" became unreadable: the enrollment no longer exists`,
+      );
+      return null;
+    }
+    return result.data;
+  } catch (error: unknown) {
+    console.error(
+      `Unexpected failure reading the run closure summary for program "${program.slug}"`,
+      error,
+    );
+    return null;
   }
 }
 
@@ -145,6 +198,7 @@ export default async function ProgramDetailPage({
   let nextWorkoutPreview: NextWorkoutPreviewState | null = null;
   let schedule: ScheduleReadState | null = null;
   let followThrough: EnrollmentFollowThroughDto | null = null;
+  let runClosure: RunClosureSummaryDto | null = null;
   if (user !== null) {
     const enrollmentResult = await getProgramEnrollmentUseCase.execute({
       userId: user.id,
@@ -165,16 +219,32 @@ export default async function ProgramDetailPage({
     // "unavailable" state — never to "completed" — and no workout data is
     // fabricated.
     if (enrollment.status === 'enrolled') {
+      // M17 (Slice 10): the run's closure truth — counts plus the complete /
+      // concluded / open verdicts — for EVERY enrolled run. It is a factual
+      // read, not a lifecycle surface: no clock, no calendar, no `nextWorkout`
+      // precondition, and nothing rendered from it yet (Slice 11 does), so the
+      // M14 completion surface stays the only lifecycle state shown today.
+      runClosure = await readRunClosure(user.id, result.data.program, enrollment.enrollmentId);
+
+      // M17 (Slice 11): the up-next affordance follows the run's AUTHORITATIVE
+      // next occurrence — the closure-resolved FIRST OPEN authored occurrence
+      // when the closure read supplied it — never merely the first occurrence
+      // without a completed session, which can be a recorded-not-performed
+      // settlement that must not be offered a Start. The preview is resolved for
+      // that occurrence with the page's existing single resolve call (no new DB
+      // read); a null closure DTO degrades to the M14 next workout exactly as
+      // before.
+      const nextOccurrence = resolveRunNextOccurrence(enrollment.nextWorkout, runClosure);
       const workout =
-        enrollment.nextWorkout === null
+        nextOccurrence === null
           ? null
           : await buildNextWorkoutView({
               userId: user.id,
               programSlug: result.data.program.slug,
-              weekNumber: enrollment.nextWorkout.weekNumber,
-              workoutOrder: enrollment.nextWorkout.workoutOrder,
+              weekNumber: nextOccurrence.weekNumber,
+              workoutOrder: nextOccurrence.workoutOrder,
             });
-      nextWorkoutPreview = nextWorkoutPreviewState(enrollment.nextWorkout, workout);
+      nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, workout);
 
       // M15 (Slice 6) + M16 (Slice 5): one server-owned request clock,
       // captured here at the page boundary and shared by both section reads —
@@ -209,6 +279,7 @@ export default async function ProgramDetailPage({
         nextWorkoutPreview={nextWorkoutPreview}
         schedule={schedule}
         followThrough={followThrough}
+        runClosure={runClosure}
       />
     </PageContainer>
   );

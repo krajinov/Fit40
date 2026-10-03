@@ -48,7 +48,7 @@ async function seedSession(
     ],
   });
   if (!sr.ok) throw Error();
-  await repo.save(sr.data);
+  await repo.create(sr.data);
   return { repo, sessionId: sr.data.id as string };
 }
 
@@ -69,7 +69,7 @@ async function seedSkippedSession() {
   if (!sr.ok) throw Error();
   const skipped = skipSessionExercise(sr.data, { exerciseOrder: 1 });
   if (!skipped.ok) throw Error();
-  await repo.save(skipped.data);
+  await repo.create(skipped.data);
   return { repo, sessionId: skipped.data.id as string };
 }
 

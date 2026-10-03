@@ -11,6 +11,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
+import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { EnrollmentScheduleDto, PlannedWorkoutDto } from '@/application/dto/schedule';
 import type {
   TrainingWeeklyInsightsDto,
@@ -24,6 +25,7 @@ const {
   listEnrollmentsExecute,
   findBySlugExecute,
   getEnrollmentExecute,
+  closureExecute,
   resolveNextExecute,
   listHistoryExecute,
   weeklyInsightsExecute,
@@ -31,6 +33,7 @@ const {
   listEnrollmentsExecute: vi.fn(),
   findBySlugExecute: vi.fn(),
   getEnrollmentExecute: vi.fn(),
+  closureExecute: vi.fn(),
   resolveNextExecute: vi.fn(),
   listHistoryExecute: vi.fn(),
   weeklyInsightsExecute: vi.fn(),
@@ -39,6 +42,7 @@ const {
 vi.mock('@/features/enrollment/services', () => ({
   listUserEnrollmentsUseCase: { execute: listEnrollmentsExecute },
   getProgramEnrollmentUseCase: { execute: getEnrollmentExecute },
+  getRunClosureSummaryUseCase: { execute: closureExecute },
 }));
 
 vi.mock('@/features/programs/services', () => ({
@@ -72,9 +76,15 @@ const SCHEDULE_DTO: EnrollmentScheduleDto = {
   configured: true,
   today: '2026-02-18',
   items: [],
-  focus: { today: null, next: null, pastDue: null },
+  unplacedNotPerformedWorkouts: [],
+  focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
 };
 enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: SCHEDULE_DTO });
+
+// M17 final review: the run-closure read. Its default is a DEGRADED read (null
+// data) — the pre-M17 dashboard exactly, where Up next falls back to the M14
+// `nextWorkout`. Tests exercising authoritative open truth override it.
+closureExecute.mockResolvedValue({ ok: true, data: null });
 
 // The dashboard feature root also composes the insights use case over the
 // shared Drizzle repository singletons. Unit tests replace that use case (no
@@ -259,6 +269,8 @@ describe('buildDashboardView / nextWorkoutPreview', () => {
     listEnrollmentsExecute.mockReset();
     findBySlugExecute.mockReset();
     getEnrollmentExecute.mockReset();
+    closureExecute.mockReset();
+    closureExecute.mockResolvedValue({ ok: true, data: null });
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
@@ -346,6 +358,8 @@ describe('buildDashboardView / recentTraining', () => {
     listEnrollmentsExecute.mockReset();
     findBySlugExecute.mockReset();
     getEnrollmentExecute.mockReset();
+    closureExecute.mockReset();
+    closureExecute.mockResolvedValue({ ok: true, data: null });
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
@@ -544,6 +558,8 @@ describe('buildDashboardView / weeklyInsights (M13)', () => {
     listEnrollmentsExecute.mockResolvedValue([]);
     findBySlugExecute.mockReset();
     getEnrollmentExecute.mockReset();
+    closureExecute.mockReset();
+    closureExecute.mockResolvedValue({ ok: true, data: null });
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
@@ -634,6 +650,8 @@ describe('buildDashboardView / M15 schedule (Slice 5)', () => {
     listEnrollmentsExecute.mockReset();
     findBySlugExecute.mockReset();
     getEnrollmentExecute.mockReset();
+    closureExecute.mockReset();
+    closureExecute.mockResolvedValue({ ok: true, data: null });
     resolveNextExecute.mockReset();
     listHistoryExecute.mockReset();
     listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
@@ -690,6 +708,7 @@ describe('buildDashboardView / M15 schedule (Slice 5)', () => {
         },
         next: null,
         pastDue: { count: 1, earliest: { scheduledWorkoutId: 'sw-1', weekNumber: 1, workoutOrder: 1, workoutName: 'Push A', plannedDate: '2026-02-16', status: 'past-due' } satisfies PlannedWorkoutDto },
+        notPerformedRecorded: 0,
       },
     };
     enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: focused });
@@ -743,6 +762,362 @@ describe('buildDashboardView / M15 schedule (Slice 5)', () => {
 
     expect(view.currentProgram).toBeNull();
     expect(enrollmentScheduleExecute).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('buildDashboardView / M17 Up next uses the authoritative open occurrence', () => {
+  beforeEach(() => {
+    listEnrollmentsExecute.mockReset();
+    findBySlugExecute.mockReset();
+    getEnrollmentExecute.mockReset();
+    closureExecute.mockReset();
+    resolveNextExecute.mockReset();
+    listHistoryExecute.mockReset();
+    listHistoryExecute.mockResolvedValue({ ok: true, data: { sessions: [], nextCursor: null } });
+    weeklyInsightsExecute.mockReset();
+    weeklyInsightsExecute.mockResolvedValue({ ok: true, data: insightsDtoFixture() });
+    enrollmentScheduleExecute.mockReset();
+    enrollmentScheduleExecute.mockResolvedValue({ ok: true, data: SCHEDULE_DTO });
+  });
+
+  /** A closure DTO helper: defaults to an open run with one open occurrence. */
+  function closure(overrides: Partial<RunClosureSummaryDto> = {}): RunClosureSummaryDto {
+    return {
+      programSlug: 'prog-1',
+      totalWorkouts: 3,
+      completedWorkouts: 1,
+      notPerformedWorkouts: 1,
+      openWorkouts: 1,
+      hasOpenWorkout: true,
+      openInProgramOrder: [
+        { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
+      ],
+      isConcluded: false,
+      isProgramComplete: false,
+      restartAvailable: false,
+      ...overrides,
+    };
+  }
+
+  /** An enrolled run whose M14 completed ids and next workout the test chooses. */
+  function enrolledRun(nextWorkout: { weekNumber: number; workoutOrder: number } | null): void {
+    listEnrollmentsExecute.mockResolvedValue([{ programSlug: 'prog-1' }]);
+    findBySlugExecute.mockResolvedValue({
+      ok: true,
+      data: { program: { slug: 'prog-1', id: 'p1' }, detail: PROGRAM_DETAIL },
+    });
+    getEnrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: { ...ENROLLED, completedScheduledWorkoutIds: ['sw-1'], nextWorkout },
+    });
+  }
+
+  function preview(view: Awaited<ReturnType<typeof buildDashboardView>>) {
+    if (view.currentProgram === null) throw new Error('expected a current program');
+    return view.currentProgram.nextWorkoutPreview;
+  }
+
+  it('(1) chooses the later OPEN occurrence over a recorded M14 next workout', async () => {
+    // A completed, B recorded N, C open. M14 nextWorkout is B=(1,2); closure's
+    // first OPEN authored occurrence is C=(1,3).
+    enrolledRun({ weekNumber: 1, workoutOrder: 2 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
+        ],
+      }),
+    });
+    // The use case resolves the M14 preview (B); the view re-resolves for C.
+    resolveNextExecute
+      .mockResolvedValueOnce({ ...NEXT_DTO, weekNumber: 1, workoutOrder: 2, workoutName: 'B' })
+      .mockResolvedValue({ ...NEXT_DTO, weekNumber: 1, workoutOrder: 3, workoutName: 'Conditioning C' });
+
+    const state = preview(await buildDashboardView('user-a', PROFILE, NOW));
+
+    expect(state.status).toBe('available');
+    if (state.status !== 'available') return;
+    expect(state.workout.workoutName).toBe('Conditioning C');
+    expect(resolveNextExecute.mock.calls.at(-1)?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 3,
+    });
+  });
+
+  it('(2) chooses the first ACTUAL open occurrence after multiple leading recorded ones', async () => {
+    // A recorded N (1,1), B recorded N (1,2), C open (1,3).
+    enrolledRun({ weekNumber: 1, workoutOrder: 1 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 3,
+      workoutName: 'Conditioning C',
+    });
+
+    const state = preview(await buildDashboardView('user-a', PROFILE, NOW));
+
+    expect(state.status).toBe('available');
+    if (state.status !== 'available') return;
+    expect(state.workout.workoutOrder).toBe(3);
+    expect(resolveNextExecute.mock.calls.at(-1)?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 3,
+    });
+  });
+
+  it('(3) offers no Start / Up next for a concluded-but-incomplete run (no completion copy)', async () => {
+    enrolledRun({ weekNumber: 1, workoutOrder: 2 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        completedWorkouts: 1,
+        notPerformedWorkouts: 2,
+        openWorkouts: 0,
+        hasOpenWorkout: false,
+        openInProgramOrder: [],
+        isConcluded: true,
+        isProgramComplete: false,
+        restartAvailable: true,
+      }),
+    });
+
+    const state = preview(await buildDashboardView('user-a', PROFILE, NOW));
+
+    expect(state).toEqual({
+      status: 'concluded',
+      completedWorkouts: 1,
+      notPerformedWorkouts: 2,
+    });
+    expect(state.status).not.toBe('complete');
+    expect(state).not.toHaveProperty('workout');
+    // The only preview resolve is the use case's own M14 read for the recorded
+    // next workout (1,2); the view resolves nothing further for the settled run
+    // and discards it — no second, authoritative occurrence is ever offered.
+    expect(resolveNextExecute).toHaveBeenCalledTimes(1);
+    expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 2,
+    });
+  });
+
+
+  it('(4) keeps the completed-run behavior unchanged (completion stays M14)', async () => {
+    enrolledRun(null);
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        completedWorkouts: 3,
+        notPerformedWorkouts: 0,
+        openWorkouts: 0,
+        hasOpenWorkout: false,
+        openInProgramOrder: [],
+        isConcluded: true,
+        isProgramComplete: true,
+        restartAvailable: true,
+      }),
+    });
+
+    expect(preview(await buildDashboardView('user-a', PROFILE, NOW))).toEqual({
+      status: 'complete',
+    });
+  });
+
+  it('(5) preserves the M14 fallback when the closure read is unavailable (null DTO)', async () => {
+    enrolledRun({ weekNumber: 2, workoutOrder: 1 });
+    closureExecute.mockResolvedValue({ ok: true, data: null });
+    resolveNextExecute.mockResolvedValue(NEXT_DTO);
+
+    const state = preview(await buildDashboardView('user-a', PROFILE, NOW));
+
+    expect(state.status).toBe('available');
+    if (state.status !== 'available') return;
+    expect(state.workout.workoutName).toBe('Push A');
+    // The M14 next workout (2,1) is what was resolved and offered.
+    expect(resolveNextExecute.mock.calls.at(-1)?.[0]).toMatchObject({
+      weekNumber: 2,
+      workoutOrder: 1,
+    });
+  });
+
+  it('(6) can never surface a freshly recorded current occurrence as Up next', async () => {
+    // M14 next is (2,1); the closure says (2,1) is settled and (2,2) is open.
+    enrolledRun({ weekNumber: 2, workoutOrder: 1 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-4', weekNumber: 2, workoutOrder: 2, workoutName: 'D' },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 2,
+      workoutOrder: 2,
+      workoutName: 'Push B',
+    });
+
+    const state = preview(await buildDashboardView('user-a', PROFILE, NOW));
+
+    expect(state.status).toBe('available');
+    if (state.status !== 'available') return;
+    expect(state.workout.workoutName).toBe('Push B');
+    expect(resolveNextExecute.mock.calls.at(-1)?.[0]).toMatchObject({
+      weekNumber: 2,
+      workoutOrder: 2,
+    });
+  });
+
+  it('(7) dashboard current week follows the SAME first OPEN occurrence as Up next', async () => {
+    // A=(1,1) completed, B=(1,2) recorded N (the M14 nextWorkout), C=(2,1) open.
+    enrolledRun({ weekNumber: 1, workoutOrder: 2 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        totalWorkouts: 2,
+        completedWorkouts: 1,
+        notPerformedWorkouts: 0,
+        openWorkouts: 1,
+        hasOpenWorkout: true,
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-2', weekNumber: 2, workoutOrder: 1, workoutName: 'C' },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({ ...NEXT_DTO, weekNumber: 2, workoutOrder: 1 });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    const upNext = preview(view);
+    expect(upNext.status).toBe('available');
+    if (upNext.status !== 'available') return;
+    expect(upNext.workout.weekNumber).toBe(2);
+    // The "Program week" card uses the SAME week — never the recorded week 1.
+    expect(view.currentWeek?.weekNumber).toBe(2);
+    expect(view.weekSummaries.map((week) => week.status)).toEqual(['completed', 'in-progress']);
+  });
+
+  it('(8) multiple settled leading weeks advance both surfaces to the first open week', async () => {
+    const threeWeekProgram = {
+      ...PROGRAM_DETAIL,
+      weeks: [
+        PROGRAM_DETAIL.weeks[0],
+        PROGRAM_DETAIL.weeks[1],
+        {
+          weekNumber: 3,
+          scheduledWorkouts: [
+            {
+              scheduledWorkoutId: 'sw-3',
+              workoutId: 'w3',
+              workoutName: 'C',
+              workoutSlug: 'c',
+              order: 1,
+              estimatedDurationMinutes: 30,
+            },
+          ],
+        },
+      ],
+    };
+    listEnrollmentsExecute.mockResolvedValue([{ programSlug: 'prog-1' }]);
+    findBySlugExecute.mockResolvedValue({
+      ok: true,
+      data: { program: { slug: 'prog-1', id: 'p1' }, detail: threeWeekProgram },
+    });
+    getEnrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...ENROLLED,
+        completedScheduledWorkoutIds: ['sw-1'],
+        nextWorkout: { weekNumber: 1, workoutOrder: 2 },
+      },
+    });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        openInProgramOrder: [
+          { scheduledWorkoutId: 'sw-3', weekNumber: 3, workoutOrder: 1, workoutName: 'C' },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({ ...NEXT_DTO, weekNumber: 3, workoutOrder: 1 });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    const upNext = preview(view);
+    expect(upNext.status).toBe('available');
+    if (upNext.status !== 'available') return;
+    expect(upNext.workout.weekNumber).toBe(3);
+    expect(view.currentWeek?.weekNumber).toBe(3);
+    expect(view.weekSummaries.map((week) => week.status)).toEqual([
+      'completed',
+      'completed',
+      'in-progress',
+    ]);
+  });
+
+  it('(9) concluded-but-incomplete: no current week — the recorded M14 week is never shown as current', async () => {
+    enrolledRun({ weekNumber: 1, workoutOrder: 2 });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        completedWorkouts: 1,
+        notPerformedWorkouts: 2,
+        openWorkouts: 0,
+        hasOpenWorkout: false,
+        openInProgramOrder: [],
+        isConcluded: true,
+        isProgramComplete: false,
+        restartAvailable: true,
+      }),
+    });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(preview(view).status).toBe('concluded');
+    expect(view.currentWeek).toBeNull();
+  });
+
+  it('(10) complete: the last-week presentation is unchanged', async () => {
+    enrolledRun(null);
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: closure({
+        completedWorkouts: 2,
+        notPerformedWorkouts: 0,
+        openWorkouts: 0,
+        hasOpenWorkout: false,
+        openInProgramOrder: [],
+        isConcluded: true,
+        isProgramComplete: true,
+        restartAvailable: true,
+      }),
+    });
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(preview(view)).toEqual({ status: 'complete' });
+    expect(view.currentWeek?.weekNumber).toBe(2);
+  });
+
+  it('(11) closure unavailable: the M14 fallback week is preserved', async () => {
+    enrolledRun({ weekNumber: 2, workoutOrder: 1 });
+    closureExecute.mockResolvedValue({ ok: true, data: null });
+    resolveNextExecute.mockResolvedValue(NEXT_DTO);
+
+    const view = await buildDashboardView('user-a', PROFILE, NOW);
+
+    expect(view.currentWeek?.weekNumber).toBe(2);
+    expect(view.weekSummaries.map((week) => week.status)).toEqual(['completed', 'in-progress']);
   });
 });
 

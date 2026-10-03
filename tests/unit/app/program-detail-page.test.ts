@@ -21,6 +21,7 @@ const {
   notFoundMock,
   getCurrentUserMock,
   enrollmentExecute,
+  closureExecute,
   programExecute,
   resolveNextExecute,
   scheduleExecute,
@@ -35,6 +36,7 @@ const {
     notFoundMock: notFound,
     getCurrentUserMock: vi.fn(),
     enrollmentExecute: vi.fn(),
+    closureExecute: vi.fn(),
     programExecute: vi.fn(),
     resolveNextExecute: vi.fn(),
     scheduleExecute: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@/features/auth/current-user', () => ({ getCurrentUser: getCurrentUserM
 
 vi.mock('@/features/enrollment/services', () => ({
   getProgramEnrollmentUseCase: { execute: enrollmentExecute },
+  getRunClosureSummaryUseCase: { execute: closureExecute },
 }));
 
 vi.mock('@/features/programs/services', () => ({
@@ -124,6 +127,22 @@ const PROGRAM_DETAIL = {
           order: 1,
           estimatedDurationMinutes: 30,
         },
+        {
+          scheduledWorkoutId: 'sw-2',
+          workoutId: 'wo-2',
+          workoutName: 'Lower Body B',
+          workoutSlug: 'lower-body-b',
+          order: 2,
+          estimatedDurationMinutes: 45,
+        },
+        {
+          scheduledWorkoutId: 'sw-3',
+          workoutId: 'wo-3',
+          workoutName: 'Conditioning C',
+          workoutSlug: 'conditioning-c',
+          order: 3,
+          estimatedDurationMinutes: 25,
+        },
       ],
     },
   ],
@@ -131,6 +150,7 @@ const PROGRAM_DETAIL = {
 
 const ENROLLED_INCOMPLETE = {
   status: 'enrolled',
+  enrollmentId: 'enr-detail-page-a',
   enrolledAt: '2026-01-01T00:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 5, percentage: 42 },
   nextWorkout: { weekNumber: 1, workoutOrder: 2 },
@@ -139,6 +159,7 @@ const ENROLLED_INCOMPLETE = {
 
 const ENROLLED_COMPLETE = {
   status: 'enrolled',
+  enrollmentId: 'enr-detail-page-complete',
   enrolledAt: '2026-01-01T00:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 12, percentage: 100 },
   nextWorkout: null,
@@ -180,6 +201,7 @@ function scheduleDto(configured = true) {
     configured,
     today: '2026-09-23',
     items: configured ? [item] : [],
+    unplacedNotPerformedWorkouts: [],
     focus: configured
       ? { today: item, next: null, pastDue: null }
       : { today: null, next: null, pastDue: null },
@@ -196,7 +218,12 @@ async function renderPage(): Promise<string> {
 /** The M16 follow-through DTO: one open week with one past-due occurrence. */
 function followThroughDto(configured = true) {
   if (!configured) {
-    return { programSlug: SLUG, today: '2026-09-23', configured: false as const };
+    return {
+      programSlug: SLUG,
+      today: '2026-09-23',
+      configured: false as const,
+      notPerformedUnplaced: 0,
+    };
   }
 
   return {
@@ -227,6 +254,31 @@ function followThroughDto(configured = true) {
   };
 }
 
+/**
+ * The M17 Slice 10 run-closure DTO: six authored occurrences, four completed,
+ * one recorded, one still open — concluded false, so the page resolves the
+ * up-next affordance from its first open occurrence (Slice 11). The open
+ * occurrence coincides with the M14 next workout by default; the divergence case
+ * is exercised with an override.
+ */
+function runClosureDto(overrides: Record<string, unknown> = {}) {
+  return {
+    programSlug: SLUG,
+    totalWorkouts: 6,
+    completedWorkouts: 4,
+    notPerformedWorkouts: 1,
+    openWorkouts: 1,
+    hasOpenWorkout: true,
+    openInProgramOrder: [
+      { scheduledWorkoutId: 'sw-2', weekNumber: 1, workoutOrder: 2, workoutName: 'Cardio' },
+    ],
+    isConcluded: false,
+    isProgramComplete: false,
+    restartAvailable: false,
+    ...overrides,
+  };
+}
+
 describe('/programs/[programSlug] page (M15 Slice 6)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -239,6 +291,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     resolveNextExecute.mockResolvedValue(NEXT_DTO);
     scheduleExecute.mockResolvedValue({ ok: true, data: scheduleDto() });
     followThroughExecute.mockResolvedValue({ ok: true, data: followThroughDto() });
+    closureExecute.mockResolvedValue({ ok: true, data: runClosureDto() });
   });
 
   it('never reads or renders a schedule for anonymous visitors', async () => {
@@ -248,6 +301,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    expect(closureExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Weekly schedule');
@@ -261,6 +315,7 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    expect(closureExecute).not.toHaveBeenCalled();
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('This plan so far');
     expect(markup).toContain('Join this program');
@@ -277,6 +332,19 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(input).toMatchObject({ userId: USER_ID });
     expect(input?.program).toBe(PROGRAM_AGGREGATE);
     expect(input?.now).toBeInstanceOf(Date);
+
+    // M17 Slice 10: the closure summary rides the composed read with the SAME
+    // aggregate — and deliberately carries no request clock, because
+    // conclusion is not a date consequence.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    const closureInput = closureExecute.mock.calls[0]?.[0];
+    expect(closureInput).toMatchObject({ userId: USER_ID });
+    expect(closureInput?.program).toBe(PROGRAM_AGGREGATE);
+    expect(closureInput?.now).toBeUndefined();
+    // M17 fencing: the closure read is FENCED to the enrollment this page
+    // already loaded — it never re-resolves the current run, so a concurrent
+    // restart cannot compose this view with a new run's closure facts.
+    expect(closureInput?.expectedEnrollmentId).toBe('enr-detail-page-a');
 
     expect(markup).toContain('aria-label="Training schedule"');
     expect(markup).toContain('aria-label="This week"');
@@ -305,11 +373,20 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
 
   it('keeps the M14 completed state authoritative: no schedule read, no section, restart/leave intact', async () => {
     enrollmentExecute.mockResolvedValue({ ok: true, data: ENROLLED_COMPLETE });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: runClosureDto({ isConcluded: true, isProgramComplete: true, restartAvailable: true }),
+    });
 
     const markup = await renderPage();
 
     expect(scheduleExecute).not.toHaveBeenCalled();
     expect(followThroughExecute).not.toHaveBeenCalled();
+    // The closure summary IS loaded for a complete run — it is factual state —
+    // but Slice 10 draws no lifecycle conclusion from it: the M14 surface
+    // above stays the only state rendered, and none of the DTO's labels leak.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    expect(markup).not.toContain('Cardio');
     expect(markup).not.toContain('aria-label="Training schedule"');
     expect(markup).not.toContain('id="training-schedule"');
     expect(markup).not.toContain('This plan so far');
@@ -318,6 +395,248 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(markup).toContain('Start program again');
     expect(markup).toContain('Leave plan');
     expect(markup).toContain('Program completed — every workout is done.');
+  });
+
+  it('carries the closure summary without rendering its counts or open-occurrence labels', async () => {
+    const markup = await renderPage();
+
+    // Loaded once, for the enrolled run, through the composed use case.
+    expect(closureExecute).toHaveBeenCalledTimes(1);
+    // Only the open occurrence's IDENTITY (its public coordinates) drives the
+    // up-next selection; the DTO's counts, open-occurrence labels and verdict
+    // copy never reach the markup (Slice 11 renders none of that).
+    expect(markup).not.toContain('Cardio');
+    expect(markup).not.toContain('4 completed');
+    expect(markup).not.toContain('concluded');
+    // Every existing surface is unchanged.
+    expect(markup).toContain('Weekly schedule');
+    expect(markup).toContain('aria-label="Training schedule"');
+    expect(markup).toContain('This plan so far');
+  });
+
+  it('surfaces a recorded occurrence on its authored card with Undo (M17 Slice 11)', async () => {
+    // The M15 read resolved the week-1 occurrence as `not-performed`; the page
+    // passes that user-scoped fact down to the authored schedule cards.
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            plannedDate: '2026-09-23',
+            status: 'not-performed',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+
+    const markup = await renderPage();
+
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    // No Start control is offered for it, and its detail link survives.
+    expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
+  });
+
+  it('resolves the up-next affordance from the closure FIRST OPEN occurrence, never a recorded M14 next', async () => {
+    // The M14 next workout (1,1) is recorded as not performed; the run's first
+    // OPEN authored occurrence is (1,2). The up-next preview must be resolved
+    // for the OPEN occurrence — the recorded one must not be offered a Start.
+    enrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: { ...ENROLLED_INCOMPLETE, nextWorkout: { weekNumber: 1, workoutOrder: 1 } },
+    });
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            plannedDate: '2026-09-23',
+            status: 'not-performed',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 2,
+      workoutName: 'Lower Body B',
+    });
+
+    const markup = await renderPage();
+
+    // The preview was resolved for the OPEN occurrence (1,2), never the recorded
+    // M14 next (1,1).
+    expect(resolveNextExecute).toHaveBeenCalledTimes(1);
+    expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 2,
+    });
+    // The panel offers the OPEN occurrence as up next, and the recorded card is
+    // stated as recorded (never as up next).
+    expect(markup).toContain('UP NEXT · WEEK 1 · WORKOUT 2');
+    expect(markup).toContain('Recorded as not performed');
+  });
+
+  it('renders a recorded fallback preview with no Start when the closure read is unavailable (M17 final review)', async () => {
+    // Degraded closure (null): the page falls back to the M14 next workout
+    // (1,2), which here is a RECORDED occurrence. The preview must render the
+    // factual recorded state and never a Start/Resume.
+    closureExecute.mockResolvedValue({ ok: true, data: null });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 2,
+      sessionState: 'not-performed',
+    });
+
+    const markup = await renderPage();
+
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).not.toContain('Start workout');
+    expect(markup).not.toContain('Resume workout');
+  });
+
+  it('marks a rowless recorded occurrence on its authored card with Undo and no Start', async () => {
+    // (1,1) is authored but holds no current planned row; only its recorded fact
+    // exists, so the M15 read reports it among the UNPLACED recorded workouts.
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        unplacedNotPerformedWorkouts: [
+          {
+            scheduledWorkoutId: 'sw-1',
+            weekNumber: 1,
+            workoutOrder: 1,
+            workoutName: 'Upper Body A',
+            recordedAtIso: '2026-09-24T18:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    const markup = await renderPage();
+
+    // The rowless fact is stated on the authored card with Undo, its detail link
+    // survives and — because the card is recorded — no Start / up-next state is
+    // produced for it (no fabricated planned date is needed to suppress it).
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    expect(markup).toContain('href="/programs/fit40-beginner-strength/weeks/1/workouts/1"');
+  });
+
+  it('shows rowless-recorded B as recorded while the later OPEN C is Up next (A/B/C chain)', async () => {
+    // Authored A=(1,1) completed, B=(1,2) recorded with NO planned row, C=(1,3)
+    // open. The M14 next is B (the first non-completed), which must NOT be shown
+    // as up next; the closure's first OPEN authored occurrence is C.
+    enrollmentExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...ENROLLED_INCOMPLETE,
+        completedScheduledWorkoutIds: ['sw-1'],
+        nextWorkout: { weekNumber: 1, workoutOrder: 2 },
+      },
+    });
+    scheduleExecute.mockResolvedValue({
+      ok: true,
+      data: {
+        ...scheduleDto(),
+        items: [
+          {
+            scheduledWorkoutId: 'sw-3',
+            weekNumber: 1,
+            workoutOrder: 3,
+            workoutName: 'Conditioning C',
+            plannedDate: '2026-09-25',
+            status: 'planned',
+          },
+        ],
+        unplacedNotPerformedWorkouts: [
+          {
+            scheduledWorkoutId: 'sw-2',
+            weekNumber: 1,
+            workoutOrder: 2,
+            workoutName: 'Lower Body B',
+            recordedAtIso: '2026-09-24T18:00:00.000Z',
+          },
+        ],
+        focus: { today: null, next: null, pastDue: null },
+      },
+    });
+    closureExecute.mockResolvedValue({
+      ok: true,
+      data: runClosureDto({
+        openInProgramOrder: [
+          {
+            scheduledWorkoutId: 'sw-3',
+            weekNumber: 1,
+            workoutOrder: 3,
+            workoutName: 'Conditioning C',
+          },
+        ],
+      }),
+    });
+    resolveNextExecute.mockResolvedValue({
+      ...NEXT_DTO,
+      weekNumber: 1,
+      workoutOrder: 3,
+      workoutName: 'Conditioning C',
+    });
+
+    const markup = await renderPage();
+
+    // B's rowless record is stated on its authored card, with Undo.
+    expect(markup).toContain('Recorded as not performed');
+    expect(markup).toContain('>Undo<');
+    // C — the first OPEN occurrence — is the resolved up-next / Start target.
+    expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+      weekNumber: 1,
+      workoutOrder: 3,
+    });
+    expect(markup).toContain('UP NEXT · WEEK 1 · WORKOUT 3');
+    expect(markup).toContain(
+      'href="/programs/fit40-beginner-strength/weeks/1/workouts/3/session"',
+    );
+  });
+
+  it('degrades a failed run-closure read to a null DTO (logged), never to fabricated counts', async () => {
+    closureExecute.mockResolvedValue({
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'bad id', field: 'userId' },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const markup = await renderPage();
+
+      expect(consoleError).toHaveBeenCalled();
+      expect(markup).toContain('Weekly schedule');
+      expect(markup).toContain('aria-label="Training schedule"');
+      // Still the incomplete M14 surface: a failed closure read never becomes
+      // a completion claim.
+      expect(markup).not.toContain('View completion summary');
+      // Degraded read → no closure truth is invented: the up-next affordance
+      // keeps the M14 next workout (1,2).
+      expect(resolveNextExecute.mock.calls[0]?.[0]).toMatchObject({
+        weekNumber: 1,
+        workoutOrder: 2,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('degrades a failed schedule read to no section (logged), never to unconfigured', async () => {

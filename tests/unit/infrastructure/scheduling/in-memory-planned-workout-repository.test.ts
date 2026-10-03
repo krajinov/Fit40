@@ -189,7 +189,7 @@ describe('InMemoryPlannedWorkoutRepository — reschedule', () => {
       plannedDate('2026-10-07'),
     );
 
-    expect(moved).toBe(true);
+    expect(moved).toEqual({ outcome: 'moved' });
     expect((await repo.listByEnrollment(OWNER_RUN)).map(line)).toEqual([
       'prog-w1-2@2026-09-30',
       'prog-w2-1@2026-10-05',
@@ -211,21 +211,21 @@ describe('InMemoryPlannedWorkoutRepository — reschedule', () => {
     expect((await repo.listByEnrollment(OWNER_RUN)).map(line)).toEqual(SET_LINES);
   });
 
-  it('returns false for a row this run does not plan, without writing', async () => {
+  it('returns not-moved for a row this run does not plan, without writing', async () => {
     const repo = new InMemoryPlannedWorkoutRepository();
     await repo.replaceAllForEnrollment(OWNER_RUN, SET);
 
-    expect(await repo.reschedule(OWNER_RUN, scheduledWorkoutId('prog-w9-9'), plannedDate('2026-10-09'))).toBe(
-      false,
-    );
+    expect(
+      await repo.reschedule(OWNER_RUN, scheduledWorkoutId('prog-w9-9'), plannedDate('2026-10-09')),
+    ).toEqual({ outcome: 'not-moved' });
     expect((await repo.listByEnrollment(OWNER_RUN)).map(line)).toEqual(SET_LINES);
   });
 
-  it('returns false for a run with no planning', async () => {
+  it('returns not-moved for a run with no planning', async () => {
     const repo = new InMemoryPlannedWorkoutRepository();
 
-    expect(await repo.reschedule(OTHER_RUN, scheduledWorkoutId('prog-w1-1'), plannedDate('2026-10-09'))).toBe(
-      false,
-    );
+    expect(
+      await repo.reschedule(OTHER_RUN, scheduledWorkoutId('prog-w1-1'), plannedDate('2026-10-09')),
+    ).toEqual({ outcome: 'not-moved' });
   });
 });

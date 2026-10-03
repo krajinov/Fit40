@@ -60,6 +60,8 @@ export interface FollowThroughWeekRowView {
   readonly startedLabel: string | null;
   /** `1 past due`, or null when the DTO reports none. */
   readonly pastDueLabel: string | null;
+  /** `1 not performed`, or null when the DTO reports none. */
+  readonly notPerformedLabel: string | null;
   /**
    * True only for the still-open week containing the DTO's `today`. `closed`
    * stays authoritative and is never recomputed; a provisional future week is
@@ -85,6 +87,13 @@ export interface FollowThroughSectionView {
   readonly title: string;
   readonly horizonLabel: string;
   readonly summary: FollowThroughSummaryView;
+  /**
+   * One factual line when the run has recorded occurrences with no current
+   * planned row, or null otherwise. It names the count and the surface that owns
+   * them (the calendar on this page); it carries no action, no undo control and
+   * no unplaced-copy sentence — the labelled list lives in the M15 calendar.
+   */
+  readonly unplacedNotPerformedLabel: string | null;
   readonly disclosure: string;
 }
 
@@ -101,9 +110,23 @@ export function buildFollowThroughView(dto: ConfiguredFollowThroughDto): FollowT
             totalsLabel: totalsLabel(dto.totals),
             weeks: dto.weeks.map((week) => weekRowView(week, dto.today)),
           },
+    unplacedNotPerformedLabel:
+      dto.notPerformedUnplaced > 0
+        ? countLabel(dto.notPerformedUnplaced, FOLLOW_THROUGH_UNPLACED_POINTER)
+        : null,
     disclosure: FOLLOW_THROUGH_DISCLOSURE,
   };
 }
+
+/**
+ * The pointer phrase for recorded occurrences that hold no current planned row.
+ *
+ * Factual and verbless, so any count reads correctly and nothing is claimed about
+ * dates, weeks or the horizon. It names the calendar section on this page, which
+ * is where those occurrences are listed and undone — this report only points.
+ */
+export const FOLLOW_THROUGH_UNPLACED_POINTER =
+  'recorded as not performed without a calendar date — see Training schedule';
 
 /** One week's labels, using only values the DTO already carries. */
 function weekRowView(week: FollowThroughWeekDto, today: string): FollowThroughWeekRowView {
@@ -116,6 +139,8 @@ function weekRowView(week: FollowThroughWeekDto, today: string): FollowThroughWe
     progressLabel: `${week.completed} of ${week.planned} done`,
     startedLabel: week.started > 0 ? countLabel(week.started, 'started') : null,
     pastDueLabel: week.pastDue > 0 ? countLabel(week.pastDue, 'past due') : null,
+    notPerformedLabel:
+      week.notPerformed > 0 ? countLabel(week.notPerformed, 'not performed') : null,
     // `closed` is authoritative: a closed week is never the current one, and a
     // week is only "current" when today falls inside its [start, end) dates.
     isCurrent:
@@ -149,6 +174,11 @@ function totalsLabel(totals: FollowThroughWeekCountsDto): string {
   }
   if (totals.pastDue > 0) {
     fragments.push(countLabel(totals.pastDue, 'past due'));
+  }
+  if (totals.notPerformed > 0) {
+    // A restatement of the recorded facts in the reported weeks — never a
+    // separate denominator: those occurrences are already counted as planned.
+    fragments.push(countLabel(totals.notPerformed, 'not performed'));
   }
 
   return fragments.join(' · ');

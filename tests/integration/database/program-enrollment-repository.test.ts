@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   EnrollmentAlreadyExistsError,
   EnrollmentIdentityMismatchError,
+  type RestartabilityDecision,
 } from '@/application/ports/program-enrollment-repository';
 import {
   createProgramEnrollment,
@@ -33,6 +34,13 @@ function enid(value: string) {
   if (!result.ok) throw new Error(result.error.message);
   return result.data;
 }
+
+/**
+ * This suite is about the compare-and-replace MECHANICS (identity guard,
+ * rollback, FK detachment), not restartability, so the injected decision always
+ * passes. The locked-fact gate itself is proven by the restart and race suites.
+ */
+const alwaysRestartable: RestartabilityDecision = () => true;
 
 function userId(value: string) {
   const result = createUserId(value);
@@ -124,9 +132,10 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
     const replaced = await programEnrollmentRepository.replaceExpectedWithNew(
       enid('enr-1'),
       enrollment('enr-2', 'user-a', 'prog-beginner-strength', '2026-04-01T10:00:00Z'),
+      alwaysRestartable,
     );
 
-    expect(replaced).toBe(true);
+    expect(replaced.kind).toBe('replaced');
 
     // The old identity is gone, the fresh one exists, and nothing else moved:
     // exactly one enrollment for the (user, program) pair.
@@ -155,17 +164,19 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
       await programEnrollmentRepository.replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-2', 'user-a', 'prog-beginner-strength', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       ),
-    ).toBe(true);
+    ).toEqual({ kind: 'replaced' });
     // ...which owns a session of its own.
     await attachSession('sess-after', 'user-a', 'enr-2');
 
     const replaced = await programEnrollmentRepository.replaceExpectedWithNew(
       enid('enr-1'),
       enrollment('enr-3', 'user-a', 'prog-beginner-strength', '2026-05-01T10:00:00Z'),
+      alwaysRestartable,
     );
 
-    expect(replaced).toBe(false);
+    expect(replaced.kind).toBe('stale');
     // No insertion, and the newer enrollment is untouched.
     const rows = await enrollmentRows();
     expect(rows.map((row) => row.id)).toEqual(['enr-2']);
@@ -204,6 +215,7 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
       .replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-a2', 'user-a', 'prog-beginner-strength', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       )
       .then(
         () => null,
@@ -249,6 +261,7 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
       .replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-other', 'user-a', 'prog-beginner-strength', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       )
       .then(
         () => null,
@@ -327,6 +340,7 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
       .replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-2', 'user-a', 'prog-strong-at-home', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       )
       .then(
         () => null,
@@ -356,6 +370,7 @@ describe('DrizzleProgramEnrollmentRepository.replaceExpectedWithNew', () => {
       .replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-2', 'user-b', 'prog-beginner-strength', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       )
       .then(
         () => null,

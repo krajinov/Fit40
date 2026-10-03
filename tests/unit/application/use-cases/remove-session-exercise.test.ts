@@ -76,7 +76,7 @@ async function seedSession(
   });
   if (!created.ok) throw Error(created.error.message);
   const seeded = withAdded(created.data);
-  await repo.save(seeded);
+  await repo.create(seeded);
   return { repo, sessionId: seeded.id as string };
 }
 
@@ -100,7 +100,7 @@ async function seedThreeOccurrenceSession(): Promise<{
   if (!created.ok) throw Error(created.error.message);
   // ex-001 (template), ex-100 (added, order 2), ex-200 (added, order 3).
   const seeded = withAdded(withAdded(created.data, 'ex-100'), 'ex-200');
-  await repo.save(seeded);
+  await repo.create(seeded);
   return { repo, sessionId: seeded.id as string };
 }
 

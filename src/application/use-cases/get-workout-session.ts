@@ -6,11 +6,21 @@
  * each other's sessions for the same occurrence. When the user is not
  * enrolled, no session can exist for them and the view reports
  * `enrolled: false` so the presentation layer can offer the join action.
+ *
+ * This is also the workout detail surface's own read, so it reports the
+ * occurrence's M17 not-performed fact as well (`notPerformedRecorded`): the
+ * detail header must be able to refuse Start for a settled occurrence without
+ * inferring settlement from the absence or state of a session. The session
+ * state and the settlement state are mutually exclusive truths of the SAME
+ * occurrence, so they are read through ONE coherent snapshot port — never two
+ * independent statements, which could pair the old abandoned session with the
+ * freshly committed record while `recordNotPerformed` replaces one with the
+ * other atomically.
  */
 
+import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occurrence-execution-facts-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
 import { createUserId } from '@/domain/types/ids';
@@ -37,13 +47,18 @@ export interface GetWorkoutSessionInput {
 export interface WorkoutSessionView {
   readonly enrolled: boolean;
   readonly session: WorkoutSessionDto | null;
+  /**
+   * Whether the occurrence carries an M17 not-performed record in THIS user's
+   * run. Always false when the user is not enrolled (there is no run to settle).
+   */
+  readonly notPerformedRecorded: boolean;
 }
 
 export class GetWorkoutSessionUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
+    private readonly occurrenceExecutionFactsRepository: OccurrenceExecutionFactsRepository,
   ) {}
 
   async execute(
@@ -88,17 +103,22 @@ export class GetWorkoutSessionUseCase {
       program.id,
     );
     if (enrollment === null) {
-      return ok({ enrolled: false, session: null });
+      return ok({ enrolled: false, session: null, notPerformedRecorded: false });
     }
 
-    const session = await this.sessionRepository.findByEnrollmentAndScheduledWorkout(
+    // The occurrence's session state and its settlement state from ONE
+    // coherent snapshot: mutually exclusive truths of the same occurrence, so
+    // a concurrent record/undo transition can never pair the old session with
+    // the fresh record (or erase both).
+    const facts = await this.occurrenceExecutionFactsRepository.findOccurrenceExecutionFacts(
       enrollment.id,
       occurrence.scheduled.id,
     );
 
     return ok({
       enrolled: true,
-      session: session === null ? null : toWorkoutSessionDto(session),
+      session: facts.session === null ? null : toWorkoutSessionDto(facts.session),
+      notPerformedRecorded: facts.notPerformedRecorded,
     });
   }
 }

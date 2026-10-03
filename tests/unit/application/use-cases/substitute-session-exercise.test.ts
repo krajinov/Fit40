@@ -54,7 +54,7 @@ async function seedSession(
     })),
   });
   if (!sr.ok) throw Error();
-  await repo.save(sr.data);
+  await repo.create(sr.data);
   return { repo, sessionId: sr.data.id as string };
 }
 

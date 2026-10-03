@@ -81,8 +81,17 @@ export function TrainingScheduleCard({ state, programName, className }: Training
   const today = schedule.focus.today;
   const next = schedule.focus.next;
   const pastDue = schedule.focus.pastDue;
-  // "Next workout" answers the question only when nothing is actionable today.
-  const todayActionable = today !== null && today.status !== 'completed';
+
+  // `today` answers one question only: "what calendar occurrence belongs to
+  // today?" — never "what should the user act on?". The two settled statuses
+  // are factual state, not work to do: a completed workout is done, and an M17
+  // recorded-not-performed occurrence is SETTLED execution truth. Neither is
+  // actionable, so neither renders Start/Resume nor hides the genuinely open
+  // `next` occurrence (a settled today item must never suppress the next open
+  // workout). `planned` / `past-due` / `in-progress` keep their behavior.
+  const todaySettled =
+    today !== null && (today.status === 'completed' || today.status === 'not-performed');
+  const todayActionable = today !== null && !todaySettled;
 
   return (
     <section
@@ -123,9 +132,12 @@ export function TrainingScheduleCard({ state, programName, className }: Training
             </h3>
             {today.status === 'completed' && <Badge variant="done">Completed today</Badge>}
             {today.status === 'in-progress' && <Badge variant="neutral">In progress</Badge>}
+            {today.status === 'not-performed' && (
+              <Badge variant="neutral">Recorded as not performed</Badge>
+            )}
           </div>
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            {today.status !== 'completed' && (
+            {todayActionable && (
               <Link
                 href={sessionPath(schedule, today)}
                 className={buttonVariants({ className: 'w-full md:w-auto' })}

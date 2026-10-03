@@ -32,6 +32,11 @@
  * foreign-key check: recording a workout is never blocked by scheduling, and
  * scheduling waits are never extended by training.
  *
+ * `reschedule` additionally re-checks the occurrence's M17 not-performed fact
+ * UNDER that lock, before its UPDATE. Settlement is authoritative execution
+ * truth, so a record that committed after the caller's pre-read refuses the move
+ * with zero writes instead of leaving a settled occurrence looking movable.
+ *
  * Consequences:
  * - Concurrent scheduling writes against the same run serialize, so the stored
  *   schedule is always exactly one complete replacement set — never a union of
@@ -67,6 +72,31 @@ export class PlannedDateConflictError extends Error {
     this.name = 'PlannedDateConflictError';
   }
 }
+
+/**
+ * Outcome of one `reschedule` attempt, decided inside the transaction AFTER the
+ * enrollment lock and BEFORE any planned write.
+ *
+ * The M17 settlement re-check lives here, not in the caller: a record that
+ * committed between the caller's pre-read and this transaction's lock must
+ * refuse the move with ZERO planned-workout writes (M17 final review).
+ */
+export type PlannedWorkoutRescheduleOutcome =
+  /** The occurrence's planned row was moved to the target date. */
+  | { readonly outcome: 'moved' }
+  /**
+   * Nothing was written: the enrollment row no longer exists (a concurrent
+   * leave/restart won), or the run has no planned row for the occurrence.
+   * Callers resolve that ambiguity from current state with a single read-only
+   * re-check.
+   */
+  | { readonly outcome: 'not-moved' }
+  /**
+   * Nothing was written: the occurrence carries an M17 not-performed record
+   * under the lock. A recorded occurrence is settled execution truth, so it is
+   * never movable as ordinary future intent.
+   */
+  | { readonly outcome: 'recorded-not-performed' };
 
 /**
  * Thrown by `replaceAllForEnrollment` when a supplied row belongs to a
@@ -202,21 +232,26 @@ export interface PlannedWorkoutRepository {
    * that locks the enrollment row first (see the concurrency contract above).
    *
    * Contract:
-   * - Returns `true` when the row was updated.
-   * - Returns `false` — writing nothing — when the enrollment row no longer
-   *   exists (a concurrent leave/restart won) or when the occurrence has no
-   *   planned row in this run (never planned, or removed by a regeneration
-   *   that completed it). Callers resolve that ambiguity from current state
-   *   with a single read-only re-check.
+   * - Returns `{ outcome: 'moved' }` when the row was updated.
+   * - Returns `{ outcome: 'recorded-not-performed' }` — writing NOTHING — when
+   *   the occurrence carries an M17 not-performed record read UNDER the lock.
+   *   The settlement check happens after the lock and before the UPDATE, so a
+   *   record that committed after the caller's pre-read can never be moved.
+   * - Returns `{ outcome: 'not-moved' }` — writing nothing — when the enrollment
+   *   row no longer exists (a concurrent leave/restart won) or when the
+   *   occurrence has no planned row in this run (never planned, or removed by a
+   *   regeneration that completed it). Callers resolve that ambiguity from
+   *   current state with a single read-only re-check.
    * - Throws {@link PlannedDateConflictError} when another planned workout of
    *   the same run already holds the target date: exactly one planned workout
    *   per calendar date is a business rule, and the database constraint naming
    *   `planned_workouts_enrollment_date_unique` is its final authority.
-   * - No retry loop and no second write: one locking read and one UPDATE.
+   * - No retry loop and no second write: one locking read, one settlement read
+   *   and one UPDATE.
    */
   reschedule(
     enrollmentId: EnrollmentId,
     scheduledWorkoutId: ScheduledWorkoutId,
     plannedDate: PlannedDate,
-  ): Promise<boolean>;
+  ): Promise<PlannedWorkoutRescheduleOutcome>;
 }

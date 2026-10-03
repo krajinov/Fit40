@@ -5,6 +5,14 @@
  * orchestrating the scheduled-workout detail with the user's session state
  * is application orchestration. The raw prescription value objects are
  * returned; label formatting stays in presentation.
+ *
+ * M17 final review: the preview carries the occurrence's authoritative
+ * settlement truth. `GetWorkoutSessionUseCase` already reports
+ * `notPerformedRecorded` for the user's own run, so a recorded occurrence maps
+ * to the `not-performed` session state — never `not-started`, which would
+ * advertise a Start the backend refuses. The degraded paths (a null closure
+ * read that falls back to the M14 `nextWorkout`) therefore stay non-startable
+ * without any surface inspecting a repository or recomputing settlement.
  */
 
 import type { NextWorkoutDto, NextWorkoutSessionState } from '@/application/dto/dashboard';
@@ -53,9 +61,14 @@ export class ResolveNextWorkoutUseCase {
     }
 
     const workout = workoutResult.data.workout;
-    const sessionState: NextWorkoutSessionState =
-      sessionResult.data.session !== null &&
-      sessionResult.data.session.status === 'in-progress'
+    // M17 final review: the occurrence's authoritative settlement fact comes
+    // from the SAME user-scoped session read — never from a client flag. A
+    // recorded occurrence has no session but is settled, so it is NEVER
+    // 'not-started' (which would advertise a Start the backend refuses).
+    const sessionState: NextWorkoutSessionState = sessionResult.data.notPerformedRecorded
+      ? 'not-performed'
+      : sessionResult.data.session !== null &&
+          sessionResult.data.session.status === 'in-progress'
         ? 'in-progress'
         : 'not-started';
 

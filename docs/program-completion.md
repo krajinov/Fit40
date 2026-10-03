@@ -6,6 +6,12 @@ and presents, and what M14 deliberately does not do. The Domain layer is the
 semantic authority for completion; Application orchestrates; no completion
 state is ever persisted.
 
+M17 added a second, independent verdict — **run conclusion** — and widened
+restart from "complete" to **restartable (complete OR concluded)** without
+changing `isProgramComplete` or any completion surface. See
+[Run Closure & Not-Performed Settlement](run-closure.md); this document stays
+the completion authority.
+
 ## Scope
 
 M14 makes a finished program run a first-class, truthful moment:
@@ -14,8 +20,9 @@ M14 makes a finished program run a first-class, truthful moment:
 2. **Surface** it: a dedicated completion route, the completed enrollment
    panel, a conditional Session Completed callout, and the dashboard's
    completed card.
-3. **Restart** a completed run through ONE atomic compare-and-replace write,
-   preserving user-global training history.
+3. **Restart** a completed run (since M17: a completed **or concluded** run)
+   through ONE atomic compare-and-replace write, preserving user-global
+   training history.
 4. Report the run's **historical** Personal Record events (M12 semantics)
    for the current run only.
 
@@ -48,8 +55,10 @@ schedule (null when none). There is no persisted enrollment completion date.
 - Legacy `getNextWorkout` may return **null** for the same program (reads as
   "nothing left"), so the two helpers intentionally diverge on the empty
   schedule.
-- Restart uses `isProgramComplete` as its authority, so a zero-schedule
-  program **cannot** be restarted (pinned as locked semantics in tests).
+- Restart uses `isRunRestartable` (M17), and a zero-schedule program is
+  **neither complete nor concluded** — no `NotPerformedOccurrence` can ever
+  exist for it — so it **cannot** be restarted (pinned as locked semantics in
+  tests).
 - Broader reconciliation of the two helpers is explicitly out of M14 scope.
 
 ## Current run identity
@@ -78,9 +87,10 @@ performs exactly one write attempt:
 2. Load the **current** enrollment server-side — the caller never supplies an
    expected EnrollmentId, and no enrollment id ever crosses the client
    boundary.
-3. Verify completion with `isProgramComplete` against the current
-   enrollment's completed ids (incomplete → `PROGRAM_NOT_COMPLETE`, zero
-   writes).
+3. Verify **restartability** with `isRunRestartable` (M17) against the
+   current enrollment: `isProgramComplete` over its completed ids **or**
+   `isRunConcluded` over those ids plus its not-performed facts (not
+   restartable → `PROGRAM_NOT_COMPLETE`, zero writes).
 4. Build a fresh enrollment (`IdGenerator.generate()`,
    `enrolledAt = new Date()`; same user, same program).
 5. Call `replaceExpectedWithNew(oldId, fresh)` **exactly once**.
@@ -146,10 +156,13 @@ summary — see Current run identity.
 
 `/programs/[programSlug]/completed` (server-rendered): invalid or unknown
 slug → `notFound()`; unauthenticated → login with a `?next=` deep link back;
-not enrolled (`null`) or incomplete → redirect to program detail; completed →
+not enrolled (`null`), incomplete **or merely concluded (not complete)** →
+redirect to program detail; completed →
 render. Completion state comes only from `GetProgramCompletionSummaryUseCase`
-— never query params or client state. After a successful restart the route
-naturally redirects, because the fresh enrollment is incomplete.
+— never query params or client state, never the M17 closure read. A concluded
+but incomplete run never receives completion semantics here; its surface is
+the "Run closed" callout on program detail. After a successful restart the
+route naturally redirects, because the fresh enrollment is incomplete.
 
 The summary reports, for the current run only:
 
@@ -210,8 +223,11 @@ No other performance numbers are claimed by M14.
   secondary "Choose another program" → `/programs`.
 - **EnrolledProgramPanel** — complete enrollment only: "View completion
   summary" → the route, plus the shared restart button; Leave preserved.
-  Incomplete enrollments keep their existing up-next/progress behavior and
-  never see completion controls.
+  Incomplete enrollments keep their progress behavior and never see completion
+  controls. (Since M17 the incomplete run's **up-next** affordance follows the
+  run closure's first OPEN authored occurrence, not merely the first
+  non-completed one — a recorded occurrence is settled and is never shown as up
+  next. See [Run Closure & Not-Performed Settlement](run-closure.md).)
 - **Session Completed** — the `programCompletion` callout ("Program complete"
   → summary) renders only when the server-resolved enrollment view says
   complete. The program/enrollment resolution runs **only** for
@@ -247,9 +263,14 @@ No other performance numbers are claimed by M14.
   completion summary is unrecoverable after restart.
 - Zero-schedule divergence (`isProgramComplete` false vs legacy
   `getNextWorkout` null) is documented, not reconciled.
-- No dashboard restart control and no new dashboard data flow.
+- No dashboard restart control. Since M17 the dashboard does have one **additive**
+  closure read (`RunClosureSummaryDto`) so "Up next" follows the run's first
+  OPEN authored occurrence and a concluded-but-incomplete run shows no Start —
+  but that read changes no completion semantics, adds no restart control, and
+  the M14 completed card stays the only completion surface (see
+  [Run Closure & Not-Performed Settlement](run-closure.md)).
 - `ENROLLMENT_CHANGED` is reachable only when the current enrollment itself
-  is complete (state moved twice); the common concurrent loser observes
+  is restartable (state moved twice); the common concurrent loser observes
   `PROGRAM_NOT_COMPLETE`.
 
 ## Tests & acceptance evidence

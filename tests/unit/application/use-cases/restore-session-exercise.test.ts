@@ -55,7 +55,7 @@ async function seedSubstitutedSession(
     replacementExerciseId: eid(REPLACE_WITH),
   });
   if (!substituted.ok) throw Error();
-  await repo.save(substituted.data);
+  await repo.create(substituted.data);
   return { repo, sessionId: substituted.data.id as string };
 }
 
@@ -171,7 +171,7 @@ describe('RestoreSessionExerciseUseCase', () => {
       ],
     });
     if (!sr.ok) throw Error();
-    await repo.save(sr.data);
+    await repo.create(sr.data);
     const uc = new RestoreSessionExerciseUseCase(repo);
 
     const r = await uc.execute({ sessionId: sr.data.id as string, userId: OWNER_ID, exerciseOrder: 1 , expectedSessionVersion: 0 });

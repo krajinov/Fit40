@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import { ReschedulePlannedWorkoutUseCase } from '@/application/use-cases/reschedule-planned-workout';
@@ -14,9 +15,12 @@ import {
   makeEnrollmentRepo,
   makePlannedRepo,
   makeProgram,
+  makeNotPerformedRepo,
+  notPerformedFact,
   makeProgramRepo,
   MON,
   NEXT_FRI,
+  NEXT_WED,
   NOW,
   OCCURRENCE_W1_1,
   OCCURRENCE_W1_2,
@@ -42,19 +46,22 @@ function makeHarness(
     readonly program?: TrainingProgram | null;
     readonly enrollmentRepo?: ProgramEnrollmentRepository;
     readonly planned?: PlannedWorkoutRepository;
+    readonly notPerformed?: NotPerformedOccurrenceRepository;
   } = {},
 ) {
   const programRepo = makeProgramRepo(options.program === undefined ? PROGRAM : options.program);
   const enrollments = options.enrollmentRepo ?? new InMemoryProgramEnrollmentRepository();
   const plannedWorkouts = options.planned ?? new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
+  const notPerformed = options.notPerformed ?? makeNotPerformedRepo();
   const useCase = new ReschedulePlannedWorkoutUseCase(
     programRepo,
     enrollments,
     plannedWorkouts,
     sessions,
+    notPerformed,
   );
-  return { programRepo, enrollments, plannedWorkouts, sessions, useCase };
+  return { programRepo, enrollments, plannedWorkouts, sessions, notPerformed, useCase };
 }
 
 type Harness = ReturnType<typeof makeHarness>;
@@ -345,7 +352,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A), null]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -363,7 +370,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A), enrollment(ENR_B, USER_A)]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -382,7 +389,7 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
       enrollmentRepo: makeEnrollmentRepo([enrollment(ENR_A, USER_A)]),
       planned: makePlannedRepo({
         rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
-        rescheduleResult: false,
+        rescheduleResult: { outcome: 'not-moved' },
       }),
     });
     const rescheduleSpy = vi.mocked(harness.plannedWorkouts.reschedule);
@@ -441,5 +448,106 @@ describe('ReschedulePlannedWorkoutUseCase', () => {
 
     expect(result.ok).toBe(true);
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * M17 Slice 8 — a recorded occurrence is settled, so it is never movable as
+ * ordinary future intent. The guard lives in the existing eligibility block
+ * (the same boundary that refuses completed and in-progress moves) and adds
+ * only that check: settlement policy stays in the mutation authority.
+ */
+describe('ReschedulePlannedWorkoutUseCase — recorded not-performed occurrences', () => {
+  it('refuses to move a recorded occurrence without writing', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+    const rescheduleSpy = vi.spyOn(harness.plannedWorkouts, 'reschedule');
+    const listFacts = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+
+    const result = await reschedule(harness, NEXT_WED);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({
+      code: 'OCCURRENCE_RECORDED_NOT_PERFORMED',
+      programSlug: PROGRAM_SLUG,
+      scheduledWorkoutId: OCCURRENCE_W1_1,
+    });
+    expect(rescheduleSpy).not.toHaveBeenCalled();
+    // ONE bounded fact read, scoped to the caller's run.
+    expect(listFacts).toHaveBeenCalledTimes(1);
+    expect(listFacts).toHaveBeenCalledWith(enrollmentId(ENR_A));
+  });
+
+  it('keeps the established precedence: completed still outranks the record', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+    await saveCompletedSession(harness.sessions, {
+      id: 's-done',
+      userId: USER_A,
+      enrollmentId: enrollmentId(ENR_A),
+      scheduledWorkoutId: OCCURRENCE_W1_1,
+      workoutId: WORKOUT_A,
+    });
+
+    const result = await reschedule(harness, NEXT_WED);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('WORKOUT_ALREADY_COMPLETED');
+  });
+
+  it("ignores another enrollment's recorded fact", async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_B, OCCURRENCE_W1_1)]),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+
+    const result = await reschedule(harness, NEXT_WED);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a record that committed after the pre-read but before the locked update', async () => {
+    // The pre-read saw NO fact — the occurrence looked OPEN — but by the time
+    // the planned repository took the enrollment lock the record had committed.
+    // The repository reports `recorded-not-performed` and writes nothing: the
+    // use case must surface the typed refusal, never a success.
+    const harness = makeHarness({
+      planned: makePlannedRepo({
+        rows: [planned(ENR_A, OCCURRENCE_W1_1, MON)],
+        rescheduleResult: { outcome: 'recorded-not-performed' },
+      }),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+    const listFacts = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+
+    const result = await reschedule(harness, NEXT_WED);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({
+      code: 'OCCURRENCE_RECORDED_NOT_PERFORMED',
+      programSlug: PROGRAM_SLUG,
+      scheduledWorkoutId: OCCURRENCE_W1_1,
+    });
+    // The open pre-read ran, then the under-lock truth won.
+    expect(listFacts).toHaveBeenCalledTimes(1);
   });
 });

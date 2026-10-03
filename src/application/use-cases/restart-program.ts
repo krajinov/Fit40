@@ -14,11 +14,23 @@
  * client value could address another run's enrollment, so restart authority is
  * always the row the current state resolves to.
  *
- * Completion gate: the Domain's `isProgramComplete` over the enrollment's
- * completed scheduled-workout ids — the single authoritative rule (which also
- * reports a zero-schedule program as not complete). Preview state, dashboard
- * state, persisted status, the completion-summary DTO and client input are
- * never consulted.
+ * Restartability gate: the Domain's `isRunRestartable` over the enrollment's
+ * own execution truth — completed scheduled-workout ids (M14) and recorded
+ * not-performed facts (M17) — read through the ONE-snapshot closure-facts
+ * projection, never two independently mutable reads that could tear across a
+ * concurrent Undo→start→complete and manufacture a completed+recorded overlap
+ * the persisted state never held. It is the single authoritative rule: complete OR
+ * concluded, so a run whose every authored occurrence is settled (completed or
+ * explicitly recorded as not performed) may start over even though it is NOT
+ * complete, while an open run never can (a zero-schedule program is neither, so
+ * it stays not restartable). The same rule is handed INTO the replacement write
+ * and re-evaluated there over the CURRENT facts under the enrollment lock, so a
+ * run that was settled at the pre-read but had a settlement undone before the
+ * replacement acquired authority is refused — the final delete/replace never
+ * relies on this pre-read. Preview state, dashboard state, persisted status,
+ * the completion-summary DTO and client input are never consulted, and no
+ * `complete || concluded` expression is ever written here — the verdict belongs
+ * to the Domain.
  *
  * Fresh run: a new `EnrollmentId` from the `IdGenerator`, the same user and
  * program, and the current instant as `enrolledAt` (the repository's use-case
@@ -31,13 +43,16 @@
 import type { IdGenerator } from '@/application/ports/id-generator';
 import {
   EnrollmentAlreadyExistsError,
+  type LockedRunSettlementFacts,
   type ProgramEnrollmentRepository,
+  type ReplaceEnrollmentOutcome,
 } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
-import type { WorkoutSessionRepository } from '@/application/ports/workout-session-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { isProgramComplete } from '@/domain/services/program-progress';
+import { isRunConcluded, isRunRestartable } from '@/domain/services/run-closure';
 import { createUserId, type EnrollmentId, type UserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -58,7 +73,7 @@ export class RestartProgramUseCase {
   constructor(
     private readonly programRepository: ProgramRepository,
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly closureFactsRepository: RunClosureFactsRepository,
     private readonly idGenerator: IdGenerator,
   ) {}
 
@@ -87,9 +102,10 @@ export class RestartProgramUseCase {
       return err(notEnrolled(program.slug));
     }
 
-    // The authoritative completion gate: nothing is written when the run is
-    // not complete (a zero-schedule program is never complete).
-    if (!(await this.isEnrollmentComplete(program, enrollment.id))) {
+    // The authoritative restartability gate: nothing is written when the run
+    // is still open (a zero-schedule program is neither complete nor
+    // concluded, so it can never be restarted).
+    if (!(await this.isEnrollmentRestartable(program, enrollment.id))) {
       return err(programNotComplete(program.slug));
     }
 
@@ -108,12 +124,18 @@ export class RestartProgramUseCase {
     }
 
     // The ONE write. The expected id is the enrollment this use case loaded,
-    // so a stale request can never replace or delete a newer enrollment.
-    let replaced: boolean;
+    // so a stale request can never replace or delete a newer enrollment. The
+    // restartability decision is passed INTO the replacement so it is
+    // re-evaluated under that write's own enrollment-lock authority: a run that
+    // was settled at the pre-read above but had a settlement undone (an Undo
+    // reopening it) before the replacement acquired the lock is refused there,
+    // with zero writes — never replaced from the stale pre-read.
+    let outcome: ReplaceEnrollmentOutcome;
     try {
-      replaced = await this.enrollmentRepository.replaceExpectedWithNew(
+      outcome = await this.enrollmentRepository.replaceExpectedWithNew(
         enrollment.id,
         freshResult.data,
+        (facts) => this.isRestartable(program, facts),
       );
     } catch (error) {
       if (error instanceof EnrollmentAlreadyExistsError) {
@@ -124,7 +146,15 @@ export class RestartProgramUseCase {
       throw error;
     }
 
-    if (replaced) {
+    if (outcome.kind === 'not-restartable') {
+      // The run stopped being restartable between the pre-read and the
+      // replacement's authority acquiring (e.g. Undo reopened it): nothing was
+      // written and the old enrollment remains. Same typed outcome an open run
+      // gets at the gate — the error vocabulary is unchanged.
+      return err(programNotComplete(program.slug));
+    }
+
+    if (outcome.kind === 'replaced') {
       return ok(undefined);
     }
 
@@ -133,27 +163,57 @@ export class RestartProgramUseCase {
     return err(await this.mapStaleOutcome(program, userId));
   }
 
-  /** Slice 1's rule over the enrollment's own completed occurrence ids. */
-  private async isEnrollmentComplete(
+  /**
+   * The Domain's restartability rule over one set of run-scoped settlement
+   * facts: completed occurrence ids (M14) and recorded not-performed facts
+   * (M17), read together because neither decides whether the other happens.
+   *
+   * The verdict itself is `isRunRestartable` composing `isProgramComplete` and
+   * `isRunConcluded`; this method never writes a `complete || concluded`
+   * expression of its own, so Application cannot grow a second restartability
+   * policy beside the Domain's. It is the SAME composition the pre-read uses
+   * and the SAME one handed to the replacement transaction — one rule, one
+   * widened meaning.
+   */
+  private isRestartable(program: TrainingProgram, facts: LockedRunSettlementFacts): boolean {
+    return isRunRestartable({
+      programComplete: isProgramComplete(program, facts.completedIds),
+      runConcluded: isRunConcluded(program, {
+        completedIds: facts.completedIds,
+        notPerformedIds: facts.notPerformedIds,
+      }),
+    });
+  }
+
+  /**
+   * The pre-write restartability read: the SAME one-snapshot closure-facts
+   * projection the summary read uses (never session aggregates, never two
+   * independently mutable reads), evaluated through the shared `isRestartable`
+   * composition. This is the normal-path gate that produces the typed
+   * PROGRAM_NOT_COMPLETE error; the authoritative re-check happens under the
+   * replacement transaction's own lock and remains the final write-side
+   * authority — this preflight adds no lock and no retry.
+   */
+  private async isEnrollmentRestartable(
     program: TrainingProgram,
     enrollmentId: EnrollmentId,
   ): Promise<boolean> {
-    const completedIds = await this.sessionRepository.listCompletedScheduledWorkoutIds(
-      enrollmentId,
-    );
-    return isProgramComplete(program, completedIds);
+    const facts = await this.closureFactsRepository.listClosureFactsByEnrollment(enrollmentId);
+
+    return this.isRestartable(program, facts);
   }
 
   /**
    * Truthful mapping of a stale CAS (it returned false), from ONE read-only
    * re-check of the user's current enrollment for this program:
    * - none → NOT_ENROLLED (a concurrent leave won);
-   * - a current enrollment that is not complete → PROGRAM_NOT_COMPLETE (a
+   * - a current enrollment that is NOT restartable → PROGRAM_NOT_COMPLETE (a
    *   concurrent restart already produced a fresh, unstarted run);
-   * - a current enrollment that IS complete → ENROLLMENT_CHANGED (the state
-   *   moved again; restarting again from fresh state is legitimate).
-   * Completeness is decided by the same authoritative rule — never inferred
-   * from the enrollment's age or identity.
+   * - a current enrollment that IS restartable → ENROLLMENT_CHANGED (the state
+   *   moved again; restarting again from settled state is legitimate).
+   * Restartability is decided by the same authoritative rule — never inferred
+   * from the enrollment's age or identity — so the widening is identical at
+   * both evaluation points.
    */
   private async mapStaleOutcome(
     program: TrainingProgram,
@@ -164,7 +224,7 @@ export class RestartProgramUseCase {
       return notEnrolled(program.slug);
     }
 
-    return (await this.isEnrollmentComplete(program, current.id))
+    return (await this.isEnrollmentRestartable(program, current.id))
       ? enrollmentChanged(program.slug)
       : programNotComplete(program.slug);
   }

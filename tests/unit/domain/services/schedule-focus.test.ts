@@ -46,12 +46,17 @@ function plannedWorkout(scheduledWorkoutId: string, plannedDate: string): Planne
 function facts(
   scheduledWorkoutId: string,
   plannedDate: string,
-  flags: { readonly completed?: boolean; readonly active?: boolean } = {},
+  flags: {
+    readonly completed?: boolean;
+    readonly active?: boolean;
+    readonly notPerformed?: boolean;
+  } = {},
 ): PlannedWorkoutFacts {
   return {
     plannedWorkout: plannedWorkout(scheduledWorkoutId, plannedDate),
     hasCompletedSession: flags.completed ?? false,
     hasActiveSession: flags.active ?? false,
+    hasNotPerformedRecord: flags.notPerformed ?? false,
   };
 }
 
@@ -219,5 +224,120 @@ describe('resolveScheduleFocus — determinism and empty input', () => {
     expect(focus.today).toBeNull();
     expect(focus.next).toBeNull();
     expect(focus.pastDue).toBeNull();
+    expect(focus.notPerformedRecorded).toBe(0);
+  });
+});
+
+describe('resolvePlannedWorkoutStatus — not-performed', () => {
+  it('is not-performed for an explicit record, on a past, today and future date', () => {
+    for (const plannedDate of [LAST_WEEK, YESTERDAY, TODAY, TOMORROW, NEXT_WEEK]) {
+      expect(
+        resolvePlannedWorkoutStatus(facts('a', plannedDate, { notPerformed: true }), date(TODAY)),
+      ).toBe(PlannedWorkoutStatus.NotPerformed);
+    }
+  });
+
+  it('never derives not-performed from the date alone', () => {
+    for (const plannedDate of [LAST_WEEK, YESTERDAY, TODAY, TOMORROW, NEXT_WEEK]) {
+      expect(resolvePlannedWorkoutStatus(facts('a', plannedDate), date(TODAY))).not.toBe(
+        PlannedWorkoutStatus.NotPerformed,
+      );
+    }
+  });
+
+  it('leaves the pre-M17 statuses exactly as they were', () => {
+    expect(resolvePlannedWorkoutStatus(facts('a', YESTERDAY), date(TODAY))).toBe(
+      PlannedWorkoutStatus.PastDue,
+    );
+    expect(resolvePlannedWorkoutStatus(facts('a', TODAY), date(TODAY))).toBe(
+      PlannedWorkoutStatus.Planned,
+    );
+    expect(resolvePlannedWorkoutStatus(facts('a', TOMORROW), date(TODAY))).toBe(
+      PlannedWorkoutStatus.Planned,
+    );
+    expect(resolvePlannedWorkoutStatus(facts('a', LAST_WEEK, { completed: true }), date(TODAY))).toBe(
+      PlannedWorkoutStatus.Completed,
+    );
+    expect(resolvePlannedWorkoutStatus(facts('a', YESTERDAY, { active: true }), date(TODAY))).toBe(
+      PlannedWorkoutStatus.InProgress,
+    );
+  });
+
+  it('keeps a live session above the record', () => {
+    expect(
+      resolvePlannedWorkoutStatus(facts('a', YESTERDAY, { active: true, notPerformed: true }), date(TODAY)),
+    ).toBe(PlannedWorkoutStatus.InProgress);
+  });
+
+  it('throws when the occurrence is both completed and recorded (M17 I1)', () => {
+    expect(() =>
+      resolvePlannedWorkoutStatus(
+        facts('a', TODAY, { completed: true, notPerformed: true }),
+        date(TODAY),
+      ),
+    ).toThrow(
+      'Occurrence settlement contract violated: occurrence "sw-a" is both completed and recorded as not performed',
+    );
+  });
+});
+
+describe('resolveScheduleFocus — not-performed', () => {
+  it('never counts a recorded item as past due', () => {
+    const focus = resolveScheduleFocus(
+      [facts('a', LAST_WEEK, { notPerformed: true }), facts('b', YESTERDAY)],
+      date(TODAY),
+    );
+
+    expect(focus.pastDue?.count).toBe(1);
+    expect(focus.pastDue?.earliest.plannedWorkout.scheduledWorkoutId).toBe('sw-b');
+    expect(focus.notPerformedRecorded).toBe(1);
+  });
+
+  it('never offers a recorded item as next', () => {
+    const focus = resolveScheduleFocus(
+      [facts('a', TOMORROW, { notPerformed: true }), facts('b', NEXT_WEEK)],
+      date(TODAY),
+    );
+
+    expect(focus.next?.plannedWorkout.scheduledWorkoutId).toBe('sw-b');
+  });
+
+  it('still exposes a recorded item dated today as today, with its status', () => {
+    const focus = resolveScheduleFocus([facts('a', TODAY, { notPerformed: true })], date(TODAY));
+
+    expect(focus.today?.plannedWorkout.scheduledWorkoutId).toBe('sw-a');
+    expect(focus.today).not.toBeNull();
+    if (focus.today !== null) {
+      expect(resolvePlannedWorkoutStatus(focus.today, date(TODAY))).toBe(
+        PlannedWorkoutStatus.NotPerformed,
+      );
+    }
+  });
+
+  it('counts recorded items and stays at zero for a pre-M17 plan', () => {
+    const preM17 = resolveScheduleFocus(
+      [facts('a', YESTERDAY), facts('b', TOMORROW), facts('c', LAST_WEEK, { completed: true })],
+      date(TODAY),
+    );
+    const recorded = resolveScheduleFocus(
+      [
+        facts('a', YESTERDAY, { notPerformed: true }),
+        facts('b', TOMORROW, { notPerformed: true }),
+        facts('c', NEXT_WEEK),
+      ],
+      date(TODAY),
+    );
+
+    expect(preM17.notPerformedRecorded).toBe(0);
+    expect(recorded.notPerformedRecorded).toBe(2);
+  });
+
+  it('throws when any supplied item is both completed and recorded (M17 I1)', () => {
+    expect(() =>
+      resolveScheduleFocus(
+        [facts('a', TODAY, { completed: true, notPerformed: true })],
+        date(TODAY),
+      ),
+    ).toThrow(/is both completed and recorded as not performed/);
   });
 });

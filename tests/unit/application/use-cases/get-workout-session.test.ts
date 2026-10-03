@@ -12,6 +12,8 @@ import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createU
 import { ProgramGoal } from '@/domain/types/program';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
+import { makeOccurrenceExecutionFactsRepo, notPerformedFact } from './schedule-fixtures';
+
 function rep() { const r = createRepScheme(3, 8, 10); if (!r.ok) throw Error(); return r.data; }
 function eid(v: string) { const r = createExerciseId(v); if (!r.ok) throw Error(); return r.data; }
 function swid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
@@ -41,7 +43,7 @@ function seedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, 
   const { swId, workoutId } = seedProgram();
   const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
-  return repo.save(sr.data);
+  return repo.create(sr.data);
 }
 
 function makeUseCase() {
@@ -49,8 +51,9 @@ function makeUseCase() {
   const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
-  const uc = new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo);
-  return { sessionRepo, enrollmentRepo, uc };
+  const occurrenceFacts = makeOccurrenceExecutionFactsRepo(sessionRepo);
+  const uc = new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, occurrenceFacts);
+  return { sessionRepo, enrollmentRepo, occurrenceFacts, uc };
 }
 
 const INPUT = { programSlug: 'prog-1', weekNumber: 1, workoutOrder: 1 } as const;
@@ -61,7 +64,7 @@ describe('GetWorkoutSessionUseCase', () => {
     const r = await uc.execute({ ...INPUT, userId: 'user-a' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data).toEqual({ enrolled: false, session: null });
+    expect(r.data).toEqual({ enrolled: false, session: null, notPerformedRecorded: false });
   });
 
   it('reports enrolled with null session when the workout was not started', async () => {
@@ -71,7 +74,7 @@ describe('GetWorkoutSessionUseCase', () => {
     const r = await uc.execute({ ...INPUT, userId: 'user-a' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data).toEqual({ enrolled: true, session: null });
+    expect(r.data).toEqual({ enrolled: true, session: null, notPerformedRecorded: false });
   });
 
   it('returns the session when it exists for the user\'s enrollment', async () => {
@@ -101,10 +104,109 @@ describe('GetWorkoutSessionUseCase', () => {
 
   it('returns PROGRAM_NOT_FOUND', async () => {
     const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(null), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
-    const uc = new GetWorkoutSessionUseCase(programRepo, new InMemoryWorkoutSessionRepository(), new InMemoryProgramEnrollmentRepository());
+    const uc = new GetWorkoutSessionUseCase(programRepo, new InMemoryProgramEnrollmentRepository(), makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository()));
     const r = await uc.execute({ ...INPUT, programSlug: 'missing', userId: 'user-a' });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('PROGRAM_NOT_FOUND');
+  });
+
+  it('reports the not-performed record of the occurrence for the detail header', async () => {
+    const programRepo: ProgramRepository = {
+      list: vi.fn(),
+      findBySlug: vi.fn().mockResolvedValue(seedProgram().program),
+      findSessionRouteByScheduledWorkoutId: vi.fn(),
+      listMetadataByIds: vi.fn(),
+    };
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const occurrenceFacts = makeOccurrenceExecutionFactsRepo(
+      new InMemoryWorkoutSessionRepository(),
+      [notPerformedFact('enr-a', 'sched-wo1')],
+    );
+    const uc = new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, occurrenceFacts);
+
+    const r = await uc.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).toEqual({ enrolled: true, session: null, notPerformedRecorded: true });
+    // ONE coherent snapshot read supplies session state and settlement state.
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).toHaveBeenCalledTimes(1);
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).toHaveBeenCalledWith(
+      enid('enr-a'),
+      swid('sched-wo1'),
+    );
+  });
+
+  it('reports the record independently of the session state', async () => {
+    const { sessionRepo, enrollmentRepo } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    await seedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+
+    const useCase = new GetWorkoutSessionUseCase(
+      { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(seedProgram().program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() },
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(sessionRepo, [notPerformedFact('enr-a', 'sched-wo1')]),
+    );
+
+    const r = await useCase.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.session?.sessionId).toBe('s-1');
+    expect(r.data.notPerformedRecorded).toBe(true);
+  });
+
+  it("does not report another enrollment's record for the same occurrence", async () => {
+    const programRepo: ProgramRepository = {
+      list: vi.fn(),
+      findBySlug: vi.fn().mockResolvedValue(seedProgram().program),
+      findSessionRouteByScheduledWorkoutId: vi.fn(),
+      listMetadataByIds: vi.fn(),
+    };
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-b', 'user-b', 'p1');
+    const uc = new GetWorkoutSessionUseCase(
+      programRepo,
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository(), [
+        notPerformedFact('enr-b', 'sched-wo1'),
+        notPerformedFact('enr-a', 'sched-wo1'),
+      ]),
+    );
+
+    const r = await uc.execute({ ...INPUT, userId: 'user-b' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // The stub answers per enrollment exactly like the port; the fact of the
+    // other run is never visible here.
+    expect(r.data.notPerformedRecorded).toBe(true);
+
+    const other = await uc.execute({ ...INPUT, userId: 'user-a' });
+    expect(other.ok).toBe(true);
+    if (!other.ok) return;
+    expect(other.data.enrolled).toBe(false);
+    expect(other.data.notPerformedRecorded).toBe(false);
+  });
+
+  it('reports no record for a different occurrence of the same run', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const useCase = new GetWorkoutSessionUseCase(
+      { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(seedProgram().program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() },
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(new InMemoryWorkoutSessionRepository(), [
+        notPerformedFact('enr-a', 'sched-other'),
+      ]),
+    );
+
+    const r = await useCase.execute({ ...INPUT, userId: 'user-a', workoutOrder: 1 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.notPerformedRecorded).toBe(false);
+    expect(uc).toBeDefined();
   });
 });

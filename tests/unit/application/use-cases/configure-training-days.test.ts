@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import { ConfigureTrainingDaysUseCase } from '@/application/use-cases/configure-training-days';
@@ -14,8 +15,10 @@ import {
   FRI,
   LAST_FRI,
   makeEnrollmentRepo,
+  makeNotPerformedRepo,
   makePlannedRepo,
   makeProgram,
+  notPerformedFact,
   makeProgramRepo,
   MON,
   MON_WED_FRI,
@@ -59,19 +62,22 @@ function makeHarness(
     readonly program?: TrainingProgram | null;
     readonly enrollmentRepo?: ProgramEnrollmentRepository;
     readonly planned?: PlannedWorkoutRepository;
+    readonly notPerformed?: NotPerformedOccurrenceRepository;
   } = {},
 ) {
   const programRepo = makeProgramRepo(options.program === undefined ? PROGRAM : options.program);
   const enrollments = options.enrollmentRepo ?? new InMemoryProgramEnrollmentRepository();
   const plannedWorkouts = options.planned ?? new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
+  const notPerformed = options.notPerformed ?? makeNotPerformedRepo();
   const useCase = new ConfigureTrainingDaysUseCase(
     programRepo,
     enrollments,
     plannedWorkouts,
     sessions,
+    notPerformed,
   );
-  return { programRepo, enrollments, plannedWorkouts, sessions, useCase };
+  return { programRepo, enrollments, plannedWorkouts, sessions, notPerformed, useCase };
 }
 
 type Harness = ReturnType<typeof makeHarness>;
@@ -447,3 +453,137 @@ describe('ConfigureTrainingDaysUseCase', () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * M17 Slice 8 — recorded occurrences are SETTLED, so generation never re-places
+ * them (completed ∪ recorded). The fact read is one bounded statement and the
+ * surrounding M15 semantics (frozen live dates, deterministic ordering, the
+ * single replacement write) are unchanged.
+ */
+describe('ConfigureTrainingDaysUseCase — recorded not-performed exclusion', () => {
+  it('reads the run facts once and generates no row for a recorded occurrence', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W1_2)]),
+    });
+    await enroll(harness);
+    const listFacts = vi.spyOn(harness.notPerformed, 'listByEnrollment');
+
+    await configure(harness, MON_WED_FRI);
+
+    // ONE bounded, enrollment-scoped fact read — never per occurrence.
+    expect(listFacts).toHaveBeenCalledTimes(1);
+    expect(listFacts).toHaveBeenCalledWith(enrollmentId(ENR_A));
+
+    // The recorded occurrence receives NO row; every other occurrence keeps the
+    // exact deterministic cadence the empty-fact run would produce.
+    expect((await planEntries(harness)).map(([occurrence]) => occurrence)).toEqual([
+      OCCURRENCE_W1_1,
+      OCCURRENCE_W1_3,
+      OCCURRENCE_W2_1,
+      OCCURRENCE_W2_2,
+      OCCURRENCE_W2_3,
+    ]);
+    expect(await planEntries(harness)).toEqual([
+      [OCCURRENCE_W1_1, MON],
+      [OCCURRENCE_W1_3, WED],
+      [OCCURRENCE_W2_1, FRI],
+      [OCCURRENCE_W2_2, NEXT_MON],
+      [OCCURRENCE_W2_3, NEXT_WED],
+    ]);
+  });
+
+  it('removes the recorded occurrence’s existing row while leaving the others untouched', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W1_2)]),
+    });
+    await enroll(harness);
+    // The legal pre-regeneration state: a recorded occurrence that still holds a
+    // row (recording never deletes planned rows itself).
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_2, WED),
+      planned(ENR_A, OCCURRENCE_W2_3, SUN),
+    ]);
+
+    await configure(harness, MON_WED_FRI);
+
+    const entries = await planEntries(harness);
+    expect(entries.map(([occurrence]) => occurrence)).not.toContain(OCCURRENCE_W1_2);
+    // Never-started rows are regenerated (the move is authoritative), and the
+    // recorded occurrence is simply absent from the replacement.
+    expect(entries).toEqual([
+      [OCCURRENCE_W1_1, MON],
+      [OCCURRENCE_W1_3, WED],
+      [OCCURRENCE_W2_1, FRI],
+      [OCCURRENCE_W2_2, NEXT_MON],
+      [OCCURRENCE_W2_3, NEXT_WED],
+    ]);
+  });
+
+  it('leaves a frozen live date alone while excluding a recorded occurrence', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W1_3)]),
+    });
+    await enroll(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_2, WED),
+    ]);
+    await saveInProgressSession(harness.sessions, {
+      id: 's-live',
+      userId: USER_A,
+      enrollmentId: enrollmentId(ENR_A),
+      scheduledWorkoutId: OCCURRENCE_W1_2,
+      workoutId: WORKOUT_A,
+    });
+
+    await configure(harness, MON_WED_FRI);
+
+    expect(await planEntries(harness)).toEqual([
+      [OCCURRENCE_W1_1, MON],
+      [OCCURRENCE_W1_2, WED],
+      [OCCURRENCE_W2_1, FRI],
+      [OCCURRENCE_W2_2, NEXT_MON],
+      [OCCURRENCE_W2_3, NEXT_WED],
+    ]);
+  });
+
+  it('treats completed and recorded occurrences as one settled set', async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_A, OCCURRENCE_W2_2)]),
+    });
+    await enroll(harness);
+    await saveCompletedSession(harness.sessions, {
+      id: 's-done',
+      userId: USER_A,
+      enrollmentId: enrollmentId(ENR_A),
+      scheduledWorkoutId: OCCURRENCE_W1_1,
+    });
+
+    await configure(harness, MON_WED_FRI);
+
+    expect((await planEntries(harness)).map(([occurrence]) => occurrence)).toEqual([
+      OCCURRENCE_W1_2,
+      OCCURRENCE_W1_3,
+      OCCURRENCE_W2_1,
+      OCCURRENCE_W2_3,
+    ]);
+  });
+
+  it("ignores another enrollment's recorded facts", async () => {
+    const harness = makeHarness({
+      notPerformed: makeNotPerformedRepo([notPerformedFact(ENR_B, OCCURRENCE_W1_2)]),
+    });
+    await enroll(harness);
+
+    await configure(harness, MON_WED_FRI);
+
+    expect(await planEntries(harness)).toEqual([
+      [OCCURRENCE_W1_1, MON],
+      [OCCURRENCE_W1_2, WED],
+      [OCCURRENCE_W1_3, FRI],
+      [OCCURRENCE_W2_1, NEXT_MON],
+      [OCCURRENCE_W2_2, NEXT_WED],
+      [OCCURRENCE_W2_3, NEXT_FRI],
+    ]);
+  });
+});
+

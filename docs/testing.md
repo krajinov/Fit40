@@ -503,7 +503,8 @@ npm run test:coverage
   cascade, detached history, fresh run starts with zero planning, no orphan
   rows), `planned-workout-concurrency.test.ts` (forced-overlap matrix:
   configure‖configure, configure/reschedule ‖ restart/leave both orders,
-  deadlock absence, session INSERT never blocked), the InMemory fake + mapper
+  deadlock absence, a bare workout-session INSERT's FK probe never blocked),
+  the InMemory fake + mapper
   tests, and `workout-session-repository.test.ts` for the 1-statement
   in-progress projection.
 - Presentation & actions: `training-schedule-card`, `dashboard-view`,
@@ -519,14 +520,15 @@ npm run test:coverage
 
 ## Plan Follow-Through (M16)
 
-- Domain: `tests/unit/domain/services/plan-follow-through.test.ts` (seven
+- Domain: `tests/unit/domain/services/plan-follow-through.test.ts` (eight
   outcomes, locked precedence, UTC midnight boundary, week bucketing against
   `[weekStart, weekEnd)`, empty-window omission, totals = sum of rows,
   order-independence, no input mutation, `closed` at the exclusive end,
   duplicate-occurrence contract violation) and
   `schedule-follow-through-parity.test.ts` — **the M15 drift guard**: the real
   `resolvePlannedWorkoutStatus` is called on a shared fixture and M16's three
-  completed variants must normalize back to `completed`.
+  completed variants must normalize back to `completed` (and `not-performed`
+  back to M15's `not-performed`).
 - Application: `get-enrollment-follow-through.test.ts` (`INVALID_INPUT`,
   `ok(null)` with no downstream reads, `configured: false` with no session read
   and no fabricated zeros, fact assembly with completion precedence, orphan
@@ -549,14 +551,75 @@ npm run test:coverage
   and the M16 vocabulary/percentage/clock bans in presentation code.
 - Infrastructure (real PostgreSQL):
   `follow-through-round-trip.test.ts` (the full vertical: real planned rows and
-  sessions → real use case → Domain summary → DTO, all seven outcomes, empty
+  sessions → real use case → Domain summary → DTO, all eight outcomes, empty
   windows, `closed` from a fixed clock, totals = sum of rows, the unplanned
   completed occurrence stays history, another run and detached history excluded,
-  exactly four `SELECT`s and no write) and the Slice 2 addition to
+  exactly five `SELECT`s and no write) and the Slice 2 addition to
   `workout-session-repository.test.ts` (one row per occurrence, the completed
   ladder, detached/other-run exclusion, one fan-out-free statement, no
   `planned_workouts` access).
 - Totals: 179 unit test files / 2344 unit tests; 24 integration files / 324
+
+## Not-Performed Settlement & Run Closure (M17)
+
+- Domain: `tests/unit/domain/services/run-closure.test.ts` (closure and
+  restartability verdicts, authored denominator, `isProgramComplete` pinned
+  byte-identical to M14, open-in-authored-order, zero-workout never
+  concluded),
+  `not-performed-decision.test.ts` (record/undo truth tables, zero-write
+  refusals), `occurrence-settlement` consistency via
+  `schedule-focus.test.ts` / `plan-follow-through.test.ts` (loud
+  `contract violated`, no precedence reconciliation), plus
+  `planned-schedule-not-performed.test.ts` (settled-excluded generation) and
+  the eight-outcome parity guard.
+- Application: `record-not-performed.test.ts`, `undo-not-performed.test.ts`,
+  `start-workout-session.test.ts` (recorded → `OCCURRENCE_RECORDED_NOT_PERFORMED`,
+  zero writes), `get-run-closure-summary.test.ts`,
+  `restart-program.test.ts` (restartability gate, retained
+  `PROGRAM_NOT_COMPLETE`, single read-only stale re-check), the Slice 8/9
+  additions to `get-enrollment-schedule.test.ts` /
+  `get-enrollment-follow-through.test.ts` (fact reads, five-statement bounds,
+  `notPerformedUnplaced` row-set difference), and
+  `configure-training-days.test.ts` (settled input into generation).
+- Presentation & actions: `schedule-week-view`,
+  `program-schedule-section`, `record-not-performed-action`,
+  `undo-not-performed-action`, `workout-cta-state`, `workout-start-panel`,
+  `program-panel-state`, `enrolled-program-panel`, `restart-action` — literal
+  copy ("Didn't train this" / "Recorded as not performed" / "Undo" / "Run
+  closed" / "This run hasn't finished yet."), state matrices, inline
+  `role="alert"` errors, no confirmation step, no bulk action.
+- Architecture guards: `tests/unit/architecture/` —
+  `run-closure.test.ts` (no persisted closure status, no run archive,
+  completion isolation),
+  `session-creation-authority.test.ts` (read-only fact port, exact
+  `RunOccurrenceWriteRepository` shape, single mutation authority wired
+  through `sessions/services`, parent-lock-before-diagnostic-read order,
+  version-pinned guarded DELETE, no settlement retry loop, no `onConflict`
+  session resurrection),
+  `schedule-not-performed.test.ts` (`notPerformedIds` into generation,
+  `notPerformedUnplaced` projection, 8-week horizon constant),
+  `settlement-presentation.test.ts` (presentation computes no settlement or
+  closure verdict), `follow-through.test.ts` (report read-only), plus the
+  Slice 13 `settlement-authority.test.ts` final pins.
+- Infrastructure (real PostgreSQL):
+  `not-performed-occurrence-repository.test.ts` (read-port contract),
+  `not-performed-settlement.test.ts` (cross-table serialization),
+  `session-creation-serialized.test.ts` (parent-first creation, queueing
+  behind the enrollment lock),
+  `not-performed-schedule.test.ts` (fact projection into the calendar),
+  `follow-through-round-trip.test.ts` (Slice 9 facts),
+  `not-performed-concurrency.test.ts` (forced race matrix record‖record,
+  record‖start, record‖content-write, leave/restart ‖ settlement both orders,
+  statement/lock discipline: `FOR NO KEY UPDATE` first, zero `onConflict` on
+  sessions, version pin proven by test 9c),
+  `not-performed-lifecycle.test.ts` and
+  `not-performed-historical-truth.test.ts` (leave/restart cascade truth,
+  detached sessions, no PR/history contamination).
+- Totals: 197 unit test files / 2620 unit tests; 33 integration files / 427
+  integration tests.
+- Canonical reference:
+  [Run Closure & Not-Performed Settlement](run-closure.md).
+
   integration tests.
 - Canonical reference: [Plan Follow-Through](follow-through.md).
 

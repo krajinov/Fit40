@@ -19,11 +19,27 @@
  * Three authoritative outcomes:
  * - `ok(null)` — the user is not enrolled in this program: there is no run,
  *   hence no report, and no downstream read is issued.
- * - `configured: false` — a run exists but has no planned rows yet: there is
- *   nothing to reconcile, so the session reads are not issued (they could not
- *   change the result) and no zero week is fabricated.
+ * - `configured: false` — a run exists but has no planned rows yet: there is no
+ *   calendar to reconcile, so no week and no total is fabricated. The run's
+ *   recorded not-performed facts ARE read, because with zero planned rows every
+ *   one of them is unplaced and their count is execution truth independent of
+ *   the calendar; the session projections are not issued (they could not change
+ *   the result).
  * - `configured: true` — one fact per CURRENT planned row, summarized by the
  *   Slice 1 Domain rules. This use case never re-decides an outcome or a count.
+ *
+ * The report's execution facts (completed activity, in-progress sessions and
+ * the M17 records) are mutually exclusive per occurrence, so they are read
+ * through ONE coherent snapshot port — never assembled from independent
+ * statements that could tear across a concurrent settlement transition.
+ *
+ * M17 recorded-not-performed facts join this report WITHOUT changing its shape:
+ * current planned rows stay the only report occurrences (a fact whose occurrence
+ * has no row never becomes one), each row's facts gain `hasNotPerformedRecord` so
+ * the existing Domain precedence reports `not-performed`, and the run's facts
+ * whose occurrence holds no current row are counted separately as
+ * `notPerformedUnplaced` — a bounded count, independent of the 8-week horizon,
+ * that never touches a week or a total.
  *
  * Session-derived facts are a read-time derivation: a session that starts or
  * completes immediately after this read is reflected by the next read. M15
@@ -36,12 +52,12 @@ import {
   toUnconfiguredFollowThroughDto,
   type EnrollmentFollowThroughDto,
 } from '@/application/dto/follow-through';
+import type { FollowThroughExecutionFactsRepository } from '@/application/ports/follow-through-execution-facts-repository';
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type {
-  CompletedOccurrenceActivity,
-  WorkoutSessionRepository,
-} from '@/application/ports/workout-session-repository';
+import type { CompletedOccurrenceActivity } from '@/application/ports/workout-session-repository';
+import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { summarizeFollowThrough } from '@/domain/services/follow-through-week';
@@ -80,7 +96,13 @@ export class GetEnrollmentFollowThroughUseCase {
   constructor(
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
-    private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly followThroughExecutionFactsRepository: FollowThroughExecutionFactsRepository,
+    /**
+     * The zero-planned-rows terminal path only: it composes NOTHING (its count
+     * is facts alone), so it keeps the plain fact read. Every path that
+     * composes session truth with the facts uses the snapshot port above.
+     */
+    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
   ) {}
 
   async execute(
@@ -108,55 +130,112 @@ export class GetEnrollmentFollowThroughUseCase {
     const plannedRows = await this.plannedWorkoutRepository.listByEnrollment(enrollment.id);
     const today = plannedDateFromInstant(input.now);
     if (plannedRows.length === 0) {
-      return ok(toUnconfiguredFollowThroughDto(input.program.slug, today));
+      // No current calendar: no week and no total is fabricated, and no planned
+      // row is invented. But the run's recorded not-performed facts are still
+      // execution truth — with zero planned rows EVERY one of them is unplaced,
+      // so the factual count is reported. Only the fact read is issued: the
+      // session projections could change no count here. This stays the
+      // unconfigured variant (no weeks, no totals, no dates) — a fact does not
+      // configure the calendar.
+      const notPerformedFacts = await this.notPerformedRepository.listByEnrollment(enrollment.id);
+      return ok(
+        toUnconfiguredFollowThroughDto(
+          input.program.slug,
+          today,
+          countUnplacedFacts(notPerformedFacts, plannedRows),
+        ),
+      );
     }
 
-    // Two independent, enrollment-scoped projections read in one batch: neither
-    // decides whether the other should happen (the planned rows above already
-    // did), so issuing them together only shortens the read.
-    const [completedActivity, inProgressIds] = await Promise.all([
-      this.sessionRepository.listCompletedOccurrenceActivity(enrollment.id),
-      this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
-    ]);
+    // ONE coherent snapshot: completed activity, in-progress sessions and the
+    // recorded facts are mutually exclusive per occurrence, so they are
+    // projected together — a concurrent Undo→start→complete transition can
+    // never hand the Domain BOTH the record and the completed session for one
+    // occurrence. ONE bounded statement, never one query per planned row or
+    // per occurrence.
+    const { completedActivity, inProgressIds, notPerformedFacts } =
+      await this.followThroughExecutionFactsRepository.listFollowThroughExecutionFactsByEnrollment(
+        enrollment.id,
+      );
+
+    // Deliberately computed BEFORE summarization and outside it: the count is
+    // "recorded facts whose occurrence has no current planned row", so it cannot
+    // be derived from the reported weeks and cannot be influenced by the horizon.
+    const notPerformedUnplaced = countUnplacedFacts(notPerformedFacts, plannedRows);
 
     return ok(
       toConfiguredFollowThroughDto(
         input.program.slug,
         today,
         summarizeFollowThrough(
-          assembleOccurrences(plannedRows, completedActivity, inProgressIds),
+          assembleOccurrences(
+            plannedRows,
+            completedActivity,
+            inProgressIds,
+            notPerformedFacts,
+          ),
           listRecentTrainingWeekWindows(input.now, FOLLOW_THROUGH_WEEK_COUNT),
           input.now,
         ),
+        notPerformedUnplaced,
       ),
     );
   }
 }
 
 /**
+ * The recorded facts whose occurrence holds NO current planned row.
+ *
+ * A set difference in memory between two enrollment-scoped reads: no extra query,
+ * no date rule and no horizon. An out-of-horizon planned row is still a row, so a
+ * recorded occurrence dated outside the reported weeks is NOT counted here — this
+ * count means exactly "no current planned row", never "not represented by a
+ * reported week".
+ */
+function countUnplacedFacts(
+  notPerformedFacts: ReadonlyArray<NotPerformedOccurrence>,
+  plannedRows: ReadonlyArray<PlannedWorkout>,
+): number {
+  const occurrenceIdsWithRows = new Set<ScheduledWorkoutId>(
+    plannedRows.map((row) => row.scheduledWorkoutId),
+  );
+
+  return notPerformedFacts.filter((fact) => !occurrenceIdsWithRows.has(fact.scheduledWorkoutId))
+    .length;
+}
+
+/**
  * Builds exactly one fact per CURRENT planned occurrence.
  *
- * Completion and in-progress facts are keyed by occurrence id, so a fact whose
- * occurrence has no planned row simply never joins: it can neither create an
- * extra report occurrence nor be attributed to another run's. Planned rows are
- * iterated once and never deduplicated — `(enrollment, scheduled workout)` is
- * unique in the database, so a duplicate here would be a corrupt read, and the
- * Domain summarizer fails loudly on one rather than merging it.
+ * Completion, in-progress and recorded-not-performed facts are keyed by occurrence
+ * id, so a fact whose occurrence has no planned row simply never joins: it can
+ * neither create an extra report occurrence nor be attributed to another run's.
+ * That is what keeps M16 a current-calendar report — the recorded facts are only
+ * ever attached to rows that exist, and the run's rowless records are reported
+ * separately as a count. Planned rows are iterated once and never deduplicated —
+ * `(enrollment, scheduled workout)` is unique in the database, so a duplicate
+ * here would be a corrupt read, and the Domain summarizer fails loudly on one
+ * rather than merging it.
  */
 function assembleOccurrences(
   plannedRows: ReadonlyArray<PlannedWorkout>,
   completedActivity: ReadonlyArray<CompletedOccurrenceActivity>,
   inProgressIds: ReadonlyArray<ScheduledWorkoutId>,
+  notPerformedFacts: ReadonlyArray<NotPerformedOccurrence>,
 ): ReadonlyArray<PlannedOccurrenceFacts> {
   const completedAtByOccurrence = new Map<ScheduledWorkoutId, Date>(
     completedActivity.map((item) => [item.scheduledWorkoutId, item.completedAt]),
   );
   const inProgress = new Set<ScheduledWorkoutId>(inProgressIds);
+  const recorded = new Set<ScheduledWorkoutId>(
+    notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
+  );
 
   return plannedRows.map((plannedWorkout) => ({
     scheduledWorkoutId: plannedWorkout.scheduledWorkoutId,
     plannedDate: plannedWorkout.plannedDate,
     completedAt: completedAtByOccurrence.get(plannedWorkout.scheduledWorkoutId) ?? null,
     hasActiveSession: inProgress.has(plannedWorkout.scheduledWorkoutId),
+    hasNotPerformedRecord: recorded.has(plannedWorkout.scheduledWorkoutId),
   }));
 }

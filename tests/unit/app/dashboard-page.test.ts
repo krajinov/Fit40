@@ -120,6 +120,14 @@ const ENROLLED = {
   completedScheduledWorkoutIds: [],
 } as const;
 
+/** The authoritative current week the view assembly resolves for the fixture. */
+const CURRENT_WEEK_ONE = {
+  weekNumber: 1,
+  totalWorkouts: 3,
+  completedCount: 1,
+  status: 'in-progress',
+} as const;
+
 const NEXT_PREVIEW = {
   status: 'available',
   workout: {
@@ -181,6 +189,7 @@ function activeProgram(schedule: DashboardScheduleState): NonNullable<
     enrollment: ENROLLED,
     nextWorkoutPreview: NEXT_PREVIEW,
     schedule,
+    currentWeek: CURRENT_WEEK_ONE,
   };
 }
 
@@ -261,6 +270,7 @@ describe('/dashboard page (M15 Slice 5)', () => {
         workout: { ...NEXT_PREVIEW.workout, sessionState: 'not-performed' },
       },
       schedule: unconfigured,
+      currentWeek: CURRENT_WEEK_ONE,
     };
     const markup = await renderPage(recorded);
 
@@ -276,6 +286,9 @@ describe('/dashboard page (M15 Slice 5)', () => {
       nextWorkoutPreview: { status: 'complete' },
       // Even a configured schedule must not appear against a completed run.
       schedule: configuredSchedule(),
+      // No open week: the heading falls back to the authored duration, exactly
+      // as the completed card always did.
+      currentWeek: null,
     };
     const markup = await renderPage(completed);
 
@@ -307,6 +320,9 @@ describe('/dashboard page (M15 Slice 5)', () => {
       },
       // Even a configured schedule must not surface a Start against a settled run.
       schedule: configuredSchedule(),
+      // Concluded-but-incomplete: NO open week, so the heading must not name an
+      // old recorded occurrence's week.
+      currentWeek: null,
     };
     const markup = await renderPage(concluded);
 
@@ -327,5 +343,80 @@ describe('/dashboard page (M15 Slice 5)', () => {
 
     expect(markup).not.toContain('enr-');
     expect(markup).not.toContain(SESSION_USER.id);
+  });
+});
+/**
+ * M17 — the CurrentProgramCard heading consumes the AUTHORITATIVE current week
+ * the view assembly resolves, never the completion-only
+ * `enrollment.nextWorkout` (which can point at a week already settled as
+ * recorded not performed, contradicting Up next and the weekly summaries).
+ */
+describe('/dashboard page — CurrentProgramCard uses the authoritative week', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    requireUserMock.mockResolvedValue(SESSION_USER);
+    profileExecuteMock.mockResolvedValue(PROFILE);
+  });
+
+  /** The active-run view with an explicit authoritative week and next workout. */
+  function programView(
+    overrides: {
+      readonly nextWorkout: { readonly weekNumber: number; readonly workoutOrder: number } | null;
+      readonly currentWeek: NonNullable<DashboardView['currentProgram']>['currentWeek'];
+      readonly nextWorkoutPreview: NonNullable<
+        DashboardView['currentProgram']
+      >['nextWorkoutPreview'];
+    },
+  ): NonNullable<DashboardView['currentProgram']> {
+    return {
+      ...activeProgram(configuredSchedule()),
+      enrollment: { ...ENROLLED, nextWorkout: overrides.nextWorkout },
+      nextWorkoutPreview: overrides.nextWorkoutPreview,
+      currentWeek: overrides.currentWeek,
+    };
+  }
+
+  it('A. recorded week 1 + first open week 2: the card shows week 2, never the stale week 1', async () => {
+    const program = programView({
+      // The completion-only next workout still points at the recorded week 1…
+      nextWorkout: { weekNumber: 1, workoutOrder: 4 },
+      // …while the authoritative open occurrence is week 2.
+      nextWorkoutPreview: {
+        status: 'available',
+        workout: { ...NEXT_PREVIEW.workout, weekNumber: 2, workoutOrder: 1 },
+      },
+      currentWeek: { weekNumber: 2, totalWorkouts: 3, completedCount: 0, status: 'in-progress' },
+    });
+
+    const markup = await renderPage(program);
+
+    expect(markup).toContain('Week 2 of 4');
+    expect(markup).not.toContain('Week 1 of 4');
+  });
+
+  it('B. concluded-but-incomplete: no stale recorded week, the authored duration is the fallback', async () => {
+    const program = programView({
+      nextWorkout: { weekNumber: 1, workoutOrder: 4 },
+      nextWorkoutPreview: { status: 'concluded', completedWorkouts: 3, notPerformedWorkouts: 2 },
+      // No open occurrence → no authoritative week.
+      currentWeek: null,
+    });
+
+    const markup = await renderPage(program);
+
+    expect(markup).toContain('Week 4 of 4');
+    expect(markup).not.toContain('Week 1 of 4');
+  });
+
+  it('C. completed run: the completion-only presentation is unchanged', async () => {
+    const program = programView({
+      nextWorkout: null,
+      nextWorkoutPreview: { status: 'complete' },
+      currentWeek: null,
+    });
+
+    const markup = await renderPage(program);
+
+    expect(markup).toContain('Week 4 of 4');
   });
 });

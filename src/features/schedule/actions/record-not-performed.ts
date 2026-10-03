@@ -9,6 +9,11 @@ import {
   recordNotPerformedSchema,
 } from '@/features/schedule/schemas/schedule-actions-schema';
 import { recordNotPerformedUseCase } from '@/features/schedule/services';
+import {
+  programPathFromSlug,
+  sessionPathFromRoute,
+  workoutPathFromRoute,
+} from '@/features/sessions/session-path';
 import type { ScheduleActionState } from '@/features/schedule/types/schedule-action-state';
 
 /**
@@ -27,10 +32,15 @@ import type { ScheduleActionState } from '@/features/schedule/types/schedule-act
  * already performed, or carries logged work. This action duplicates none of
  * it, never inspects sessions, and never retries. Contract violations already
  * throw inside the Application layer and are deliberately NOT caught here —
- * they are invariant breaches, not user outcomes. On success the program
- * detail and the dashboard are revalidated so the recorded state reaches both
- * the calendar and the dashboard schedule — no redirect, and no
- * completed-truth route is touched.
+ * they are invariant breaches, not user outcomes.
+ *
+ * On success EVERY route that can render this occurrence's recorded state is
+ * revalidated, each built from the SAME authored coordinates the schema already
+ * validated — never a client-supplied path: the owning program detail, the
+ * occurrence's workout-detail route and its session route (both render the
+ * recorded CTA band, so a previously visited one must stop offering Start),
+ * plus the dashboard. The set is bounded and closed, and no completed-truth
+ * route is touched.
  */
 export async function recordNotPerformedAction(
   formData: FormData,
@@ -64,7 +74,15 @@ export async function recordNotPerformedAction(
     return { ok: false, error: { code: result.error.code, message: result.error.message } };
   }
 
-  revalidatePath(`/programs/${parsed.data.programSlug}`);
+  // Every surface that renders this occurrence's recorded state is invalidated
+  // from the AUTHORED coordinates the schema already validated — the owning
+  // program detail, the occurrence's workout-detail route and its session route
+  // (both render the recorded CTA band), plus the dashboard. No path is ever
+  // read from FormData, so a forged field can neither redirect nor revalidate
+  // the wrong page; the set is bounded and closed.
+  revalidatePath(programPathFromSlug(parsed.data.programSlug));
+  revalidatePath(workoutPathFromRoute(parsed.data));
+  revalidatePath(sessionPathFromRoute(parsed.data));
   revalidatePath('/dashboard');
 
   return { ok: true };

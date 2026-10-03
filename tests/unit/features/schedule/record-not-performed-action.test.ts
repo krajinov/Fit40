@@ -45,6 +45,10 @@ const SESSION_USER = {
 };
 
 const PROGRAM_PATH = '/programs/fit40-beginner-strength';
+// The authored coordinates `submit()` sends (week 2, order 3) resolved to the
+// concrete nested occurrence routes.
+const WORKOUT_PATH = '/programs/fit40-beginner-strength/weeks/2/workouts/3';
+const SESSION_PATH = `${WORKOUT_PATH}/session`;
 
 function submit(
   overrides: Readonly<Record<string, string>> = {},
@@ -152,13 +156,53 @@ describe('recordNotPerformedAction', () => {
     ]);
   });
 
-  it('revalidates the program detail and the dashboard on success, nothing else', async () => {
+  it('revalidates the exact bounded set on success: program, workout detail, session, dashboard', async () => {
     const state = await recordNotPerformedAction(submit());
 
     expect(state).toEqual({ ok: true });
-    expect(revalidatePath).toHaveBeenCalledTimes(2);
-    expect(revalidatePath).toHaveBeenCalledWith(PROGRAM_PATH);
-    expect(revalidatePath).toHaveBeenCalledWith('/dashboard');
+    // Exactly FOUR targets, matching Undo: the top-level program + dashboard
+    // plus the two concrete nested routes that can render the recorded state
+    // (workout detail and session) — so a previously visited occurrence route
+    // cannot keep showing its pre-record state. No fifth path, and nothing
+    // client-controlled.
+    expect(revalidatePath).toHaveBeenCalledTimes(4);
+    expect(new Set(vi.mocked(revalidatePath).mock.calls.map((call) => call[0]))).toEqual(
+      new Set([PROGRAM_PATH, WORKOUT_PATH, SESSION_PATH, '/dashboard']),
+    );
+  });
+
+  it('invalidates the exact workout-detail route of the recorded occurrence', async () => {
+    await recordNotPerformedAction(submit());
+
+    expect(revalidatePath).toHaveBeenCalledWith(WORKOUT_PATH);
+  });
+
+  it('invalidates the exact session route of the recorded occurrence', async () => {
+    await recordNotPerformedAction(submit());
+
+    expect(revalidatePath).toHaveBeenCalledWith(SESSION_PATH);
+  });
+
+  it('derives every path from the PARSED route, never from other submitted fields', async () => {
+    // A forged path/coordinate field must not become a revalidation target: the
+    // action revalidates only the coordinates the schema validated.
+    await recordNotPerformedAction(
+      submit({}, [
+        ['path', '/programs/attacker-program/weeks/9/workouts/9'],
+        ['next', '/dashboard/elsewhere'],
+        ['redirectTo', '/evil'],
+      ]),
+    );
+
+    const targets = vi.mocked(revalidatePath).mock.calls.map((call) => call[0]);
+    expect(new Set(targets)).toEqual(
+      new Set([PROGRAM_PATH, WORKOUT_PATH, SESSION_PATH, '/dashboard']),
+    );
+    for (const target of targets) {
+      expect(target).not.toContain('attacker');
+      expect(target).not.toContain('evil');
+      expect(target).not.toContain('elsewhere');
+    }
   });
 
   it('maps every real Slice 7 record outcome truthfully, without revalidating', async () => {

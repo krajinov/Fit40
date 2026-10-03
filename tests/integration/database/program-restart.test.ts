@@ -637,6 +637,16 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
           await releasePreRead.opened;
           return facts;
         },
+        async findFencedClosureFactsByEnrollment(expected, userId, programId) {
+          const projection = await closureFacts.findFencedClosureFactsByEnrollment(
+            expected,
+            userId,
+            programId,
+          );
+          preReadCaptured.open();
+          await releasePreRead.opened;
+          return projection;
+        },
       };
 
       const useCase = new RestartProgramUseCase(

@@ -49,6 +49,13 @@
  * compose an old-enrollment DTO with new-run closure truth. The caller decides
  * the fallback (the parents degrade to no closure data); this read never
  * mixes enrollment generations.
+ *
+ * Fencing is ATOMIC: identity and facts come from ONE statement (the
+ * closure-facts port's fenced projection), because validating the expected
+ * enrollment with a read and then reading its facts is two statements - a
+ * restart/leave committing between them would make the facts read observe a
+ * run that no longer exists, and the resulting empty sets would render the
+ * OLD authored program as a fully-open run instead of a refusal.
  */
 
 import { toRunClosureSummaryDto, type RunClosureSummaryDto } from '@/application/dto/run-closure';
@@ -57,7 +64,11 @@ import type { RunClosureFactsRepository } from '@/application/ports/run-closure-
 import type { ProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { TrainingProgram } from '@/domain/entities/training-program';
 import { isProgramComplete } from '@/domain/services/program-progress';
-import { isRunRestartable, resolveRunClosure } from '@/domain/services/run-closure';
+import {
+  isRunRestartable,
+  resolveRunClosure,
+  type RunClosureFacts,
+} from '@/domain/services/run-closure';
 import {
   createEnrollmentId,
   createUserId,
@@ -120,21 +131,20 @@ export class GetRunClosureSummaryUseCase {
       });
     }
 
-    const enrollment =
-      input.expectedEnrollmentId === undefined
-        ? await this.resolveCurrentEnrollment(userIdResult.data, input.program.id)
-        : await this.resolveFencedEnrollment(
-            input.expectedEnrollmentId,
-            userIdResult.data,
-            input.program.id,
-          );
-    if ('error' in enrollment) {
-      return err(enrollment.error);
+    // The fenced path: identity and facts in ONE statement - never a validate
+    // call followed by an independent facts call, whose window a concurrent
+    // restart/leave could open.
+    if (input.expectedEnrollmentId !== undefined) {
+      return this.summarizeFenced(input.expectedEnrollmentId, userIdResult.data, input.program);
     }
-    if (enrollment.data === null) {
+
+    const enrollment = await this.resolveCurrentEnrollment(
+      userIdResult.data,
+      input.program.id,
+    );
+    if (enrollment === null) {
       return ok(null);
     }
-    const resolvedEnrollment = enrollment.data;
 
     // The run's own execution truth from ONE coherent snapshot: completed
     // occurrence ids (M14) and recorded not-performed facts (M17), projected
@@ -142,23 +152,29 @@ export class GetRunClosureSummaryUseCase {
     // authored occurrence that appears in both sets. Both sets are
     // enrollment-scoped projections, never session aggregates and never
     // another run's (or detached) history.
-    const facts = await this.closureFactsRepository.listClosureFactsByEnrollment(resolvedEnrollment.id);
+    const facts = await this.closureFactsRepository.listClosureFactsByEnrollment(enrollment.id);
 
-    // Domain authority, evaluated exactly once each: closure over the authored
-    // program, M14 completion untouched by the records, and the one
-    // restartability rule composed from the two — never recomputed here.
-    const closure = resolveRunClosure(input.program, facts);
-    const programComplete = isProgramComplete(input.program, facts.completedIds);
+    return ok(this.buildSummary(input.program, facts));
+  }
 
-    return ok(
-      toRunClosureSummaryDto(input.program, closure, {
+  /**
+   * Domain authority over one coherent fact set, evaluated exactly once each:
+   * closure over the authored program, M14 completion untouched by the records,
+   * and the one restartability rule composed from the two — never recomputed
+   * here. Shared by the standalone and fenced paths so both derive the SAME
+   * verdicts from their own snapshot's facts.
+   */
+  private buildSummary(program: TrainingProgram, facts: RunClosureFacts): RunClosureSummaryDto {
+    const closure = resolveRunClosure(program, facts);
+    const programComplete = isProgramComplete(program, facts.completedIds);
+
+    return toRunClosureSummaryDto(program, closure, {
+      programComplete,
+      restartAvailable: isRunRestartable({
         programComplete,
-        restartAvailable: isRunRestartable({
-          programComplete,
-          runConcluded: closure.isConcluded,
-        }),
+        runConcluded: closure.isConcluded,
       }),
-    );
+    });
   }
 
   /**
@@ -168,50 +184,46 @@ export class GetRunClosureSummaryUseCase {
   private async resolveCurrentEnrollment(
     userId: UserId,
     programId: ProgramId,
-  ): Promise<{ readonly data: ProgramEnrollment | null }> {
-    return { data: await this.enrollmentRepository.findByUserAndProgram(userId, programId) };
+  ): Promise<ProgramEnrollment | null> {
+    return this.enrollmentRepository.findByUserAndProgram(userId, programId);
   }
 
   /**
-   * The fenced path: EXACTLY the caller's expected enrollment, or the typed
-   * `ENROLLMENT_CHANGED` refusal — never a silent switch to the current run.
+   * The fenced read: ONE statement establishes BOTH that the caller's expected
+   * enrollment is still this user's run of this program AND that run's facts.
    *
-   * The expected id comes from the caller's own loaded DTO (never client
-   * input), but it is still verified structurally: the row found by identity
-   * must belong to the trusted (user, program) pair, so a foreign or stale id
-   * can never leak another user's run. A vanished expected row (restart/leave
-   * deleted it; a rejoin created a different id) is `ENROLLMENT_CHANGED`, not
-   * absence: the caller is composing a DTO for a run that DID exist.
+   * `matched: false` (gone, replaced, or not the trusted pair's — a foreign id
+   * never leaks another user's run) is the typed `ENROLLMENT_CHANGED`, never
+   * absence and never a summary: the caller is composing a DTO for a run that
+   * DID exist, so an empty fact set must never be interpreted as a fresh, open
+   * run. A malformed id is the same refusal.
    */
-  private async resolveFencedEnrollment(
+  private async summarizeFenced(
     expectedEnrollmentId: string,
     userId: UserId,
-    programId: ProgramId,
-  ): Promise<
-    | { readonly data: ProgramEnrollment | null }
-    | { readonly error: Extract<GetRunClosureSummaryError, { readonly code: 'ENROLLMENT_CHANGED' }> }
-  > {
+    program: TrainingProgram,
+  ): Promise<Result<RunClosureSummaryDto | null, GetRunClosureSummaryError>> {
     const expectedId = createEnrollmentId(expectedEnrollmentId);
     if (!expectedId.ok) {
-      return {
-        error: {
-          code: 'ENROLLMENT_CHANGED',
-          message: `The expected enrollment id is invalid, so the run's closure cannot be read`,
-        },
-      };
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: `The expected enrollment id is invalid, so the closure cannot be read`,
+      });
     }
 
-    const enrollment = await this.enrollmentRepository.findById(expectedId.data);
-    if (enrollment === null || enrollment.userId !== userId || enrollment.programId !== programId) {
-      return {
-        error: {
-          code: 'ENROLLMENT_CHANGED',
-          message:
-            'Your enrollment changed while reading the run closure. Please reload and try again.',
-        },
-      };
+    const projection = await this.closureFactsRepository.findFencedClosureFactsByEnrollment(
+      expectedId.data,
+      userId,
+      program.id,
+    );
+    if (!projection.matched) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message:
+          'Your enrollment changed while reading the run closure. Please reload and try again.',
+      });
     }
 
-    return { data: enrollment };
+    return ok(this.buildSummary(program, projection.facts));
   }
 }

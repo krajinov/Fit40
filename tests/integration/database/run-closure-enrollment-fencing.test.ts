@@ -21,22 +21,49 @@
  * guards); this suite proves the fenced read contract on the real database.
  */
 
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
+import { resolveRunClosure } from '@/domain/services/run-closure';
+import { createUserId, type UserId } from '@/domain/types/ids';
 import { GetRunClosureSummaryUseCase } from '@/application/use-cases/get-run-closure-summary';
 import { LeaveProgramUseCase } from '@/application/use-cases/leave-program';
 import { RestartProgramUseCase } from '@/application/use-cases/restart-program';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 
-import { seedConcludedRun, type ConcludedRunFixture } from './not-performed-race-fixtures';
-import { closeDatabase, programEnrollmentRepository, programRepository, resetAndSeed, runClosureFactsRepository, workoutSessionRepository } from './setup';
+import {
+  createRaceHarness,
+  holdEnrollmentLock,
+  holdTableWriteGate,
+  seedConcludedRun,
+  waitForPendingLock,
+  type ConcludedRunFixture,
+  type RaceHarness,
+} from './not-performed-race-fixtures';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
+import {
+  closeDatabase,
+  programEnrollmentRepository,
+  programRepository,
+  resetAndSeed,
+  runClosureFactsRepository,
+  workoutSessionRepository,
+} from './setup';
+import { enrollmentIdValue } from './planned-workout-fixtures';
 
 const OWNER = 'm17-fencing-owner';
 /** `strong-at-home` authors 12 occurrences (4 weeks × 3 workouts). */
 const PROGRAM_SLUG = 'strong-at-home';
 const RUN_ID = 'enr-m17-fencing-a';
+
+/** The trusted owner as a branded id, for the projection`s user predicate. */
+function seedOwnerId(): UserId {
+  const result = createUserId(OWNER);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
 
 afterAll(async () => {
   await closeDatabase();
@@ -148,5 +175,118 @@ describe('M17 enrollment identity fencing — the closure read composes one gene
     expect(fenced.data.completedWorkouts).toBe(11);
     expect(fenced.data.notPerformedWorkouts).toBe(1);
     expect(fenced.data.isConcluded).toBe(true);
+  });
+});
+
+/**
+ * The fenced projection over a dedicated pool: real parallel connections, so a
+ * peer transition can genuinely be in flight.
+ */
+async function withHarness(
+  run: (harness: RaceHarness, fenced: DrizzleRunClosureFactsRepository) => Promise<void>,
+): Promise<void> {
+  const harness = createRaceHarness(6);
+  try {
+    await run(harness, new DrizzleRunClosureFactsRepository(harness.db));
+  } finally {
+    await harness.end();
+  }
+}
+
+/**
+ * Holds the peer `leave` UNCOMMITTED until `release()`: the enrollment lock
+ * FIRST (the writer-side serialization the production authority uses), then the
+ * enrollment delete, which cascades the recorded facts and detaches the run's
+ * sessions by the FK`s ON DELETE SET NULL.
+ */
+async function holdLeave(
+  harness: RaceHarness,
+): Promise<{ readonly release: () => Promise<void> }> {
+  return holdEnrollmentLock({
+    db: harness.db,
+    enrollmentId: enrollmentIdValue(RUN_ID),
+    work: async (tx) => {
+      await tx.execute(sql`DELETE FROM program_enrollments WHERE id = ${RUN_ID}`);
+    },
+  });
+}
+
+describe('M17 fenced closure projection - identity and facts from ONE snapshot', () => {
+  it('never validates a vanished enrollment and then reads its empty facts: the whole statement is one snapshot', async () => {
+    const seeded = await seedRestartableRun();
+    const expected = enrollmentIdValue(seeded.enrollmentId);
+
+    await withHarness(async (harness, fenced) => {
+      const program = await harness.programs.findBySlug(PROGRAM_SLUG);
+      if (program === null) throw new Error(`seed program is missing`);
+      const owner = (await harness.enrollments.listByUserId(seedOwnerId()))[0];
+      if (owner === undefined) throw new Error('expected the seeded run');
+
+      // 1. The transition is genuinely in flight (uncommitted): the fenced read
+      // sees the OLD coherent state - matched, with exactly this run`s facts.
+      const writer = await holdLeave(harness);
+      const duringFlight = await fenced.findFencedClosureFactsByEnrollment(
+        expected,
+        owner.userId,
+        program.id,
+      );
+      expect(duringFlight.matched).toBe(true);
+      if (!duringFlight.matched) return;
+      expect(duringFlight.facts.completedIds).toHaveLength(11);
+      expect(duringFlight.facts.notPerformedIds).toHaveLength(1);
+
+      // 2. Arm the gate on program_enrollments, pending behind the writer`s
+      // uncommitted delete (VERIFIED), and dispatch the fenced read: its single
+      // statement queues behind the gate, so it can only run after the commit.
+      const gate = holdTableWriteGate(harness.db, 'program_enrollments');
+      await waitForPendingLock(harness.sql, 'program_enrollments', 'AccessExclusiveLock');
+      const inFlight = fenced.findFencedClosureFactsByEnrollment(
+        expected,
+        owner.userId,
+        program.id,
+      );
+      await waitForPendingLock(harness.sql, 'program_enrollments', 'AccessShareLock');
+      await writer.release();
+      await gate.release();
+
+      // 3. The whole statement ran after the commit: the NEW coherent state -
+      // NOT matched. The forbidden answer (matched with EMPTY facts, which the
+      // summary would render as a fully-open run with the old authored
+      // structure) can never be produced by one snapshot.
+      const afterCommit = await inFlight;
+      expect(afterCommit).toEqual({ matched: false });
+    });
+  });
+
+  it('negative control: the retired two-call composition reads empty facts for a vanished enrollment', async () => {
+    const seeded = await seedRestartableRun();
+    const expected = enrollmentIdValue(seeded.enrollmentId);
+
+    await withHarness(async (harness, fenced) => {
+      const program = await harness.programs.findBySlug(PROGRAM_SLUG);
+      if (program === null) throw new Error(`seed program is missing`);
+      const owner = (await harness.enrollments.listByUserId(seedOwnerId()))[0];
+      if (owner === undefined) throw new Error('expected the seeded run');
+
+      // The retired composition: validate the expected enrollment, then read its
+      // facts as a SECOND statement. The writer commits strictly between them.
+      const writer = await holdLeave(harness);
+      const validatedBefore = await harness.enrollments.findByUserAndProgram(
+        owner.userId,
+        program.id,
+      );
+      expect(validatedBefore?.id).toBe(seeded.enrollmentId);
+
+      await writer.release();
+      const factsAfter = await fenced.listClosureFactsByEnrollment(expected);
+
+      // The tear: a validated enrollment whose facts are now EMPTY. A summary
+      // built from this pair reports the old authored program as fully open -
+      // the false-open read this fix removes.
+      const closure = resolveRunClosure(program, factsAfter);
+      expect(factsAfter).toEqual({ completedIds: [], notPerformedIds: [] });
+      expect(closure.openWorkouts).toBe(closure.totalWorkouts);
+      expect(closure.isConcluded).toBe(false);
+    });
   });
 });

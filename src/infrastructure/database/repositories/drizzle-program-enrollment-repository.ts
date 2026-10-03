@@ -48,20 +48,6 @@ const USER_PROGRAM_UNIQUE_CONSTRAINT = 'program_enrollments_user_program_unique'
 export class DrizzleProgramEnrollmentRepository implements ProgramEnrollmentRepository {
   constructor(private readonly db: Database) {}
 
-  async findById(id: EnrollmentId): Promise<ProgramEnrollment | null> {
-    // One bounded, identity-scoped statement. A restart/leave deletes the
-    // expected row, so `null` means the expected run vanished — never a silent
-    // switch to a new generation.
-    const rows = await this.db
-      .select()
-      .from(programEnrollments)
-      .where(eq(programEnrollments.id, id))
-      .limit(1);
-
-    const row = rows[0];
-    return row === undefined ? null : mapRowToProgramEnrollment(row);
-  }
-
   async findByUserAndProgram(
     userId: UserId,
     programId: ProgramId,

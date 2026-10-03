@@ -32,12 +32,15 @@ import {
   createUserId,
   createWorkoutId,
   type EnrollmentId,
+  type ProgramId,
   type ScheduledWorkoutId,
+  type UserId,
   type WorkoutId,
 } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
 import { createPlannedDate, type PlannedDate } from '@/domain/value-objects/planned-date';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
+import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { vi } from 'vitest';
 
@@ -320,7 +323,6 @@ export function makeEnrollmentRepo(sequence: ReadonlyArray<ProgramEnrollment | n
       index += 1;
       return answer;
     }),
-    findById: vi.fn(async () => null),
     listByUserId: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
@@ -389,14 +391,39 @@ export function makeNotPerformedRepo(facts: ReadonlyArray<NotPerformedOccurrence
 export function makeRunClosureFactsRepo(
   sessions: InMemoryWorkoutSessionRepository,
   facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
 ) {
+  const factsFor = async (enrollmentId: EnrollmentId) => ({
+    completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
+    notPerformedIds: facts
+      .filter((fact) => fact.enrollmentId === enrollmentId)
+      .map((fact) => fact.scheduledWorkoutId),
+  });
+
   return {
-    listClosureFactsByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) => ({
-      completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
-      notPerformedIds: facts
-        .filter((fact) => fact.enrollmentId === enrollmentId)
-        .map((fact) => fact.scheduledWorkoutId),
-    })),
+    listClosureFactsByEnrollment: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-statement projection: the anchor
+    // check and the facts come from the same call, so a fixture enrollment
+    // that is gone (or belongs to another pair) is `matched: false` - never an
+    // empty-but-matched set.
+    findFencedClosureFactsByEnrollment: vi.fn(
+      async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
+        if (enrollments !== null) {
+          // Existence is derived from the repository's own port reads (never a
+          // by-id lookup, which the port deliberately does not offer): the run
+          // must still be one of this trusted user's enrollments of THIS
+          // program.
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return { matched: true as const, facts: await factsFor(enrollmentId) };
+      },
+    ),
   } satisfies RunClosureFactsRepository;
 }
 

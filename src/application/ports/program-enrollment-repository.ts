@@ -124,19 +124,6 @@ export interface ProgramEnrollmentRepository {
    * May throw {@link EnrollmentAlreadyExistsError} on a concurrent join race.
    */
   create(enrollment: ProgramEnrollment): Promise<void>;
-  /**
-   * The enrollment with EXACTLY this identity, or null when no row carries it.
-   *
-   * A by-identity read for callers that already loaded a specific enrollment
-   * and must stay fenced to it (e.g. composing a run-level read into an
-   * already-loaded run): a restart/leave deletes the expected row and a
-   * rejoin creates a DIFFERENT id, so `null` means the expected run vanished —
-   * never a silent switch to the new generation. The id alone never authorizes
-   * anything: the caller verifies the returned row's (userId, programId)
-   * ownership against its trusted pair before using it.
-   */
-  findById(id: EnrollmentId): Promise<ProgramEnrollment | null>;
-
 
 
   /**

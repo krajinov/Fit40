@@ -207,7 +207,10 @@ function makeUseCase(
     // so the dashboard can resolve the run's first OPEN occurrence. A caller
     // may stub it to observe the fencing contract.
     closureUseCase ??
-      new GetRunClosureSummaryUseCase(enrollmentRepo, makeRunClosureFactsRepo(sessionRepo)),
+      new GetRunClosureSummaryUseCase(
+        enrollmentRepo,
+        makeRunClosureFactsRepo(sessionRepo, [], enrollmentRepo),
+      ),
   );
   return { enrollmentRepo, sessionRepo, uc };
 }

@@ -1,13 +1,17 @@
-import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, exists, isNotNull, sql } from 'drizzle-orm';
 
-import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
+import type {
+  FencedRunClosureFacts,
+  RunClosureFactsRepository,
+} from '@/application/ports/run-closure-facts-repository';
 import type { RunClosureFacts } from '@/domain/services/run-closure';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
-import { notPerformedWorkouts, workoutSessions } from '../schema';
+import { notPerformedWorkouts, programEnrollments, workoutSessions } from '../schema';
 
 /** Discriminator values of the one-row-per-fact projection below. */
+const MATCHED = 'matched';
 const COMPLETED = 'completed';
 const NOT_PERFORMED = 'not_performed';
 
@@ -74,5 +78,110 @@ export class DrizzleRunClosureFactsRepository implements RunClosureFactsReposito
     }
 
     return { completedIds, notPerformedIds };
+  }
+
+  /**
+   * The FENCED projection: identity and facts from ONE statement.
+   *
+   * Three branches in a single `UNION ALL`, every one of them gated by the SAME
+   * predicate over `program_enrollments` (the expected id AND the trusted
+   * `user_id` / `program_id`):
+   * - a `matched` anchor row, present only when the expected enrollment still
+   *   exists as this user's run for this program;
+   * - the run's completed authored occurrences;
+   * - its recorded not-performed facts.
+   *
+   * Because READ COMMITTED takes ONE snapshot per statement, the anchor and the
+   * facts describe the same database instant: a restart/leave committing while
+   * this statement runs shifts the whole answer to before (matched, the old
+   * run's facts) or after (not matched) — never to a validated-but-vanished
+   * enrollment with empty facts, which the summary would misread as an open
+   * run. The anchor row is also why an empty fact set is unambiguous:
+   * `matched` present with no facts is a genuinely unstarted run, while its
+   * absence is a run that no longer exists.
+   */
+  async findFencedClosureFactsByEnrollment(
+    expectedEnrollmentId: EnrollmentId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedRunClosureFacts> {
+    // The one predicate every branch shares: the expected enrollment is THIS
+    // user's run of THIS program. Evaluated in the same snapshot as the facts.
+    const expectedRunExists = exists(
+      this.db
+        .select({ one: sql`1` })
+        .from(programEnrollments)
+        .where(
+          and(
+            eq(programEnrollments.id, expectedEnrollmentId),
+            eq(programEnrollments.userId, userId),
+            eq(programEnrollments.programId, programId),
+          ),
+        ),
+    );
+
+    const anchor = this.db
+      .select({
+        scheduledWorkoutId: sql<string | null>`null::text`.as('scheduled_workout_id'),
+        source: sql<string>`'${sql.raw(MATCHED)}'`.as('source'),
+      })
+      .from(programEnrollments)
+      .where(
+        and(
+          eq(programEnrollments.id, expectedEnrollmentId),
+          eq(programEnrollments.userId, userId),
+          eq(programEnrollments.programId, programId),
+        ),
+      );
+
+    const completedFacts = this.db
+      .select({
+        scheduledWorkoutId: workoutSessions.scheduledWorkoutId,
+        source: sql<string>`'${sql.raw(COMPLETED)}'`.as('source'),
+      })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, expectedEnrollmentId),
+          isNotNull(workoutSessions.completedAt),
+          expectedRunExists,
+        ),
+      );
+
+    const notPerformedFacts = this.db
+      .select({
+        scheduledWorkoutId: notPerformedWorkouts.scheduledWorkoutId,
+        source: sql<string>`'${sql.raw(NOT_PERFORMED)}'`.as('source'),
+      })
+      .from(notPerformedWorkouts)
+      .where(
+        and(
+          eq(notPerformedWorkouts.enrollmentId, expectedEnrollmentId),
+          expectedRunExists,
+        ),
+      );
+
+    // ONE statement: the anchor first, then the facts, each ascending by
+    // occurrence id — never implicit database order.
+    const rows = await anchor
+      .unionAll(completedFacts)
+      .unionAll(notPerformedFacts)
+      .orderBy(sql`source`, sql`scheduled_workout_id`);
+
+    if (!rows.some((row) => row.source === MATCHED)) {
+      return { matched: false };
+    }
+
+    const completedIds: ScheduledWorkoutId[] = [];
+    const notPerformedIds: ScheduledWorkoutId[] = [];
+    for (const row of rows) {
+      if (row.source === COMPLETED && row.scheduledWorkoutId !== null) {
+        completedIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
+      } else if (row.source === NOT_PERFORMED && row.scheduledWorkoutId !== null) {
+        notPerformedIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
+      }
+    }
+
+    return { matched: true, facts: { completedIds, notPerformedIds } };
   }
 }

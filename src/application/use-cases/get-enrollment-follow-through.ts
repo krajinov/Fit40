@@ -63,7 +63,12 @@ import type { TrainingProgram } from '@/domain/entities/training-program';
 import { summarizeFollowThrough } from '@/domain/services/follow-through-week';
 import type { PlannedOccurrenceFacts } from '@/domain/services/plan-follow-through';
 import { listRecentTrainingWeekWindows } from '@/domain/services/training-week';
-import { createUserId, type ScheduledWorkoutId } from '@/domain/types/ids';
+import {
+  createEnrollmentId,
+  createUserId,
+  type ScheduledWorkoutId,
+  type UserId,
+} from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 import { plannedDateFromInstant } from '@/domain/value-objects/planned-date';
 
@@ -74,11 +79,22 @@ import { plannedDateFromInstant } from '@/domain/value-objects/planned-date';
  */
 export const FOLLOW_THROUGH_WEEK_COUNT = 8;
 
-export type GetEnrollmentFollowThroughError = {
-  readonly code: 'INVALID_INPUT';
-  readonly message: string;
-  readonly field?: string;
-};
+export type GetEnrollmentFollowThroughError =
+  | {
+      readonly code: 'INVALID_INPUT';
+      readonly message: string;
+      readonly field?: string;
+    }
+  | {
+      /**
+       * The caller's expected enrollment no longer exists (a concurrent
+       * restart/leave replaced the run): the read refuses to compose the
+       * caller's old-enrollment parent with a new run's report. Never thrown —
+       * the caller degrades, never mixing generations.
+       */
+      readonly code: 'ENROLLMENT_CHANGED';
+      readonly message: string;
+    };
 
 export interface GetEnrollmentFollowThroughInput {
   readonly userId: string;
@@ -90,6 +106,16 @@ export interface GetEnrollmentFollowThroughInput {
   readonly program: TrainingProgram;
   /** The request clock; `today` and the reported weeks derive from it, in UTC. */
   readonly now: Date;
+  /**
+   * The SPECIFIC enrollment the caller already loaded and is composing this
+   * report into (the program detail's enrollment view). When supplied, the read
+   * is fenced to exactly that identity: it never re-resolves the current
+   * enrollment, so a concurrent restart/leave cannot compose the caller's
+   * old-enrollment parent data with a NEW run's report. Omitted (or undefined),
+   * the read resolves the current enrollment as before — the standalone read
+   * convention.
+   */
+  readonly expectedEnrollmentId?: string;
 }
 
 export class GetEnrollmentFollowThroughUseCase {
@@ -115,6 +141,13 @@ export class GetEnrollmentFollowThroughUseCase {
         message: userIdResult.error.message,
         field: 'userId',
       });
+    }
+
+    // The fenced path: identity and facts in ONE statement — never a validate
+    // call followed by an independent facts call, whose window a concurrent
+    // restart/leave could open.
+    if (input.expectedEnrollmentId !== undefined) {
+      return this.executeFenced(input.expectedEnrollmentId, userIdResult.data, input);
     }
 
     const enrollment = await this.enrollmentRepository.findByUserAndProgram(
@@ -161,6 +194,85 @@ export class GetEnrollmentFollowThroughUseCase {
     // Deliberately computed BEFORE summarization and outside it: the count is
     // "recorded facts whose occurrence has no current planned row", so it cannot
     // be derived from the reported weeks and cannot be influenced by the horizon.
+    const notPerformedUnplaced = countUnplacedFacts(notPerformedFacts, plannedRows);
+
+    return ok(
+      toConfiguredFollowThroughDto(
+        input.program.slug,
+        today,
+        summarizeFollowThrough(
+          assembleOccurrences(
+            plannedRows,
+            completedActivity,
+            inProgressIds,
+            notPerformedFacts,
+          ),
+          listRecentTrainingWeekWindows(input.now, FOLLOW_THROUGH_WEEK_COUNT),
+          input.now,
+        ),
+        notPerformedUnplaced,
+      ),
+    );
+  }
+
+  /**
+   * The fenced read: ONE statement establishes BOTH that the caller's expected
+   * enrollment is still this user's run of this program AND that run's
+   * execution facts (the closure-fence pattern); the planned rows are read by
+   * that exact identity, so no read of this path can ever describe another
+   * generation.
+   *
+   * `matched: false` is the typed `ENROLLMENT_CHANGED` refusal, never absence and
+   * never a report: the caller is composing a view for a run that DID exist, so
+   * empty facts must never be rendered as a fresh run beside old-generation
+   * parent data. A malformed id is the same refusal.
+   */
+  private async executeFenced(
+    expectedEnrollmentId: string,
+    userId: UserId,
+    input: GetEnrollmentFollowThroughInput,
+  ): Promise<Result<EnrollmentFollowThroughDto | null, GetEnrollmentFollowThroughError>> {
+    const expectedId = createEnrollmentId(expectedEnrollmentId);
+    if (!expectedId.ok) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'The expected enrollment id is invalid, so the report cannot be read',
+      });
+    }
+
+    const projection =
+      await this.followThroughExecutionFactsRepository.findFencedFollowThroughExecutionFactsByEnrollment(
+        expectedId.data,
+        userId,
+        input.program.id,
+      );
+    if (!projection.matched) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while reading the report. Please reload and try again.',
+      });
+    }
+
+    // The planned rows of THAT run — keyed by the expected identity, never by a
+    // re-resolved current enrollment, so this read can never mix generations.
+    const plannedRows = await this.plannedWorkoutRepository.listByEnrollment(expectedId.data);
+    const today = plannedDateFromInstant(input.now);
+
+    if (plannedRows.length === 0) {
+      // No current calendar for the expected run: the SAME unconfigured variant
+      // semantics, with the facts from the SAME fenced statement (never a second
+      // read that could observe another generation).
+      const { notPerformedFacts } = projection.facts;
+      return ok(
+        toUnconfiguredFollowThroughDto(
+          input.program.slug,
+          today,
+          countUnplacedFacts(notPerformedFacts, plannedRows),
+        ),
+      );
+    }
+
+    const { completedActivity, inProgressIds, notPerformedFacts } = projection.facts;
     const notPerformedUnplaced = countUnplacedFacts(notPerformedFacts, plannedRows);
 
     return ok(

@@ -37,7 +37,7 @@
  */
 
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 /** A run's session execution truth and settlement facts from one snapshot. */
 export interface ScheduleExecutionFacts {
@@ -49,9 +49,37 @@ export interface ScheduleExecutionFacts {
   readonly notPerformedFacts: ReadonlyArray<NotPerformedOccurrence>;
 }
 
+/**
+ * The FENCED projection: whether the caller's expected enrollment still exists
+ * as the trusted (user, program) pair's run, and - only when it does - that
+ * run's execution facts. `matched: false` (gone, replaced, foreign) is NEVER
+ * reported as matched with empty facts, which would misread a vanished run as
+ * an unconfigured one inside a parent view still describing the old
+ * generation. Mirrors `FencedRunClosureFacts` on the closure-facts port.
+ */
+export type FencedScheduleExecutionFacts =
+  | { readonly matched: true; readonly facts: ScheduleExecutionFacts }
+  | { readonly matched: false };
+
 export interface ScheduleExecutionFactsRepository {
   /** All three execution-fact sets of one run, read from ONE snapshot. */
   listScheduleExecutionFactsByEnrollment(
     enrollmentId: EnrollmentId,
   ): Promise<ScheduleExecutionFacts>;
+
+  /**
+   * The fenced variant for a caller composing this read into an
+   * already-loaded run (the dashboard, program detail): ONE statement
+   * anchors on `program_enrollments` (verifying the expected id AND the
+   * trusted `userId` / `programId` in the same predicate) and projects the
+   * facts from that same snapshot, so the answer is exactly one of the two
+   * coherent states - matched with that run's facts, or not matched. Never a
+   * validated-but-vanished enrollment whose empty facts would be rendered as
+   * a fresh unconfigured run beside old-generation parent data.
+   */
+  findFencedScheduleExecutionFactsByEnrollment(
+    expectedEnrollmentId: EnrollmentId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedScheduleExecutionFacts>;
 }

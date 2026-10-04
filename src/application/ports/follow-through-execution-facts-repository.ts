@@ -36,7 +36,7 @@
  */
 
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 import type { CompletedOccurrenceActivity } from './workout-session-repository';
 
 /** A run's session execution truth and settlement facts from one snapshot. */
@@ -49,9 +49,35 @@ export interface FollowThroughExecutionFacts {
   readonly notPerformedFacts: ReadonlyArray<NotPerformedOccurrence>;
 }
 
+/**
+ * The FENCED projection: whether the caller's expected enrollment still exists
+ * as the trusted (user, program) pair's run, and - only when it does - that
+ * run's execution facts. `matched: false` is never reported as matched with
+ * empty facts, which would misread a vanished run as a fresh one inside a
+ * parent view still describing the old generation. Mirrors
+ * `FencedRunClosureFacts` on the closure-facts port.
+ */
+export type FencedFollowThroughExecutionFacts =
+  | { readonly matched: true; readonly facts: FollowThroughExecutionFacts }
+  | { readonly matched: false };
+
 export interface FollowThroughExecutionFactsRepository {
   /** All three execution-fact sets of one run, read from ONE snapshot. */
   listFollowThroughExecutionFactsByEnrollment(
     enrollmentId: EnrollmentId,
   ): Promise<FollowThroughExecutionFacts>;
+
+  /**
+   * The fenced variant for a caller composing this read into an
+   * already-loaded run (program detail): ONE statement anchors on
+   * `program_enrollments` (verifying the expected id AND the trusted
+   * `userId` / `programId` in the same predicate) and projects the facts from
+   * that same snapshot, so the answer is exactly one of the two coherent
+   * states - matched with that run's facts, or not matched.
+   */
+  findFencedFollowThroughExecutionFactsByEnrollment(
+    expectedEnrollmentId: EnrollmentId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedFollowThroughExecutionFacts>;
 }

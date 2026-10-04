@@ -165,8 +165,10 @@ describe('M17 snapshot reads — execution truth and settlement facts are ONE co
   it('the schedule projection is ONE statement — no transaction, no lock, no writes', () => {
     const adapter = codeOf(SCHEDULE_ADAPTER);
 
+    // Each read is ONE statement (a UNION of the projections) taking ONE
+    // snapshot - the enrollment-scoped read and the generation-fenced one.
     expect(adapter).toContain('.unionAll(');
-    expect(adapter.match(/await /g)).toHaveLength(1);
+    expect(adapter.match(/await /g)).toHaveLength(2);
     expect(adapter).not.toContain('transaction(');
     expect(adapter).not.toContain(".for('");
     expect(adapter).not.toContain('insert(');
@@ -192,10 +194,11 @@ describe('M17 snapshot reads — execution truth and settlement facts are ONE co
       'src/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository.ts',
     );
 
-    // ONE statement takes ONE snapshot, so completed activity and the recorded
-    // facts can never be torn across a concurrent settlement transition.
+    // Each read is ONE statement taking ONE snapshot, so completed activity and
+    // the recorded facts can never be torn across a concurrent settlement
+    // transition - the enrollment-scoped read and the generation-fenced one.
     expect(adapter).toContain('.unionAll(');
-    expect(adapter.match(/await /g)).toHaveLength(1);
+    expect(adapter.match(/await /g)).toHaveLength(2);
     expect(adapter).not.toContain('transaction(');
     expect(adapter).not.toContain(".for('");
     expect(adapter).not.toContain('insert(');
@@ -220,8 +223,10 @@ describe('M17 Slice 9 — the M16 report READS the facts and never writes them',
   it('reads the run facts through the read-only port, once per terminal path', () => {
     const code = codeOf(FOLLOW_THROUGH_READ);
 
-    // The planned-row intent read: exactly one.
-    expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(1);
+    // The planned-row intent read: exactly ONE per terminal path - the
+    // standalone current-run read and the generation-fenced read (never per
+    // row, never a re-resolved current enrollment on the fenced path).
+    expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(2);
     // The fact projection: ONE read on the no-calendar terminal path only
     // (so a rowless fact is still counted) — the configured path takes the
     // one-snapshot execution-facts port instead. Never one query per row or

@@ -1,17 +1,19 @@
-import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, exists, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import type {
+  FencedScheduleExecutionFacts,
   ScheduleExecutionFacts,
   ScheduleExecutionFactsRepository,
 } from '@/application/ports/schedule-execution-facts-repository';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapRowToNotPerformedOccurrence } from '../mappers/not-performed-occurrence-mapper';
-import { notPerformedWorkouts, workoutSessions } from '../schema';
+import { notPerformedWorkouts, programEnrollments, workoutSessions } from '../schema';
 
 /** Discriminator values of the one-row-per-fact projection below. */
+const MATCHED = 'matched';
 const COMPLETED = 'completed';
 const IN_PROGRESS = 'in_progress';
 const NOT_PERFORMED = 'not_performed';
@@ -41,6 +43,99 @@ export class DrizzleScheduleExecutionFactsRepository implements ScheduleExecutio
   async listScheduleExecutionFactsByEnrollment(
     enrollmentId: EnrollmentId,
   ): Promise<ScheduleExecutionFacts> {
+    const { completedFacts, inProgressFacts, notPerformedFacts } = this.factBranches(
+      enrollmentId,
+      undefined,
+    );
+
+    // Deterministic order: completed, in-progress, then not-performed, each
+    // set ascending by scheduled_workout_id — never implicit database order.
+    const rows = await completedFacts
+      .unionAll(inProgressFacts)
+      .unionAll(notPerformedFacts)
+      .orderBy(sql`source`, sql`scheduled_workout_id`);
+
+    return mapScheduleFactRows(enrollmentId, rows);
+  }
+
+  /**
+   * The FENCED projection (the `findFencedClosureFactsByEnrollment` shape):
+   * identity and facts from ONE statement.
+   *
+   * Four branches in a single `UNION ALL`, every one of them gated by the SAME
+   * predicate over `program_enrollments` (the expected id AND the trusted
+   * `user_id` / `program_id`): a `matched` anchor row plus the three fact
+   * branches. Because READ COMMITTED takes ONE snapshot per statement, the
+   * anchor and the facts describe the same instant: a restart/leave committing
+   * while this statement runs shifts the whole answer to before (matched, the
+   * old run's facts) or after (not matched) — never a validated-but-vanished
+   * enrollment whose empty facts a composed parent would misread as an
+   * unconfigured run beside old-generation data.
+   */
+  async findFencedScheduleExecutionFactsByEnrollment(
+    expectedEnrollmentId: EnrollmentId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedScheduleExecutionFacts> {
+    // The one predicate every branch shares: the expected enrollment is THIS
+    // user's run of THIS program. Evaluated in the same snapshot as the facts.
+    const expectedRunExists = exists(
+      this.db
+        .select({ one: sql`1` })
+        .from(programEnrollments)
+        .where(
+          and(
+            eq(programEnrollments.id, expectedEnrollmentId),
+            eq(programEnrollments.userId, userId),
+            eq(programEnrollments.programId, programId),
+          ),
+        ),
+    );
+
+    const anchor = this.db
+      .select({
+        scheduledWorkoutId: sql<string | null>`null::text`.as('scheduled_workout_id'),
+        source: sql<string>`'${sql.raw(MATCHED)}'`.as('source'),
+        recordedAt: sql<string | null>`null::text`.as('recorded_at'),
+      })
+      .from(programEnrollments)
+      .where(
+        and(
+          eq(programEnrollments.id, expectedEnrollmentId),
+          eq(programEnrollments.userId, userId),
+          eq(programEnrollments.programId, programId),
+        ),
+      );
+
+    const { completedFacts, inProgressFacts, notPerformedFacts } = this.factBranches(
+      expectedEnrollmentId,
+      expectedRunExists,
+    );
+
+    // ONE statement: the anchor first, then the facts in the same deterministic
+    // order as the unfenced projection.
+    const rows = await anchor
+      .unionAll(completedFacts)
+      .unionAll(inProgressFacts)
+      .unionAll(notPerformedFacts)
+      .orderBy(sql`source`, sql`scheduled_workout_id`);
+
+    if (!rows.some((row) => row.source === MATCHED)) {
+      return { matched: false };
+    }
+
+    return { matched: true, facts: mapScheduleFactRows(expectedEnrollmentId, rows) };
+  }
+
+  /**
+   * The three fact branches of the projection, optionally gated by the fenced
+   * anchor predicate so both public reads share ONE branch shape and ONE
+   * mapper.
+   */
+  private factBranches(
+    enrollmentId: EnrollmentId,
+    expectedRunExists: ReturnType<typeof exists> | undefined,
+  ) {
     const completedFacts = this.db
       .select({
         scheduledWorkoutId: workoutSessions.scheduledWorkoutId,
@@ -52,6 +147,7 @@ export class DrizzleScheduleExecutionFactsRepository implements ScheduleExecutio
         and(
           eq(workoutSessions.enrollmentId, enrollmentId),
           isNotNull(workoutSessions.completedAt),
+          expectedRunExists,
         ),
       );
 
@@ -66,6 +162,7 @@ export class DrizzleScheduleExecutionFactsRepository implements ScheduleExecutio
         and(
           eq(workoutSessions.enrollmentId, enrollmentId),
           isNull(workoutSessions.completedAt),
+          expectedRunExists,
         ),
       );
 
@@ -81,44 +178,54 @@ export class DrizzleScheduleExecutionFactsRepository implements ScheduleExecutio
         recordedAt: sql<string>`to_char(${notPerformedWorkouts.recordedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`.as('recorded_at'),
       })
       .from(notPerformedWorkouts)
-      .where(eq(notPerformedWorkouts.enrollmentId, enrollmentId));
+      .where(
+        and(eq(notPerformedWorkouts.enrollmentId, enrollmentId), expectedRunExists),
+      );
 
-    // Deterministic order: completed, in-progress, then not-performed, each
-    // set ascending by scheduled_workout_id — never implicit database order.
-    const rows = await completedFacts
-      .unionAll(inProgressFacts)
-      .unionAll(notPerformedFacts)
-      .orderBy(sql`source`, sql`scheduled_workout_id`);
+    return { completedFacts, inProgressFacts, notPerformedFacts };
+  }
+}
 
-    const completedIds: ScheduledWorkoutId[] = [];
-    const inProgressIds: ScheduledWorkoutId[] = [];
-    const facts: NotPerformedOccurrence[] = [];
-    for (const row of rows) {
-      if (row.source === COMPLETED) {
-        // Trusted DB values: the column is a FK into scheduled_workouts, so
-        // each id is valid by schema constraint (database records are trusted
-        // at the repository boundary).
-        completedIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
-      } else if (row.source === IN_PROGRESS) {
-        inProgressIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
-      } else {
-        // Non-null narrowing: recorded_at is NOT NULL on the table, so a null
-        // surviving on a fact row is corrupt data — thrown, never normalized.
-        if (row.recordedAt === null) {
-          throw new Error(
-            `Corrupt data in not_performed_workouts (enrollment_id=${enrollmentId}, scheduled_workout_id=${row.scheduledWorkoutId}): recorded_at is null`,
-          );
-        }
-        facts.push(
-          mapRowToNotPerformedOccurrence({
-            enrollmentId,
-            scheduledWorkoutId: row.scheduledWorkoutId,
-            recordedAt: new Date(row.recordedAt),
-          }),
+/** One row of the projection, whatever statement produced it. */
+interface ScheduleFactRow {
+  readonly scheduledWorkoutId: string | null;
+  readonly source: string;
+  readonly recordedAt: string | null;
+}
+
+/** Maps projection rows onto the three fact sets (the shared mapper). */
+function mapScheduleFactRows(
+  enrollmentId: EnrollmentId,
+  rows: ReadonlyArray<ScheduleFactRow>,
+): ScheduleExecutionFacts {
+  const completedIds: ScheduledWorkoutId[] = [];
+  const inProgressIds: ScheduledWorkoutId[] = [];
+  const facts: NotPerformedOccurrence[] = [];
+  for (const row of rows) {
+    if (row.source === COMPLETED) {
+      // Trusted DB values: the column is a FK into scheduled_workouts, so
+      // each id is valid by schema constraint (database records are trusted
+      // at the repository boundary).
+      completedIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
+    } else if (row.source === IN_PROGRESS) {
+      inProgressIds.push(row.scheduledWorkoutId as ScheduledWorkoutId);
+    } else if (row.source === NOT_PERFORMED) {
+      // Non-null narrowing: both columns are NOT NULL on the table, so a null
+      // surviving on a fact row is corrupt data — thrown, never normalized.
+      if (row.recordedAt === null || row.scheduledWorkoutId === null) {
+        throw new Error(
+          `Corrupt data in not_performed_workouts (enrollment_id=${enrollmentId}, scheduled_workout_id=${row.scheduledWorkoutId}): recorded_at is null`,
         );
       }
+      facts.push(
+        mapRowToNotPerformedOccurrence({
+          enrollmentId,
+          scheduledWorkoutId: row.scheduledWorkoutId,
+          recordedAt: new Date(row.recordedAt),
+        }),
+      );
     }
-
-    return { completedIds, inProgressIds, notPerformedFacts: facts };
   }
+
+  return { completedIds, inProgressIds, notPerformedFacts: facts };
 }

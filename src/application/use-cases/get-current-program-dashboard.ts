@@ -114,6 +114,9 @@ export class GetCurrentProgramDashboardUseCase {
         programResult.data.program,
         now,
         programResult.data.program.slug,
+        // The SAME generation fence the closure read uses: the schedule is read
+        // for EXACTLY the enrollment this view already loaded.
+        enrollment.enrollmentId,
       ),
       this.readRunClosure(
         userId,
@@ -178,25 +181,33 @@ export class GetCurrentProgramDashboardUseCase {
 
   /**
    * Reads the run's M15 training calendar with the SAME hydrated program
-   * aggregate as the rest of this view — the schedule use case takes the
-   * aggregate precisely so one request hydrates the catalog exactly once.
+   * aggregate AND the SAME enrollment this view already loaded — the read is
+   * fenced to that identity (`expectedEnrollmentId`), so a concurrent
+   * restart/leave cannot compose this view's old-enrollment data with a new
+   * run's calendar.
    *
-   * Failure degrades to `{ status: 'unavailable' }`, never to "unconfigured":
-   * a failed read must not be rendered as an unset schedule. Per
+   * Failure - including the typed `ENROLLMENT_CHANGED` refusal - degrades to
+   * `{ status: 'unavailable' }`, never to "unconfigured": a failed or
+   * stale-generation read must not be rendered as an unset schedule. Per
    * docs/error-handling.md a caught error is always logged, mirroring the
    * dashboard's optional-read convention (M13 insights, recent training). A
    * `null` schedule means the enrollment vanished between this use case's own
-   * reads (a concurrent leave) — that is also reported as `unavailable`, not
-   * as an unconfigured run.
+   * reads (a concurrent leave) - also `unavailable`, never an unconfigured run.
    */
   private async readSchedule(
     userId: string,
     program: TrainingProgram,
     now: Date,
     programSlug: string,
+    expectedEnrollmentId: string,
   ): Promise<DashboardScheduleState> {
     try {
-      const result = await this.getEnrollmentSchedule.execute({ userId, program, now });
+      const result = await this.getEnrollmentSchedule.execute({
+        userId,
+        program,
+        now,
+        expectedEnrollmentId,
+      });
       if (!result.ok) {
         console.error(
           `Unexpected failure reading the training schedule for program "${programSlug}"`,

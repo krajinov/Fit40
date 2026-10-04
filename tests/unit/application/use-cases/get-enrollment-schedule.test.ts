@@ -46,7 +46,7 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const enrollments = new InMemoryProgramEnrollmentRepository();
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
-  const executionFacts = makeScheduleExecutionFactsRepo(sessions, facts);
+  const executionFacts = makeScheduleExecutionFactsRepo(sessions, facts, enrollments);
   const useCase = new GetEnrollmentScheduleUseCase(enrollments, plannedWorkouts, executionFacts);
   return { enrollments, plannedWorkouts, sessions, executionFacts, useCase };
 }
@@ -267,7 +267,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      makeScheduleExecutionFactsRepo(sessions),
+      makeScheduleExecutionFactsRepo(sessions, [], enrollments),
     );
 
     const result = await useCase.execute({ userId: USER_A, program: PROGRAM, now: NOW });
@@ -294,7 +294,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      makeScheduleExecutionFactsRepo(sessions),
+      makeScheduleExecutionFactsRepo(sessions, [], enrollments),
     );
 
     await expect(
@@ -632,3 +632,94 @@ describe('GetEnrollmentScheduleUseCase — rowless facts, horizons and undo', ()
   });
 });
 
+/**
+ * M17 generation fencing: the schedule read composed into an already-loaded
+ * enrollment is tied to THAT enrollment identity, never to a re-resolved
+ * current run. Mirrors the closure-fencing contract.
+ */
+describe('GetEnrollmentScheduleUseCase - enrollment identity fencing', () => {
+  it('reads the calendar of EXACTLY the expected enrollment while it exists', async () => {
+    const harness = makeHarness([notPerformedFact(ENR_A, OCCURRENCE_W1_2)]);
+    await enrolledRun(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+    ]);
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) throw new Error('expected a schedule');
+    expect(result.data.configured).toBe(true);
+    expect(result.data.items.map((item) => item.scheduledWorkoutId)).toEqual([
+      OCCURRENCE_W1_1,
+    ]);
+    expect(result.data.unplacedNotPerformedWorkouts).toHaveLength(1);
+  });
+
+  it('refuses with ENROLLMENT_CHANGED when the expected enrollment was replaced, reading no planned rows', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    // The replacement a restart produces: the old row is deleted and a
+    // DIFFERENT id becomes the current run of the same (user, program) pair.
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+    const plannedRead = vi.spyOn(harness.plannedWorkouts, 'listByEnrollment');
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    // The caller is composing an old-enrollment view: the fenced read refuses
+    // rather than silently switching to the replacement run calendar.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    // No planned rows are ever issued for the vanished expected enrollment.
+    expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the expected enrollment belongs to another user, reading no planned rows', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness, ENR_B, USER_B);
+    const plannedRead = vi.spyOn(harness.plannedWorkouts, 'listByEnrollment');
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_B,
+    });
+
+    // The id alone never authorizes: ownership is verified in the SAME
+    // statement as the facts, so a foreign run resolves not-matched.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps resolving the CURRENT enrollment when no expected id is supplied', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+
+    // The standalone convention is unchanged: without a fence the read
+    // describes whichever run is current - here the replacement.
+    const result = await harness.useCase.execute({ userId: USER_A, program: PROGRAM, now: NOW });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    // No planned rows exist for the replacement run yet: an unconfigured
+    // calendar is the truthful current state, never an error.
+    expect(result.data).toMatchObject({ configured: false });
+  });
+});

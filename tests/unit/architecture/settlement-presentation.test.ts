@@ -537,3 +537,83 @@ describe('M17 — the leave action invalidates both occurrence-route templates',
     expect(code.match(/revalidatePath\(/g)).toHaveLength(4);
   });
 });
+
+/**
+ * M17 - the generation-fence invariant: any run-scoped read composed with an
+ * already-loaded ProgramEnrollment must use that SAME ProgramEnrollmentId, so
+ * one composed page/DTO can never mix enrollment generations (old parent data
+ * beside a new run's schedule/report/closure).
+ */
+describe('M17 - composed run-scoped reads share ONE enrollment generation', () => {
+  const DASHBOARD_USE_CASE = 'src/application/use-cases/get-current-program-dashboard.ts';
+  const PROGRAM_DETAIL_PAGE = 'src/app/(app)/programs/[programSlug]/page.tsx';
+  const SCHEDULE_READ = 'src/application/use-cases/get-enrollment-schedule.ts';
+  const FOLLOW_THROUGH_READ = 'src/application/use-cases/get-enrollment-follow-through.ts';
+  const CLOSURE_READ = 'src/application/use-cases/get-run-closure-summary.ts';
+
+  it('the dashboard fences the schedule read to the enrollment it already loaded', () => {
+    const code = codeOf(DASHBOARD_USE_CASE);
+
+    expect(code).toContain('expectedEnrollmentId');
+    expect(code).toContain('enrollment.enrollmentId');
+    // The schedule read is invoked WITH the fence - never a bare current-run
+    // resolution beside an already-loaded enrollment.
+    expect(code).toContain('getEnrollmentSchedule.execute({');
+    expect(code).toContain('expectedEnrollmentId,');
+  });
+
+  it('program detail fences schedule, follow-through AND closure to the loaded enrollment', () => {
+    const code = codeOf(PROGRAM_DETAIL_PAGE);
+
+    // Every nested run-scoped read receives the SAME id the page loaded.
+    expect(code.match(/enrollment\.enrollmentId/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(code).toContain('expectedEnrollmentId');
+  });
+
+  it('the schedule and follow-through reads fence identity AND facts in ONE statement', () => {
+    for (const file of [SCHEDULE_READ, FOLLOW_THROUGH_READ]) {
+      const code = codeOf(file);
+
+      // The fenced path takes the expected id and the trusted pair...
+      expect(code).toContain('expectedEnrollmentId?: string;');
+      expect(code).toContain('ENROLLMENT_CHANGED');
+    }
+
+    // ...and the schedule/follow-through use cases never re-resolve the current
+    // enrollment on the fenced path (their current-enrollment resolution stays
+    // exactly once, on the standalone path).
+    for (const file of [SCHEDULE_READ, FOLLOW_THROUGH_READ]) {
+      const code = codeOf(file);
+      expect(code.match(/findByUserAndProgram\(/g)).toHaveLength(1);
+    }
+
+    expect(codeOf(SCHEDULE_READ)).toContain(
+      'findFencedScheduleExecutionFactsByEnrollment(',
+    );
+    expect(codeOf(FOLLOW_THROUGH_READ)).toContain(
+      'findFencedFollowThroughExecutionFactsByEnrollment(',
+    );
+    // The closure read keeps its own fence, unchanged.
+    expect(codeOf(CLOSURE_READ)).toContain('findFencedClosureFactsByEnrollment(');
+  });
+
+  it('the fenced projections anchor on the enrollment row, gated in the same statement', () => {
+    const scheduleAdapter = codeOf(
+      'src/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository.ts',
+    );
+    const followThroughAdapter = codeOf(
+      'src/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository.ts',
+    );
+
+    for (const adapter of [scheduleAdapter, followThroughAdapter]) {
+      expect(adapter).toContain('programEnrollments');
+      expect(adapter).toContain('programEnrollments.userId');
+      expect(adapter).toContain('programEnrollments.programId');
+      expect(adapter).toContain('matched: false');
+      // Read-only: no transaction, no lock, no write, no SERIALIZABLE.
+      expect(adapter).not.toContain('transaction(');
+      expect(adapter).not.toContain(".for('");
+      expect(adapter.toLowerCase()).not.toContain('serializable');
+    }
+  });
+});

@@ -56,7 +56,7 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
   const notPerformed = makeNotPerformedRepo(facts);
-  const executionFacts = makeFollowThroughExecutionFactsRepo(sessions, facts);
+  const executionFacts = makeFollowThroughExecutionFactsRepo(sessions, facts, enrollments);
   const useCase = new GetEnrollmentFollowThroughUseCase(
     enrollments,
     plannedWorkouts,
@@ -859,5 +859,86 @@ describe('GetEnrollmentFollowThroughUseCase — recorded not-performed facts (Sl
     const removed = await readFollowThrough(harness);
     expect(removed?.configured).toBe(false);
     expect(removed?.notPerformedUnplaced).toBe(1);
+  });
+});
+
+/**
+ * M17 generation fencing: the follow-through read composed into an
+ * already-loaded enrollment is tied to THAT enrollment identity, never to a
+ * re-resolved current run. Mirrors the closure-fencing contract.
+ */
+describe('GetEnrollmentFollowThroughUseCase - enrollment identity fencing', () => {
+  it('reads the report of EXACTLY the expected enrollment while it exists', async () => {
+    // The recorded fact sits on the occurrence that HAS a planned row, so it
+    // counts in the reported week (not as a rowless/unplaced fact).
+    const harness = makeHarness([notPerformedFact(ENR_A, OCCURRENCE_W1_1)]);
+    await enrolledRun(harness);
+    await configure(harness, [planned(ENR_A, OCCURRENCE_W1_1, MON)]);
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) throw new Error('expected a report');
+    if (!result.data.configured) throw new Error('expected a configured report');
+    expect(result.data.totals.notPerformed).toBe(1);
+    expect(result.data.notPerformedUnplaced).toBe(0);
+  });
+
+  it('refuses with ENROLLMENT_CHANGED when the expected enrollment was replaced, reading no planned rows', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+    const plannedRead = vi.spyOn(harness.plannedWorkouts, 'listByEnrollment');
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the expected enrollment belongs to another user, reading no planned rows', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness, ENR_B, USER_B);
+    const plannedRead = vi.spyOn(harness.plannedWorkouts, 'listByEnrollment');
+
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_B,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+    expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps resolving the CURRENT enrollment when no expected id is supplied', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    await harness.enrollments.delete(enrollmentId(ENR_A));
+    await harness.enrollments.create(enrollment('enr-a-replacement', USER_A));
+
+    // The standalone convention is unchanged: without a fence the read
+    // describes whichever run is current - here the replacement (no rows).
+    const result = await harness.useCase.execute({ userId: USER_A, program: PROGRAM, now: NOW });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.data).toMatchObject({ configured: false, notPerformedUnplaced: 0 });
   });
 });

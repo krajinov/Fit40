@@ -332,6 +332,9 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(input).toMatchObject({ userId: USER_ID });
     expect(input?.program).toBe(PROGRAM_AGGREGATE);
     expect(input?.now).toBeInstanceOf(Date);
+    // M17 generation fence: the calendar is read for EXACTLY the enrollment
+    // this page already loaded - never a re-resolved current run.
+    expect(input?.expectedEnrollmentId).toBe('enr-detail-page-a');
 
     // M17 Slice 10: the closure summary rides the composed read with the SAME
     // aggregate — and deliberately carries no request clock, because
@@ -720,6 +723,8 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(input).toMatchObject({ userId: USER_ID });
     expect(input?.program).toBe(PROGRAM_AGGREGATE);
     expect(input?.now).toBeInstanceOf(Date);
+    // The SAME generation fence as the schedule and closure reads.
+    expect(input?.expectedEnrollmentId).toBe('enr-detail-page-a');
     // No second catalog lookup, and both section reads share that clock.
     expect(programExecute).toHaveBeenCalledTimes(1);
     expect(scheduleExecute.mock.calls[0]?.[0]?.now).toBe(input?.now);

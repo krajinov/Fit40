@@ -345,8 +345,9 @@ describe('GetCurrentProgramDashboardUseCase', () => {
 
   it('reads the M15 schedule with the same hydrated program aggregate (one catalog hydration)', async () => {
     const program = P1();
-    const scheduleExecute = vi.fn(async (input: { program: { slug: string } }) =>
-      okSchedule(input.program.slug),
+    const scheduleExecute = vi.fn(
+      async (input: { program: { slug: string }; expectedEnrollmentId?: string }) =>
+        okSchedule(input.program.slug),
     );
     const { enrollmentRepo, uc } = makeUseCase([program], METADATA, undefined, {
       execute: scheduleExecute,
@@ -364,6 +365,10 @@ describe('GetCurrentProgramDashboardUseCase', () => {
       userId: 'user-a',
       now: NOW,
     });
+    // M17 generation fence: the calendar is read for EXACTLY the enrollment
+    // this view already loaded - never a re-resolved current run - so the
+    // composed dashboard can never pair old enrollment data with a new run.
+    expect(scheduleExecute.mock.calls[0]?.[0].expectedEnrollmentId).toBe('enr-1');
     expect(scheduleExecute.mock.calls[0]?.[0].program).toBe(program);
     expect(result.data.schedule).toEqual({
       status: 'loaded',

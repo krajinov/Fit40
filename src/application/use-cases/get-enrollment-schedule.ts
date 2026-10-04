@@ -49,7 +49,10 @@ import type {
 } from '@/application/dto/schedule';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
-import type { ScheduleExecutionFactsRepository } from '@/application/ports/schedule-execution-facts-repository';
+import type {
+  ScheduleExecutionFacts,
+  ScheduleExecutionFactsRepository,
+} from '@/application/ports/schedule-execution-facts-repository';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { TrainingProgram } from '@/domain/entities/training-program';
@@ -58,7 +61,12 @@ import {
   resolveScheduleFocus,
   type PlannedWorkoutFacts,
 } from '@/domain/services/schedule-focus';
-import { createUserId, type ScheduledWorkoutId } from '@/domain/types/ids';
+import {
+  createEnrollmentId,
+  createUserId,
+  type ScheduledWorkoutId,
+  type UserId,
+} from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 import {
   comparePlannedDates,
@@ -66,11 +74,22 @@ import {
   type PlannedDate,
 } from '@/domain/value-objects/planned-date';
 
-export type GetEnrollmentScheduleError = {
-  readonly code: 'INVALID_INPUT';
-  readonly message: string;
-  readonly field?: string;
-};
+export type GetEnrollmentScheduleError =
+  | {
+      readonly code: 'INVALID_INPUT';
+      readonly message: string;
+      readonly field?: string;
+    }
+  | {
+      /**
+       * The caller's expected enrollment no longer exists (a concurrent
+       * restart/leave replaced the run): the read refuses to compose the caller's
+       * old-enrollment parent with a new run's calendar. Never thrown — the
+       * caller degrades, never mixing generations.
+       */
+      readonly code: 'ENROLLMENT_CHANGED';
+      readonly message: string;
+    };
 
 export interface GetEnrollmentScheduleInput {
   readonly userId: string;
@@ -83,6 +102,16 @@ export interface GetEnrollmentScheduleInput {
   readonly program: TrainingProgram;
   /** The request clock; the calendar date is derived from it in UTC. */
   readonly now: Date;
+  /**
+   * The SPECIFIC enrollment the caller already loaded and is composing this
+   * calendar into (the dashboard's / program detail's enrollment view). When
+   * supplied, the read is fenced to exactly that identity: it never re-resolves
+   * the current enrollment, so a concurrent restart/leave cannot compose the
+   * caller's old-enrollment parent data with a NEW run's calendar. Omitted (or
+   * undefined), the read resolves the current enrollment as before — the
+   * standalone read convention.
+   */
+  readonly expectedEnrollmentId?: string;
 }
 
 export class GetEnrollmentScheduleUseCase {
@@ -102,6 +131,13 @@ export class GetEnrollmentScheduleUseCase {
         message: userIdResult.error.message,
         field: 'userId',
       });
+    }
+
+    // The fenced path: identity and facts in ONE statement — never a validate
+    // call followed by an independent facts call, whose window a concurrent
+    // restart/leave could open.
+    if (input.expectedEnrollmentId !== undefined) {
+      return this.executeFenced(input.expectedEnrollmentId, userIdResult.data, input);
     }
 
     const enrollment = await this.enrollmentRepository.findByUserAndProgram(
@@ -124,23 +160,82 @@ export class GetEnrollmentScheduleUseCase {
       this.plannedWorkoutRepository.listByEnrollment(enrollment.id),
       this.scheduleExecutionFactsRepository.listScheduleExecutionFactsByEnrollment(enrollment.id),
     ]);
+
+    return ok(this.buildSchedule(input.program, plannedRows, executionFacts, today));
+  }
+
+  /**
+   * The standalone projection, shared by both paths so the fenced read derives
+   * the SAME calendar semantics — nothing is re-decided per path.
+   */
+  private buildSchedule(
+    program: TrainingProgram,
+    plannedRows: ReadonlyArray<PlannedWorkout>,
+    executionFacts: ScheduleExecutionFacts,
+    today: PlannedDate,
+  ): EnrollmentScheduleDto {
     const { completedIds, inProgressIds, notPerformedFacts } = executionFacts;
 
     if (plannedRows.length === 0) {
       // No current calendar — but a recorded fact is execution truth and is
       // never erased by the absence of a row, so it is still projected.
-      return ok(unconfiguredSchedule(input.program, today, notPerformedFacts));
+      return unconfiguredSchedule(program, today, notPerformedFacts);
     }
 
+    return buildConfiguredSchedule(
+      program,
+      plannedRows,
+      completedIds,
+      inProgressIds,
+      notPerformedFacts,
+      today,
+    );
+  }
+
+  /**
+   * The fenced read: ONE statement establishes BOTH that the caller's expected
+   * enrollment is still this user's run of this program AND that run's
+   * execution facts (the closure-fence pattern); the planned rows are read by
+   * that exact identity, so no read of this path can ever describe another
+   * generation.
+   *
+   * `matched: false` (gone, replaced, or not the trusted pair's — a foreign id
+   * never leaks another user's run) is the typed `ENROLLMENT_CHANGED`
+   * refusal, never absence and never a calendar: the caller is composing a
+   * view for a run that DID exist, so empty facts must never be rendered as
+   * an unconfigured run. A malformed id is the same refusal.
+   */
+  private async executeFenced(
+    expectedEnrollmentId: string,
+    userId: UserId,
+    input: GetEnrollmentScheduleInput,
+  ): Promise<Result<EnrollmentScheduleDto | null, GetEnrollmentScheduleError>> {
+    const expectedId = createEnrollmentId(expectedEnrollmentId);
+    if (!expectedId.ok) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'The expected enrollment id is invalid, so the schedule cannot be read',
+      });
+    }
+
+    const projection = await this.scheduleExecutionFactsRepository.findFencedScheduleExecutionFactsByEnrollment(
+      expectedId.data,
+      userId,
+      input.program.id,
+    );
+    if (!projection.matched) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while reading the schedule. Please reload and try again.',
+      });
+    }
+
+    // The planned rows of THAT run — keyed by the expected identity, never by
+    // a re-resolved current enrollment, so this read can never mix generations.
+    const plannedRows = await this.plannedWorkoutRepository.listByEnrollment(expectedId.data);
+
     return ok(
-      buildConfiguredSchedule(
-        input.program,
-        plannedRows,
-        completedIds,
-        inProgressIds,
-        notPerformedFacts,
-        today,
-      ),
+      this.buildSchedule(input.program, plannedRows, projection.facts, plannedDateFromInstant(input.now)),
     );
   }
 }

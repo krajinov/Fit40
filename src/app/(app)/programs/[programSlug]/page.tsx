@@ -37,21 +37,32 @@ const getProgram = cache(async (programSlug: string) => {
 
 /**
  * Reads the run's M15 schedule at the server boundary with the page's single
- * request clock and the SAME program aggregate the page already hydrated — no
- * second catalog lookup. Failure degrades to `{ status: 'unavailable' }`,
- * never to "unconfigured": the read is additive, so a failure must not take
- * down program detail, and per docs/error-handling.md a caught error is
- * always logged. A `null` DTO means the enrollment vanished between this
- * page's own reads (a concurrent leave) — also reported as unavailable, not
- * as an unconfigured run (the Slice 5 convention).
+ * request clock, the SAME program aggregate the page already hydrated, AND the
+ * SAME enrollment the page already loaded - no second catalog lookup, and
+ * never a re-resolved current enrollment: the read is fenced to that exact
+ * generation (`expectedEnrollmentId`), so a concurrent restart/leave cannot
+ * compose this page's old-enrollment view with a new run's calendar. Failure -
+ * including the typed `ENROLLMENT_CHANGED` refusal - degrades to
+ * `{ status: 'unavailable' }`, never to "unconfigured": the read is additive,
+ * so a failure or stale generation must not take down program detail, and per
+ * docs/error-handling.md a caught error is always logged. A `null` DTO means
+ * the enrollment vanished between this page's own reads (a concurrent leave) -
+ * also reported as unavailable, not as an unconfigured run (the Slice 5
+ * convention).
  */
 async function readEnrollmentSchedule(
   userId: string,
   program: TrainingProgram,
   now: Date,
+  expectedEnrollmentId: string,
 ): Promise<ScheduleReadState> {
   try {
-    const result = await getEnrollmentScheduleUseCase.execute({ userId, program, now });
+    const result = await getEnrollmentScheduleUseCase.execute({
+      userId,
+      program,
+      now,
+      expectedEnrollmentId,
+    });
     if (!result.ok) {
       console.error(
         `Unexpected failure reading the training schedule for program "${program.slug}"`,
@@ -127,9 +138,10 @@ async function readRunClosure(
  * Reads the run's M16 plan follow-through at the server boundary with the SAME
  * request clock and the SAME already-hydrated program aggregate the schedule
  * read uses — no second catalog lookup. The section is additive, so this
- * follows the page's existing section-read behavior: a failure (or a `null`
- * DTO, meaning the enrollment vanished between this page's own reads) is
- * logged and renders no section. It is never turned into `configured: false`,
+ * follows the page's existing section-read behavior: a failure - including
+ * the typed `ENROLLMENT_CHANGED` refusal - (or a `null` DTO, meaning the
+ * enrollment vanished between this page's own reads) is logged and renders no
+ * section. It is never turned into `configured: false`,
  * an empty report or fabricated weeks, and not-enrolled is simply no section —
  * expected absence is data, an unexpected failure is still logged as a failure.
  */
@@ -137,9 +149,18 @@ async function readEnrollmentFollowThrough(
   userId: string,
   program: TrainingProgram,
   now: Date,
+  expectedEnrollmentId: string,
 ): Promise<EnrollmentFollowThroughDto | null> {
   try {
-    const result = await getEnrollmentFollowThroughUseCase.execute({ userId, program, now });
+    // Fenced to the enrollment the page already loaded - never a re-resolved
+    // current enrollment - so a concurrent restart/leave cannot compose this
+    // page's view with a new run's report.
+    const result = await getEnrollmentFollowThroughUseCase.execute({
+      userId,
+      program,
+      now,
+      expectedEnrollmentId,
+    });
     if (!result.ok) {
       console.error(
         `Unexpected failure reading plan follow-through for program "${program.slug}"`,
@@ -262,8 +283,12 @@ export default async function ProgramDetailPage({
       if (enrollment.nextWorkout !== null) {
         const now = new Date();
         const [scheduleState, followThroughResult] = await Promise.all([
-          readEnrollmentSchedule(user.id, result.data.program, now),
-          readEnrollmentFollowThrough(user.id, result.data.program, now),
+          // BOTH section reads are fenced to the SAME enrollment generation
+          // the page already loaded - the same fence the closure read uses - so
+          // no nested read can silently describe the replacement run while
+          // this view still describes the loaded one.
+          readEnrollmentSchedule(user.id, result.data.program, now, enrollment.enrollmentId),
+          readEnrollmentFollowThrough(user.id, result.data.program, now, enrollment.enrollmentId),
         ]);
         schedule = scheduleState;
         followThrough = followThroughResult;

@@ -264,6 +264,9 @@ export default async function ProgramDetailPage({
               programSlug: result.data.program.slug,
               weekNumber: nextOccurrence.weekNumber,
               workoutOrder: nextOccurrence.workoutOrder,
+              // The preview is fenced to the SAME enrollment generation as the
+              // schedule, follow-through and closure reads on this page.
+              expectedEnrollmentId: enrollment.enrollmentId,
             });
       nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, workout);
 

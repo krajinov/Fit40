@@ -228,7 +228,8 @@ export function createGate(): { readonly opened: Promise<void>; readonly open: (
 export type SnapshotGateTable =
   | 'workout_sessions'
   | 'not_performed_workouts'
-  | 'program_enrollments';
+  | 'program_enrollments'
+  | 'planned_workouts';
 
 /**
  * A test-only gate: a dedicated transaction whose `LOCK TABLE … IN ACCESS

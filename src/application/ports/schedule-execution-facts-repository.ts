@@ -37,6 +37,7 @@
  */
 
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
+import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 /** A run's session execution truth and settlement facts from one snapshot. */
@@ -58,7 +59,17 @@ export interface ScheduleExecutionFacts {
  * generation. Mirrors `FencedRunClosureFacts` on the closure-facts port.
  */
 export type FencedScheduleExecutionFacts =
-  | { readonly matched: true; readonly facts: ScheduleExecutionFacts }
+  | {
+      readonly matched: true;
+      /**
+       * The expected run's planned rows (calendar intent) from the SAME
+       * snapshot as the facts below: a fenced read must never re-read planned
+       * rows in a second statement, whose window a restart/leave could open
+       * (empty rows for the vanished run, misread as `configured: false`).
+       */
+      readonly plannedRows: ReadonlyArray<PlannedWorkout>;
+      readonly facts: ScheduleExecutionFacts;
+    }
   | { readonly matched: false };
 
 export interface ScheduleExecutionFactsRepository {
@@ -72,10 +83,11 @@ export interface ScheduleExecutionFactsRepository {
    * already-loaded run (the dashboard, program detail): ONE statement
    * anchors on `program_enrollments` (verifying the expected id AND the
    * trusted `userId` / `programId` in the same predicate) and projects the
-   * facts from that same snapshot, so the answer is exactly one of the two
-   * coherent states - matched with that run's facts, or not matched. Never a
-   * validated-but-vanished enrollment whose empty facts would be rendered as
-   * a fresh unconfigured run beside old-generation parent data.
+   * facts AND the planned rows from that same snapshot, so the answer is
+   * exactly one of the two coherent states - matched with that run's whole
+   * calendar truth, or not matched. Never a validated-but-vanished enrollment
+   * whose later-read empty facts or empty rows would be rendered as a fresh
+   * unconfigured run beside old-generation parent data.
    */
   findFencedScheduleExecutionFactsByEnrollment(
     expectedEnrollmentId: EnrollmentId,

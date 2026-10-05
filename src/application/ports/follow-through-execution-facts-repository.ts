@@ -36,6 +36,7 @@
  */
 
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
+import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 import type { CompletedOccurrenceActivity } from './workout-session-repository';
 
@@ -58,7 +59,16 @@ export interface FollowThroughExecutionFacts {
  * `FencedRunClosureFacts` on the closure-facts port.
  */
 export type FencedFollowThroughExecutionFacts =
-  | { readonly matched: true; readonly facts: FollowThroughExecutionFacts }
+  | {
+      readonly matched: true;
+      /**
+       * The expected run's planned rows (calendar intent) from the SAME
+       * snapshot as the facts below: a fenced read must never re-read planned
+       * rows in a second statement, whose window a restart/leave could open.
+       */
+      readonly plannedRows: ReadonlyArray<PlannedWorkout>;
+      readonly facts: FollowThroughExecutionFacts;
+    }
   | { readonly matched: false };
 
 export interface FollowThroughExecutionFactsRepository {

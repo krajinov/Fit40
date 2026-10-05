@@ -101,6 +101,10 @@ export class GetCurrentProgramDashboardUseCase {
             programSlug: programResult.data.program.slug,
             weekNumber: enrollment.nextWorkout.weekNumber,
             workoutOrder: enrollment.nextWorkout.workoutOrder,
+            // The SAME generation fence the schedule and closure reads use: the
+            // preview's session state is resolved for EXACTLY the enrollment
+            // this view already loaded, never the replacement run.
+            expectedEnrollmentId: enrollment.enrollmentId,
           });
 
     // M15 (Slice 5) calendar + M17 (Slice 10) closure truth: two independent

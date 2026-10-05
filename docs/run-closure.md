@@ -408,10 +408,15 @@ The same fence governs the dashboard and Program Detail's OTHER composed
 run-scoped reads: the schedule and follow-through use cases accept the same
 `expectedEnrollmentId` and take ONE anchored statement (`findFencedScheduleExecutionFactsByEnrollment`,
 `findFencedFollowThroughExecutionFactsByEnrollment`) for identity + execution
-facts, reading planned rows by that exact id — never a re-resolved current
-enrollment. A replaced or vanished expected run yields the same typed
-`ENROLLMENT_CHANGED` on every nested read, so one composed page can never pair
-old parent data with the replacement run's schedule, report, or closure.
+facts **and the planned rows in that same snapshot** — never a second
+planned-row read whose window a restart/leave could open (a vanished run's
+empty rows misread as `configured: false`). The next-workout preview/session
+read is fenced the same way (`GetWorkoutSessionUseCase.expectedEnrollmentId` →
+`findFencedOccurrenceExecutionFacts`), so a preview can never resolve the
+replacement run's not-started state beside old-enrollment progress. A replaced
+or vanished expected run yields the same typed `ENROLLMENT_CHANGED` on every
+nested read, so one composed page can never pair old parent data with the
+replacement run's schedule, report, closure, or preview.
 
 None of the snapshot reads takes the enrollment write lock, retries, or
 serializes behind the write side: a coherent read needs exactly one snapshot,
@@ -465,7 +470,8 @@ M17 never touched the M14 completion surface:
 | One-snapshot schedule execution facts (completed + in-progress + records) | Infrastructure | `drizzle-schedule-execution-facts-repository.ts` |
 | One-snapshot follow-through execution facts (completed activity + in-progress + records) | Infrastructure | `drizzle-follow-through-execution-facts-repository.ts` |
 | Enrollment-identity fencing for composed closure reads (`expectedEnrollmentId` → ONE statement establishing the run AND its facts) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-run-closure-facts-repository.ts` (`findFencedClosureFactsByEnrollment`), `get-run-closure-summary.ts` |
-| Generation-fenced schedule + follow-through projections (identity + facts in ONE statement, planned rows by expected id) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-schedule-execution-facts-repository.ts` (`findFencedScheduleExecutionFactsByEnrollment`), `drizzle-follow-through-execution-facts-repository.ts` (`findFencedFollowThroughExecutionFactsByEnrollment`) |
+| Generation-fenced schedule + follow-through projections (identity + facts + planned rows in ONE statement) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-schedule-execution-facts-repository.ts` (`findFencedScheduleExecutionFactsByEnrollment`), `drizzle-follow-through-execution-facts-repository.ts` (`findFencedFollowThroughExecutionFactsByEnrollment`) |
+| Generation-fenced occurrence preview/session projection (identity + occurrence facts in ONE bounded read-only snapshot) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-occurrence-execution-facts-repository.ts` (`findFencedOccurrenceExecutionFacts`) |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
 Presentation never decides settlement or closure: Server Actions own auth,
@@ -558,7 +564,7 @@ The evidence lives in the suites themselves; this is the map.
 | Integration | `program-restart.test.ts` (H restart-vs-Undo reopening, I queued-Undo-behind-replacement), `follow-through-round-trip.test.ts` (zero-planned-row rowless count) | the restartability re-check under the replacement lock refuses a reopened run with zero writes; a queued Undo can never mutate the fresh run; the no-calendar report counts rowless facts |
 | Integration | `run-closure-snapshot.test.ts`, `run-closure-facts-repository.test.ts` | the closure projection reads one coherent snapshot across a gated Undo→start→complete commit (deterministic `pg_locks` gates, negative control reproduces the torn two-statement read); projection port contract |
 | Integration | `occurrence-session-snapshot.test.ts`, `schedule-execution-snapshot.test.ts` | the occurrence and schedule projections read one coherent snapshot across a gated abandoned-session → record transition (deterministic `pg_locks` gates, negative controls reproduce the torn multi-statement reads); regression states unchanged |
-| Integration | `follow-through-snapshot.test.ts`, `restart-preflight-snapshot.test.ts`, `run-closure-enrollment-fencing.test.ts`, `run-composition-fencing.test.ts` | the follow-through projection and the restart preflight read one coherent snapshot across the gated Undo→start→complete transition (negative controls reproduce the torn reads); the fenced closure projection reads identity + facts from one statement, so a leave committing while it is in flight yields `matched: false` (`ENROLLMENT_CHANGED`) and never a matched-but-empty false-open run (the retired two-call composition is the negative control) |
+| Integration | `follow-through-snapshot.test.ts`, `restart-preflight-snapshot.test.ts`, `run-closure-enrollment-fencing.test.ts`, `run-composition-fencing.test.ts`, `run-composition-snapshot.test.ts` | the follow-through projection and the restart preflight read one coherent snapshot across the gated Undo→start→complete transition (negative controls reproduce the torn reads); the fenced closure projection reads identity + facts from one statement, so a leave committing while it is in flight yields `matched: false` (`ENROLLMENT_CHANGED`) and never a matched-but-empty false-open run (the retired two-call composition is the negative control) |
 
 Full verification for Slice 13: `pnpm typecheck`, `pnpm lint`, `pnpm test`,
 `pnpm test:integration`, `pnpm build` — all green on this commit.

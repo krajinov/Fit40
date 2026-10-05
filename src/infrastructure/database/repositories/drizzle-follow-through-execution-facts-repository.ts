@@ -7,17 +7,25 @@ import type {
 } from '@/application/ports/follow-through-execution-facts-repository';
 import type { CompletedOccurrenceActivity } from '@/application/ports/workout-session-repository';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
+import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapRowToNotPerformedOccurrence } from '../mappers/not-performed-occurrence-mapper';
-import { notPerformedWorkouts, programEnrollments, workoutSessions } from '../schema';
+import { mapRowToPlannedWorkout } from '../mappers/planned-workout-mapper';
+import {
+  notPerformedWorkouts,
+  plannedWorkouts,
+  programEnrollments,
+  workoutSessions,
+} from '../schema';
 
 /** Discriminator values of the one-row-per-fact projection below. */
 const MATCHED = 'matched';
 const COMPLETED = 'completed';
 const IN_PROGRESS = 'in_progress';
 const NOT_PERFORMED = 'not_performed';
+const PLANNED = 'planned';
 
 /**
  * Drizzle implementation of the read-only FollowThroughExecutionFactsRepository
@@ -120,20 +128,64 @@ export class DrizzleFollowThroughExecutionFactsRepository
       expectedRunExists,
     );
 
-    // ONE statement: the anchor first, then the facts in the same deterministic
-    // order as the unfenced projection.
+    // The planned rows of THAT run, in the SAME statement and gated by the
+    // SAME predicate — never a second read whose window a restart/leave could
+    // open. `planned_date` is a string-mode DATE column, so the text comes
+    // through exactly as the unfenced planned-workout read returns it.
+    const plannedBranch = this.db
+      .select({
+        scheduledWorkoutId: plannedWorkouts.scheduledWorkoutId,
+        source: sql<string>`'${sql.raw(PLANNED)}'`.as('source'),
+        // `planned_date` is a DATE column, so cast it to text exactly as the
+        // string-mode unfenced read decodes it - the UNION's output column is
+        // text for every branch.
+        at: sql<string>`to_char(${plannedWorkouts.plannedDate}, 'YYYY-MM-DD')`.as('at'),
+      })
+      .from(plannedWorkouts)
+      .where(and(eq(plannedWorkouts.enrollmentId, expectedEnrollmentId), expectedRunExists));
+
+    // ONE statement: the anchor first, then the facts and the planned rows,
+    // all from ONE snapshot.
     const rows = await anchor
       .unionAll(completedFacts)
       .unionAll(inProgressFacts)
       .unionAll(notPerformedFacts)
+      .unionAll(plannedBranch)
       .orderBy(sql`source`, sql`scheduled_workout_id`);
 
     if (!rows.some((row) => row.source === MATCHED)) {
       return { matched: false };
     }
 
+    // Planned rows mirror `listByEnrollment`'s contract: date asc, then
+    // occurrence id — never implicit database order.
+    const plannedRows: PlannedWorkout[] = [];
+    for (const row of rows) {
+      if (row.source !== PLANNED) continue;
+      // Non-null narrowing: both columns are NOT NULL on the table, so a null
+      // surviving on a planned row is corrupt data — thrown, never normalized.
+      if (row.at === null || row.scheduledWorkoutId === null) {
+        throw new Error(
+          `Corrupt data in planned_workouts (enrollment_id=${expectedEnrollmentId}, scheduled_workout_id=${row.scheduledWorkoutId}): planned_date is null`,
+        );
+      }
+      plannedRows.push(
+        mapRowToPlannedWorkout({
+          enrollmentId: expectedEnrollmentId,
+          scheduledWorkoutId: row.scheduledWorkoutId,
+          plannedDate: row.at,
+        }),
+      );
+    }
+    plannedRows.sort((a, b) =>
+      a.plannedDate === b.plannedDate
+        ? String(a.scheduledWorkoutId).localeCompare(String(b.scheduledWorkoutId))
+        : String(a.plannedDate).localeCompare(String(b.plannedDate)),
+    );
+
     return {
       matched: true,
+      plannedRows,
       facts: mapFollowThroughFactRows(expectedEnrollmentId, rows),
     };
   }

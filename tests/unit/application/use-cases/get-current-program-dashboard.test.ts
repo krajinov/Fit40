@@ -200,7 +200,11 @@ function makeUseCase(
     new GetProgramEnrollmentUseCase(enrollmentRepo, sessionRepo),
     new ResolveNextWorkoutUseCase(
       new GetScheduledWorkoutUseCase(programRepo, exerciseRepo),
-      new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, makeOccurrenceExecutionFactsRepo(sessionRepo)),
+      new GetWorkoutSessionUseCase(
+          programRepo,
+          enrollmentRepo,
+          makeOccurrenceExecutionFactsRepo(sessionRepo, [], enrollmentRepo),
+        ),
     ),
     scheduleUseCase,
     // M17 final review: the run-closure read, composed beside the schedule read

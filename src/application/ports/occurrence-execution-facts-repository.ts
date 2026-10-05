@@ -34,7 +34,7 @@
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 /** One occurrence's execution truth from one coherent database snapshot. */
 export interface OccurrenceExecutionFacts {
@@ -44,10 +44,37 @@ export interface OccurrenceExecutionFacts {
   readonly notPerformedRecorded: boolean;
 }
 
+/**
+ * The FENCED projection: whether the caller's expected enrollment still exists
+ * as the trusted (user, program) pair's run, and - only when it does - the
+ * occurrence's execution facts of THAT run. `matched: false` (gone, replaced,
+ * foreign) is never reported as matched: a preview composed into a parent view
+ * of the old run must never be built from the replacement run's session state.
+ */
+export type FencedOccurrenceExecutionFacts =
+  | { readonly matched: true; readonly facts: OccurrenceExecutionFacts }
+  | { readonly matched: false };
+
 export interface OccurrenceExecutionFactsRepository {
   /** Session state and settlement state of one occurrence, one snapshot. */
   findOccurrenceExecutionFacts(
     enrollmentId: EnrollmentId,
     scheduledWorkoutId: ScheduledWorkoutId,
   ): Promise<OccurrenceExecutionFacts>;
+
+  /**
+   * The fenced variant for a caller composing a preview/session read into an
+   * already-loaded run (the dashboard's next-workout preview, program
+   * detail): ONE snapshot establishes that the expected enrollment is still
+   * this user's run of this program AND that occurrence's session/settlement
+   * state, so the answer is exactly one of the two coherent states - matched
+   * with that run's occurrence truth, or not matched - never the replacement
+   * run's not-started state beside old-generation parent data.
+   */
+  findFencedOccurrenceExecutionFacts(
+    expectedEnrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedOccurrenceExecutionFacts>;
 }

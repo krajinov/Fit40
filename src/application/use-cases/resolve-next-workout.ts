@@ -27,6 +27,16 @@ export interface ResolveNextWorkoutInput {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  /**
+   * The SPECIFIC enrollment the caller already loaded and is composing this
+   * preview into (the dashboard's / program detail's enrollment view). When
+   * supplied, the session-state read is fenced to exactly that identity, so a
+   * concurrent restart/leave cannot hand back the replacement run's session
+   * state for an old-enrollment preview - the preview then cannot be resolved
+   * (null) instead of silently switching generations. Omitted (or undefined),
+   * the session read resolves the current enrollment as before.
+   */
+  readonly expectedEnrollmentId?: string;
 }
 
 export class ResolveNextWorkoutUseCase {
@@ -50,11 +60,18 @@ export class ResolveNextWorkoutUseCase {
       return null;
     }
 
+    // The expected-id pass-through: when the caller is composing a preview
+    // under an already-loaded run, the session-state read is fenced to that
+    // SAME generation. A typed ENROLLMENT_CHANGED (or any failure) means the
+    // preview cannot be coherently resolved for the parent's run - null, per
+    // this use case's existing degradation contract, never the replacement
+    // run's state.
     const sessionResult = await this.workoutSession.execute({
       userId: input.userId,
       programSlug: input.programSlug,
       weekNumber: input.weekNumber,
       workoutOrder: input.workoutOrder,
+      expectedEnrollmentId: input.expectedEnrollmentId,
     });
     if (!sessionResult.ok) {
       return null;

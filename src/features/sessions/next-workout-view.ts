@@ -48,6 +48,14 @@ export interface NextWorkoutInput {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  /**
+   * The SPECIFIC enrollment the caller already loaded and is composing this
+   * preview into (the dashboard's / program detail's enrollment view). Passed
+   * straight through to the resolver: the session-state read is fenced to
+   * exactly that generation, so a concurrent restart/leave cannot hand back
+   * the replacement run's session state for an old-enrollment preview.
+   */
+  readonly expectedEnrollmentId?: string;
 }
 
 /**

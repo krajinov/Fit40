@@ -4,6 +4,7 @@ import type { PlannedWorkoutRepository } from '@/application/ports/planned-worko
 import type { EnrollmentScheduleDto } from '@/application/dto/schedule';
 import type { NotPerformedOccurrence } from '@/domain/entities/not-performed-occurrence';
 import { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-enrollment-schedule';
+import type { EnrollmentId } from '@/domain/types/ids';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryPlannedWorkoutRepository } from '@/infrastructure/scheduling/in-memory-planned-workout-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
@@ -46,7 +47,7 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const enrollments = new InMemoryProgramEnrollmentRepository();
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
-  const executionFacts = makeScheduleExecutionFactsRepo(sessions, facts, enrollments);
+  const executionFacts = makeScheduleExecutionFactsRepo(sessions, facts, enrollments, plannedWorkouts);
   const useCase = new GetEnrollmentScheduleUseCase(enrollments, plannedWorkouts, executionFacts);
   return { enrollments, plannedWorkouts, sessions, executionFacts, useCase };
 }
@@ -267,7 +268,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      makeScheduleExecutionFactsRepo(sessions, [], enrollments),
+      makeScheduleExecutionFactsRepo(sessions, [], enrollments, plannedRepo),
     );
 
     const result = await useCase.execute({ userId: USER_A, program: PROGRAM, now: NOW });
@@ -294,7 +295,7 @@ describe('GetEnrollmentScheduleUseCase', () => {
     const useCase = new GetEnrollmentScheduleUseCase(
       enrollments,
       plannedRepo,
-      makeScheduleExecutionFactsRepo(sessions, [], enrollments),
+      makeScheduleExecutionFactsRepo(sessions, [], enrollments, plannedRepo),
     );
 
     await expect(
@@ -704,6 +705,66 @@ describe('GetEnrollmentScheduleUseCase - enrollment identity fencing', () => {
     if (result.ok) return;
     expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
     expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('reads planned rows from the SAME fenced projection - never a second planned-row read', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    await harness.plannedWorkouts.replaceAllForEnrollment(enrollmentId(ENR_A), [
+      planned(ENR_A, OCCURRENCE_W1_1, MON),
+      planned(ENR_A, OCCURRENCE_W1_2, WED),
+    ]);
+    // Wrap ONLY the use case's planned-row dependency: the use case must not
+    // invoke it on the fenced path (the projection owns the rows).
+    const plannedRead = vi.fn((enrollmentId: EnrollmentId) =>
+      harness.plannedWorkouts.listByEnrollment(enrollmentId),
+    );
+    const useCase = new GetEnrollmentScheduleUseCase(
+      harness.enrollments,
+      {
+        listByEnrollment: plannedRead,
+        replaceAllForEnrollment: (id, rows) =>
+          harness.plannedWorkouts.replaceAllForEnrollment(id, rows),
+        reschedule: (id, occ, date) => harness.plannedWorkouts.reschedule(id, occ, date),
+      },
+      harness.executionFacts,
+    );
+
+    const result = await useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) throw new Error('expected a schedule');
+    // The calendar carries BOTH rows from the one fenced snapshot...
+    expect(result.data.items.map((item) => item.scheduledWorkoutId)).toEqual([
+      OCCURRENCE_W1_1,
+      OCCURRENCE_W1_2,
+    ]);
+    // ...and the use case never re-reads planned rows in a second statement on
+    // the fenced path - the window a restart/leave could open is closed.
+    expect(plannedRead).not.toHaveBeenCalled();
+  });
+
+  it('reports configured:false for a genuinely EXISTING expected run with zero planned rows', async () => {
+    const harness = makeHarness();
+    await enrolledRun(harness);
+    // No rows replaced: the run exists (matched), it simply has no calendar yet.
+    const result = await harness.useCase.execute({
+      userId: USER_A,
+      program: PROGRAM,
+      now: NOW,
+      expectedEnrollmentId: ENR_A,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.data === null) throw new Error('expected a schedule');
+    // A zero-row existing run is `configured: false` - truthful for an EXISTING
+    // run, and never confused with the vanished-run ENROLLMENT_CHANGED.
+    expect(result.data).toMatchObject({ configured: false });
   });
 
   it('keeps resolving the CURRENT enrollment when no expected id is supplied', async () => {

@@ -22,8 +22,14 @@ import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occ
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
+import type { TrainingProgram } from '@/domain/entities/training-program';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
-import { createUserId } from '@/domain/types/ids';
+import {
+  createEnrollmentId,
+  createUserId,
+  type ScheduledWorkoutId,
+  type UserId,
+} from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
 export type GetWorkoutSessionError =
@@ -35,13 +41,32 @@ export type GetWorkoutSessionError =
       readonly workoutOrder: number;
       readonly message: string;
     }
-  | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string };
+  | { readonly code: 'INVALID_INPUT'; readonly message: string; readonly field?: string }
+  | {
+      /**
+       * The caller's expected enrollment no longer exists (a concurrent
+       * restart/leave replaced the run): the read refuses to compose the
+       * caller's old-enrollment parent with a new run's session state.
+       */
+      readonly code: 'ENROLLMENT_CHANGED';
+      readonly message: string;
+    };
 
 export interface GetWorkoutSessionInput {
   readonly userId: string;
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
+  /**
+   * The SPECIFIC enrollment the caller already loaded and is composing this
+   * occurrence's state into (the dashboard's / program detail's enrollment
+   * view). When supplied, the read is fenced to exactly that identity: it
+   * never re-resolves the current enrollment, so a concurrent restart/leave
+   * cannot hand back the replacement run's session state for an old-enrollment
+   * preview. Omitted (or undefined), the read resolves the current enrollment
+   * as before - the standalone read convention.
+   */
+  readonly expectedEnrollmentId?: string;
 }
 
 export interface WorkoutSessionView {
@@ -98,6 +123,10 @@ export class GetWorkoutSessionUseCase {
       });
     }
 
+    if (input.expectedEnrollmentId !== undefined) {
+      return this.executeFenced(input.expectedEnrollmentId, userIdResult.data, program, occurrence.scheduled.id);
+    }
+
     const enrollment = await this.enrollmentRepository.findByUserAndProgram(
       userIdResult.data,
       program.id,
@@ -119,6 +148,49 @@ export class GetWorkoutSessionUseCase {
       enrolled: true,
       session: facts.session === null ? null : toWorkoutSessionDto(facts.session),
       notPerformedRecorded: facts.notPerformedRecorded,
+    });
+  }
+
+  /**
+   * The fenced read: ONE snapshot establishes BOTH that the caller's expected
+   * enrollment is still this user's run of this program AND that occurrence's
+   * session/settlement state. `matched: false` is the typed ENROLLMENT_CHANGED
+   * refusal, never the replacement run's session state and never absence - the
+   * caller is composing a preview for a run that DID exist. A malformed id is
+   * the same refusal.
+   */
+  private async executeFenced(
+    expectedEnrollmentId: string,
+    userId: UserId,
+    program: TrainingProgram,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<Result<WorkoutSessionView, GetWorkoutSessionError>> {
+    const expectedId = createEnrollmentId(expectedEnrollmentId);
+    if (!expectedId.ok) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'The expected enrollment id is invalid, so the session cannot be read',
+      });
+    }
+
+    const projection = await this.occurrenceExecutionFactsRepository.findFencedOccurrenceExecutionFacts(
+      expectedId.data,
+      scheduledWorkoutId,
+      userId,
+      program.id,
+    );
+    if (!projection.matched) {
+      return err({
+        code: 'ENROLLMENT_CHANGED',
+        message: 'Your enrollment changed while reading the session. Please reload and try again.',
+      });
+    }
+
+    const { session, notPerformedRecorded } = projection.facts;
+    return ok({
+      enrolled: true,
+      session: session === null ? null : toWorkoutSessionDto(session),
+      notPerformedRecorded,
     });
   }
 }

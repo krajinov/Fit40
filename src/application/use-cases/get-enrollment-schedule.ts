@@ -230,12 +230,12 @@ export class GetEnrollmentScheduleUseCase {
       });
     }
 
-    // The planned rows of THAT run — keyed by the expected identity, never by
-    // a re-resolved current enrollment, so this read can never mix generations.
-    const plannedRows = await this.plannedWorkoutRepository.listByEnrollment(expectedId.data);
-
+    // The planned rows come from the SAME fenced statement (the one-snapshot
+    // contract): never a second read, whose window a restart/leave could open
+    // and hand this read a vanished run's empty rows as a false
+    // `configured: false`.
     return ok(
-      this.buildSchedule(input.program, plannedRows, projection.facts, plannedDateFromInstant(input.now)),
+      this.buildSchedule(input.program, projection.plannedRows, projection.facts, plannedDateFromInstant(input.now)),
     );
   }
 }

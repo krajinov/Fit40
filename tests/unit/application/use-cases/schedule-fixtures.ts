@@ -438,16 +438,39 @@ export function makeRunClosureFactsRepo(
 export function makeOccurrenceExecutionFactsRepo(
   sessions: InMemoryWorkoutSessionRepository,
   facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
 ) {
+  const factsFor = async (enrollmentId: EnrollmentId, scheduledWorkoutId: ScheduledWorkoutId) => ({
+    session: await sessions.findByEnrollmentAndScheduledWorkout(enrollmentId, scheduledWorkoutId),
+    notPerformedRecorded: facts.some(
+      (fact) =>
+        fact.enrollmentId === enrollmentId && fact.scheduledWorkoutId === scheduledWorkoutId,
+    ),
+  });
+
   return {
-    findOccurrenceExecutionFacts: vi.fn(
-      async (enrollmentId: EnrollmentId, scheduledWorkoutId: ScheduledWorkoutId) => ({
-        session: await sessions.findByEnrollmentAndScheduledWorkout(enrollmentId, scheduledWorkoutId),
-        notPerformedRecorded: facts.some(
-          (fact) =>
-            fact.enrollmentId === enrollmentId && fact.scheduledWorkoutId === scheduledWorkoutId,
-        ),
-      }),
+    findOccurrenceExecutionFacts: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-snapshot projection: existence is
+    // derived from the repository's own port reads, so a fixture enrollment
+    // that is gone (or belongs to another pair) is `matched: false`.
+    findFencedOccurrenceExecutionFacts: vi.fn(
+      async (
+        enrollmentId: EnrollmentId,
+        scheduledWorkoutId: ScheduledWorkoutId,
+        userId: UserId,
+        programId: ProgramId,
+      ) => {
+        if (enrollments !== null) {
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return { matched: true as const, facts: await factsFor(enrollmentId, scheduledWorkoutId) };
+      },
     ),
   } satisfies OccurrenceExecutionFactsRepository;
 }
@@ -461,6 +484,7 @@ export function makeFollowThroughExecutionFactsRepo(
   sessions: InMemoryWorkoutSessionRepository,
   facts: ReadonlyArray<NotPerformedOccurrence> = [],
   enrollments: InMemoryProgramEnrollmentRepository | null = null,
+  plannedWorkouts: PlannedWorkoutRepository | null = null,
 ) {
   const factsFor = async (enrollmentId: EnrollmentId) => ({
     completedActivity: await sessions.listCompletedOccurrenceActivity(enrollmentId),
@@ -472,7 +496,8 @@ export function makeFollowThroughExecutionFactsRepo(
     listFollowThroughExecutionFactsByEnrollment: vi.fn(factsFor),
     // The fenced variant, mirroring the one-statement projection (the schedule
     // fixture's convention): a fixture enrollment that is gone (or belongs to
-    // another pair) is `matched: false`.
+    // another pair) is `matched: false`. The planned rows come from the SAME
+    // projection, never a second read.
     findFencedFollowThroughExecutionFactsByEnrollment: vi.fn(
       async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
         if (enrollments !== null) {
@@ -484,7 +509,12 @@ export function makeFollowThroughExecutionFactsRepo(
             return { matched: false as const };
           }
         }
-        return { matched: true as const, facts: await factsFor(enrollmentId) };
+        return {
+          matched: true as const,
+          plannedRows:
+            plannedWorkouts === null ? [] : await plannedWorkouts.listByEnrollment(enrollmentId),
+          facts: await factsFor(enrollmentId),
+        };
       },
     ),
   } satisfies FollowThroughExecutionFactsRepository;
@@ -501,6 +531,7 @@ export function makeScheduleExecutionFactsRepo(
   sessions: InMemoryWorkoutSessionRepository,
   facts: ReadonlyArray<NotPerformedOccurrence> = [],
   enrollments: InMemoryProgramEnrollmentRepository | null = null,
+  plannedWorkouts: PlannedWorkoutRepository | null = null,
 ) {
   const factsFor = async (enrollmentId: EnrollmentId) => ({
     completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
@@ -513,7 +544,8 @@ export function makeScheduleExecutionFactsRepo(
     // The fenced variant, mirroring the one-statement projection: existence is
     // derived from the repository's own port reads, so a fixture enrollment
     // that is gone (or belongs to another pair) is `matched: false` - never an
-    // empty-but-matched set.
+    // empty-but-matched set. The planned rows come from the SAME projection,
+    // never a second read.
     findFencedScheduleExecutionFactsByEnrollment: vi.fn(
       async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
         if (enrollments !== null) {
@@ -525,7 +557,12 @@ export function makeScheduleExecutionFactsRepo(
             return { matched: false as const };
           }
         }
-        return { matched: true as const, facts: await factsFor(enrollmentId) };
+        return {
+          matched: true as const,
+          plannedRows:
+            plannedWorkouts === null ? [] : await plannedWorkouts.listByEnrollment(enrollmentId),
+          facts: await factsFor(enrollmentId),
+        };
       },
     ),
   } satisfies ScheduleExecutionFactsRepository;

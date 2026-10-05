@@ -176,10 +176,12 @@ describe('M17 snapshot reads — execution truth and settlement facts are ONE co
     expect(adapter).not.toContain('delete(');
   });
 
-  it('the occurrence projection is ONE bounded read-only REPEATABLE READ transaction', () => {
+  it('each occurrence projection is ONE bounded read-only REPEATABLE READ transaction', () => {
     const adapter = codeOf(OCCURRENCE_ADAPTER);
 
-    expect(adapter.match(/transaction\(/g)).toHaveLength(1);
+    // Both reads (enrollment-scoped and generation-fenced) are bounded,
+    // read-only and at the project's read-model ceiling.
+    expect(adapter.match(/transaction\(/g)).toHaveLength(2);
     expect(adapter).toContain("isolationLevel: 'repeatable read'");
     expect(adapter).toContain("accessMode: 'read only'");
     expect(adapter).not.toContain('serializable');
@@ -223,10 +225,12 @@ describe('M17 Slice 9 — the M16 report READS the facts and never writes them',
   it('reads the run facts through the read-only port, once per terminal path', () => {
     const code = codeOf(FOLLOW_THROUGH_READ);
 
-    // The planned-row intent read: exactly ONE per terminal path - the
-    // standalone current-run read and the generation-fenced read (never per
-    // row, never a re-resolved current enrollment on the fenced path).
-    expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(2);
+    // The planned-row intent read: exactly ONE - the standalone current-run
+    // read; the generation-fenced path takes planned rows from the SAME
+    // fenced projection instead (never per row, never a re-resolved current
+    // enrollment).
+    expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(1);
+    expect(code).toContain('projection.plannedRows');
     // The fact projection: ONE read on the no-calendar terminal path only
     // (so a rowless fact is still counted) — the configured path takes the
     // one-snapshot execution-facts port instead. Never one query per row or

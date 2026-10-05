@@ -51,7 +51,7 @@ function makeUseCase() {
   const programRepo: ProgramRepository = { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
   const sessionRepo = new InMemoryWorkoutSessionRepository();
   const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
-  const occurrenceFacts = makeOccurrenceExecutionFactsRepo(sessionRepo);
+  const occurrenceFacts = makeOccurrenceExecutionFactsRepo(sessionRepo, [], enrollmentRepo);
   const uc = new GetWorkoutSessionUseCase(programRepo, enrollmentRepo, occurrenceFacts);
   return { sessionRepo, enrollmentRepo, occurrenceFacts, uc };
 }
@@ -208,5 +208,83 @@ describe('GetWorkoutSessionUseCase', () => {
     if (!r.ok) return;
     expect(r.data.notPerformedRecorded).toBe(false);
     expect(uc).toBeDefined();
+  });
+});
+
+/**
+ * M17 generation fencing (the preview/session read): the occurrence's state
+ * composed into an already-loaded enrollment is tied to THAT identity, never
+ * to a re-resolved current run. Mirrors the closure-fencing contract.
+ */
+describe('GetWorkoutSessionUseCase - enrollment identity fencing', () => {
+  it('reads the occurrence of EXACTLY the expected enrollment while it exists', async () => {
+    const { sessionRepo, enrollmentRepo, uc } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    await seedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+
+    const result = await uc.execute({
+      ...INPUT,
+      userId: 'user-a',
+      expectedEnrollmentId: 'enr-a',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      enrolled: true,
+      notPerformedRecorded: false,
+    });
+    expect(result.data.session?.sessionId).toBe('s-1');
+  });
+
+  it('refuses with ENROLLMENT_CHANGED when the expected enrollment was replaced', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    // The replacement a restart produces: the old row is deleted and a
+    // DIFFERENT id becomes the current run of the same (user, program) pair.
+    await enrollmentRepo.delete(enid('enr-a'));
+    await seedEnrollment(enrollmentRepo, 'enr-a-replacement', 'user-a', 'p1');
+
+    const result = await uc.execute({
+      ...INPUT,
+      userId: 'user-a',
+      expectedEnrollmentId: 'enr-a',
+    });
+
+    // The caller is composing a preview for the OLD run: the fenced read
+    // refuses rather than handing back the replacement run's not-started state.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+  });
+
+  it('refuses when the expected enrollment belongs to another user', async () => {
+    const { enrollmentRepo, uc } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-b', 'user-b', 'p1');
+
+    const result = await uc.execute({
+      ...INPUT,
+      userId: 'user-a',
+      expectedEnrollmentId: 'enr-b',
+    });
+
+    // The id alone never authorizes: ownership is verified in the SAME
+    // snapshot as the facts, so a foreign run resolves not-matched.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: 'ENROLLMENT_CHANGED' });
+  });
+
+  it('keeps the standalone convention when no expected id is supplied', async () => {
+    const { sessionRepo, enrollmentRepo, uc } = makeUseCase();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    await seedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+
+    // Unchanged standalone behavior: the read resolves the current enrollment.
+    const result = await uc.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.session?.sessionId).toBe('s-1');
   });
 });

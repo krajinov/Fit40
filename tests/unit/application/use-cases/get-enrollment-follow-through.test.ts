@@ -56,7 +56,7 @@ function makeHarness(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
   const plannedWorkouts = new InMemoryPlannedWorkoutRepository();
   const sessions = new InMemoryWorkoutSessionRepository();
   const notPerformed = makeNotPerformedRepo(facts);
-  const executionFacts = makeFollowThroughExecutionFactsRepo(sessions, facts, enrollments);
+  const executionFacts = makeFollowThroughExecutionFactsRepo(sessions, facts, enrollments, plannedWorkouts);
   const useCase = new GetEnrollmentFollowThroughUseCase(
     enrollments,
     plannedWorkouts,

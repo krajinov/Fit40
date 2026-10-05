@@ -1,15 +1,16 @@
 import { and, asc, eq } from 'drizzle-orm';
 
 import type {
+  FencedOccurrenceExecutionFacts,
   OccurrenceExecutionFacts,
   OccurrenceExecutionFactsRepository,
 } from '@/application/ports/occurrence-execution-facts-repository';
 import type { WorkoutSession } from '@/domain/entities/workout-session';
-import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import { mapSessionRows } from '../mappers/session-mapper';
-import { exerciseLogs, notPerformedWorkouts, setLogs, workoutSessions } from '../schema';
+import { exerciseLogs, notPerformedWorkouts, programEnrollments, setLogs, workoutSessions } from '../schema';
 import type { Transaction } from './workout-session-writes';
 
 /**
@@ -39,36 +40,92 @@ export class DrizzleOccurrenceExecutionFactsRepository implements OccurrenceExec
     scheduledWorkoutId: ScheduledWorkoutId,
   ): Promise<OccurrenceExecutionFacts> {
     return this.db.transaction(
+      async (tx) => this.readFactsInTransaction(tx, enrollmentId, scheduledWorkoutId),
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
+  /**
+   * The occurrence's session aggregate and settlement existence inside ONE
+   * transaction's snapshot, shared by the enrollment-scoped and the fenced
+   * reads so both hydrate and map identically.
+   */
+  private async readFactsInTransaction(
+    tx: Transaction,
+    enrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+  ): Promise<OccurrenceExecutionFacts> {
+    const sessionRows = await tx
+      .select()
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.enrollmentId, enrollmentId),
+          eq(workoutSessions.scheduledWorkoutId, scheduledWorkoutId),
+        ),
+      )
+      .limit(1);
+
+    const sessionRow = sessionRows[0];
+    const session =
+      sessionRow === undefined
+        ? null
+        : await this.hydrate(tx, sessionRow.id, sessionRow);
+
+    const factRows = await tx
+      .select({ scheduledWorkoutId: notPerformedWorkouts.scheduledWorkoutId })
+      .from(notPerformedWorkouts)
+      .where(
+        and(
+          eq(notPerformedWorkouts.enrollmentId, enrollmentId),
+          eq(notPerformedWorkouts.scheduledWorkoutId, scheduledWorkoutId),
+        ),
+      )
+      .limit(1);
+
+    return { session, notPerformedRecorded: factRows.length > 0 };
+  }
+
+  /**
+   * The FENCED variant: identity and occurrence facts from ONE snapshot.
+   *
+   * The same bounded read-only REPEATABLE READ transaction as the unfenced
+   * read, with the expected-enrollment check as the FIRST statement: because
+   * the snapshot is fixed at the transaction's first statement, the check and
+   * the facts describe the same instant - a restart/leave committing while
+   * this read runs yields either the old coherent state (matched with the old
+   * run's occurrence truth) or not matched, never the replacement run's
+   * not-started state. No lock, no write, and no SERIALIZABLE (REPEATABLE READ
+   * is the project's read-model ceiling, never a stricter level).
+   */
+  async findFencedOccurrenceExecutionFacts(
+    expectedEnrollmentId: EnrollmentId,
+    scheduledWorkoutId: ScheduledWorkoutId,
+    userId: UserId,
+    programId: ProgramId,
+  ): Promise<FencedOccurrenceExecutionFacts> {
+    return this.db.transaction(
       async (tx) => {
-        const sessionRows = await tx
-          .select()
-          .from(workoutSessions)
+        // Statement 1: the expected enrollment is THIS user's run of THIS
+        // program. This statement fixes the snapshot for the whole read.
+        const enrollmentRows = await tx
+          .select({ id: programEnrollments.id })
+          .from(programEnrollments)
           .where(
             and(
-              eq(workoutSessions.enrollmentId, enrollmentId),
-              eq(workoutSessions.scheduledWorkoutId, scheduledWorkoutId),
+              eq(programEnrollments.id, expectedEnrollmentId),
+              eq(programEnrollments.userId, userId),
+              eq(programEnrollments.programId, programId),
             ),
           )
           .limit(1);
 
-        const sessionRow = sessionRows[0];
-        const session =
-          sessionRow === undefined
-            ? null
-            : await this.hydrate(tx, sessionRow.id, sessionRow);
+        if (enrollmentRows.length === 0) {
+          return { matched: false as const };
+        }
 
-        const factRows = await tx
-          .select({ scheduledWorkoutId: notPerformedWorkouts.scheduledWorkoutId })
-          .from(notPerformedWorkouts)
-          .where(
-            and(
-              eq(notPerformedWorkouts.enrollmentId, enrollmentId),
-              eq(notPerformedWorkouts.scheduledWorkoutId, scheduledWorkoutId),
-            ),
-          )
-          .limit(1);
-
-        return { session, notPerformedRecorded: factRows.length > 0 };
+        const facts = await this.readFactsInTransaction(tx, expectedEnrollmentId, scheduledWorkoutId);
+        return { matched: true as const, facts };
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );

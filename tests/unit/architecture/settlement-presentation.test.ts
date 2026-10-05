@@ -597,6 +597,55 @@ describe('M17 - composed run-scoped reads share ONE enrollment generation', () =
     expect(codeOf(CLOSURE_READ)).toContain('findFencedClosureFactsByEnrollment(');
   });
 
+  it('the fenced paths take planned rows from the SAME projection - never a second planned-row read', () => {
+    for (const file of [SCHEDULE_READ, FOLLOW_THROUGH_READ]) {
+      const code = codeOf(file);
+
+      // The fenced path consumes the projection's planned rows...
+      expect(code).toContain('projection.plannedRows');
+      // ...and plannedWorkoutRepository.listByEnrollment appears only on the
+      // standalone (unfenced) path - exactly one call site per use case.
+      expect(code.match(/plannedWorkoutRepository\.listByEnrollment\(/g)).toHaveLength(1);
+    }
+
+    // Both fenced projections include the planned rows in their ONE statement.
+    const scheduleAdapter = codeOf(
+      'src/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository.ts',
+    );
+    const followThroughAdapter = codeOf(
+      'src/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository.ts',
+    );
+    for (const adapter of [scheduleAdapter, followThroughAdapter]) {
+      expect(adapter).toContain('plannedWorkouts');
+      expect(adapter).toContain('unionAll(plannedBranch)');
+    }
+    expect(scheduleAdapter).toContain('plannedRows');
+    expect(followThroughAdapter).toContain('plannedRows');
+  });
+
+  it('the preview/session read is fenced to the parent enrollment everywhere it is composed', () => {
+    const dashboard = codeOf(DASHBOARD_USE_CASE);
+    const page = codeOf(PROGRAM_DETAIL_PAGE);
+    const dashboardView = codeOf('src/features/dashboard/dashboard-view.ts');
+    const sessionRead = codeOf('src/application/use-cases/get-workout-session.ts');
+
+    // The dashboard resolves the next-workout preview FOR the loaded run...
+    expect(dashboard).toContain('expectedEnrollmentId: enrollment.enrollmentId');
+    // ...both feature pages pass the fence into their preview builds...
+    expect(page).toContain('expectedEnrollmentId: enrollment.enrollmentId');
+    expect(dashboardView).toContain('expectedEnrollmentId: current.enrollment.enrollmentId');
+    // ...and the resolver passes it straight to the session read.
+    expect(codeOf('src/application/use-cases/resolve-next-workout.ts')).toContain(
+      'expectedEnrollmentId: input.expectedEnrollmentId',
+    );
+    // The session read's fenced path takes the expected id and refuses a
+    // changed run - never the replacement run's session state.
+    expect(sessionRead).toContain('expectedEnrollmentId?: string;');
+    expect(sessionRead).toContain('ENROLLMENT_CHANGED');
+    expect(sessionRead).toContain('findFencedOccurrenceExecutionFacts(');
+    expect(sessionRead.match(/findByUserAndProgram\(/g)).toHaveLength(1);
+  });
+
   it('the fenced projections anchor on the enrollment row, gated in the same statement', () => {
     const scheduleAdapter = codeOf(
       'src/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository.ts',

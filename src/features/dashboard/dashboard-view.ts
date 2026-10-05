@@ -321,6 +321,9 @@ export async function buildDashboardView(
               programSlug: current.program.slug,
               weekNumber: nextOccurrence.weekNumber,
               workoutOrder: nextOccurrence.workoutOrder,
+              // The preview is fenced to the SAME enrollment generation as the
+              // schedule and closure reads - never the replacement run.
+              expectedEnrollmentId: current.enrollment.enrollmentId,
             });
 
     nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, previewWorkout, runClosure);

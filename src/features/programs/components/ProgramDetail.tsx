@@ -3,6 +3,10 @@ import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
 import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
+import {
+  resolveProgramWeekLifecycle,
+  type OccurrenceCoordinates,
+} from '@/domain/services/program-week-lifecycle';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
 import {
   resolveRunNextOccurrence,
@@ -12,7 +16,6 @@ import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledP
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import { resolveProgramWeekStatus } from '@/features/programs/week-status';
 import { PlanFollowThroughSection } from '@/features/schedule/components/PlanFollowThroughSection';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
@@ -84,8 +87,10 @@ export function ProgramDetail({
     ? resolveRunNextOccurrence(enrollment.nextWorkout, runClosure)
     : null;
 
-  // Occurrences the run has already settled as recorded-not-performed,
-  // addressed by the same route key the up-next preview uses.
+  // Occurrences the run has already settled as recorded-not-performed, as
+  // AUTHORED COORDINATES — the business facts the Domain week lifecycle
+  // resolver consumes. The week cards' "week-order" route keys are derived
+  // from this ONE identity set below, never re-derived from counts.
   //
   // The AUTHORITATIVE source is the closure read's authored identity set
   // (`notPerformedInProgramOrder`): it is Application-resolved from the run's
@@ -95,21 +100,33 @@ export function ProgramDetail({
   // null (failed) does this fall back to the M15 read's recorded items and
   // rowless `unplacedNotPerformedWorkouts`. Settlement is never inferred from
   // counts and never from a missing session.
-  const recordedKeys = new Set<string>();
+  const recordedCoordinates: OccurrenceCoordinates[] = [];
   if (runClosure !== null) {
     for (const occurrence of runClosure.notPerformedInProgramOrder) {
-      recordedKeys.add(`${occurrence.weekNumber}-${occurrence.workoutOrder}`);
+      recordedCoordinates.push({
+        weekNumber: occurrence.weekNumber,
+        workoutOrder: occurrence.workoutOrder,
+      });
     }
   } else if (schedule !== null && schedule.status === 'loaded') {
     for (const item of schedule.schedule.items) {
       if (item.status === 'not-performed') {
-        recordedKeys.add(`${item.weekNumber}-${item.workoutOrder}`);
+        recordedCoordinates.push({
+          weekNumber: item.weekNumber,
+          workoutOrder: item.workoutOrder,
+        });
       }
     }
     for (const unplaced of schedule.schedule.unplacedNotPerformedWorkouts) {
-      recordedKeys.add(`${unplaced.weekNumber}-${unplaced.workoutOrder}`);
+      recordedCoordinates.push({
+        weekNumber: unplaced.weekNumber,
+        workoutOrder: unplaced.workoutOrder,
+      });
     }
   }
+  const recordedKeys = new Set(
+    recordedCoordinates.map(({ weekNumber, workoutOrder }) => `${weekNumber}-${workoutOrder}`),
+  );
 
   const upNextKey =
     nextOccurrence === null
@@ -197,16 +214,16 @@ export function ProgramDetail({
             key={week.weekNumber}
             programSlug={program.slug}
             week={week}
-            status={resolveProgramWeekStatus({
+            status={resolveProgramWeekLifecycle({
               enrolled,
               weekNumber: week.weekNumber,
               occurrences: week.scheduledWorkouts.map((scheduled) => ({
                 scheduledWorkoutId: scheduled.scheduledWorkoutId,
-                key: `${week.weekNumber}-${scheduled.order}`,
+                workoutOrder: scheduled.order,
               })),
               completedIds,
-              recordedKeys,
-              upNext: nextOccurrence,
+              recordedCoordinates,
+              firstOpen: nextOccurrence,
             })}
             completedIds={completedIds}
             recordedKeys={recordedKeys}

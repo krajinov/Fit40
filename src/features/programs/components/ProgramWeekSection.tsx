@@ -1,22 +1,17 @@
 import { Badge } from '@/components/shared/Badge';
 import { cn } from '@/lib/utils';
 import type { ProgramWeekDto } from '@/application/dto/program';
+import type { ProgramWeekLifecycle } from '@/domain/services/program-week-lifecycle';
 import {
   ScheduledWorkoutCard,
   type ScheduledWorkoutState,
 } from '@/features/programs/components/ScheduledWorkoutCard';
-import type { ProgramWeekStatus } from '@/features/programs/week-status';
-
-/**
- * Lifecycle of one program week for the enrolled visitor. Re-exported from the
- * pure status resolver (M17 final review) so importers keep one source of truth.
- */
-export type { ProgramWeekStatus } from '@/features/programs/week-status';
 
 interface ProgramWeekSectionProps {
   readonly programSlug: string;
   readonly week: ProgramWeekDto;
-  readonly status: ProgramWeekStatus;
+  /** The Domain-resolved lifecycle value — rendered here, never re-derived. */
+  readonly status: ProgramWeekLifecycle;
   readonly completedIds: ReadonlySet<string>;
   /**
    * Route keys ("week-order") of occurrences the M15 read resolved as

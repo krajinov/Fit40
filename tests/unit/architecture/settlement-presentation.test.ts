@@ -8,7 +8,7 @@
  * whole-repository prose grep.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -249,8 +249,8 @@ describe('M17 Slice 11 — locked vocabulary', () => {
       ...SETTLEMENT_SURFACES,
       PANEL_STATE,
       STATUS_VIEW,
-      // M17 final review: the week-status resolver and its badge.
-      'src/features/programs/week-status.ts',
+      // M17 final review: the week lifecycle resolver and its badge.
+      'src/domain/services/program-week-lifecycle.ts',
       'src/features/programs/components/ProgramWeekSection.tsx',
     ];
     const banned = /\b(skipped|missed|failed|incomplete)\b/i;
@@ -280,10 +280,10 @@ describe('M17 final review — recorded identity and open/up-next truth', () => 
     const code = codeOf(PROGRAM_DETAIL);
 
     // Planned not-performed rows and rowless recorded occurrences both feed the
-    // SAME recorded key set — a rowless record is never left looking startable.
+    // SAME recorded identity set — a rowless record is never left looking startable.
     expect(code).toContain("item.status === 'not-performed'");
     expect(code).toContain('schedule.schedule.unplacedNotPerformedWorkouts');
-    expect(code).toContain('recordedKeys.add(');
+    expect(code).toContain('recordedCoordinates.push(');
     // The recorded fact is read from those DTOs, never inferred from a missing
     // session or a fabricated date.
     expect(code).not.toContain('plannedDate');
@@ -314,7 +314,7 @@ describe('M17 final review — recorded identity and open/up-next truth', () => 
 
 describe('M17 final review — recorded state across the remaining workout surfaces', () => {
   const PROGRAM_DETAIL = 'src/features/programs/components/ProgramDetail.tsx';
-  const WEEK_STATUS = 'src/features/programs/week-status.ts';
+  const WEEK_LIFECYCLE = 'src/domain/services/program-week-lifecycle.ts';
   const WEEK_SECTION = 'src/features/programs/components/ProgramWeekSection.tsx';
   const DASHBOARD_VIEW = 'src/features/dashboard/dashboard-view.ts';
   const DASHBOARD_USE_CASE = 'src/application/use-cases/get-current-program-dashboard.ts';
@@ -340,8 +340,8 @@ describe('M17 final review — recorded state across the remaining workout surfa
   it('(2) Program Detail week completion comes from authored completed truth, not nextOccurrence === null', () => {
     const detail = codeOf(PROGRAM_DETAIL);
 
-    // The week status is delegated to the pure authored-truth resolver…
-    expect(detail).toContain('resolveProgramWeekStatus(');
+    // The week status is delegated to the Domain-owned pure authored-truth resolver…
+    expect(detail).toContain('resolveProgramWeekLifecycle(');
     // …and the old "settled run → all weeks completed" inference is gone.
     expect(detail).not.toContain("return 'completed';");
     // Presentation never derives a week verdict from a Domain closure call.
@@ -351,12 +351,13 @@ describe('M17 final review — recorded state across the remaining workout surfa
   });
 
   it('(3) a recorded occurrence never counts as completed for a week badge', () => {
-    const code = codeOf(WEEK_STATUS);
+    const code = codeOf(WEEK_LIFECYCLE);
 
     // Completion is decided ONLY by the completed-occurrence ids…
     expect(code).toContain('completedIds.has(occurrence.scheduledWorkoutId)');
-    // …the settled state keys on the recorded identity, never on completion…
-    expect(code).toContain('recordedKeys.has(occurrence.key)');
+    // …the settled state keys on the recorded identity (authored coordinates),
+    // never on completion…
+    expect(code).toContain('isRecorded(');
     expect(code).toContain("'settled'");
     // …and the factual badge exists without completion vocabulary.
     expect(codeOf(WEEK_SECTION)).toContain('Settled');
@@ -365,10 +366,14 @@ describe('M17 final review — recorded state across the remaining workout surfa
   it('(4) rowless recorded occurrences participate in week truth by authored identity', () => {
     const detail = codeOf(PROGRAM_DETAIL);
 
-    // Each week occurrence's recorded key is its AUTHORED "week-order"…
-    expect(detail).toContain('`${week.weekNumber}-${scheduled.order}`');
-    // …and the recorded set carries both planned N items and rowless facts.
+    // The ONE recorded identity set is built from authored coordinates — each
+    // week card's "week-order" route key derives from it…
+    expect(detail).toContain('recordedCoordinates.push(');
+    expect(detail).toContain('`${weekNumber}-${workoutOrder}`');
+    // …the recorded set carries both planned N items and rowless facts…
     expect(detail).toContain('schedule.schedule.unplacedNotPerformedWorkouts');
+    // …and those same coordinates are what the Domain lifecycle resolver gets.
+    expect(detail).toContain('recordedCoordinates,');
   });
 
   it('(5) the active workout screen consumes notPerformedRecorded from the session use case', () => {
@@ -679,12 +684,12 @@ describe('M17 - ProgramDetail consumes application-provided settlement identitie
   const CLOSURE_DTO = 'src/application/dto/run-closure.ts';
   const PROGRAM_DETAIL_PAGE = 'src/app/(app)/programs/[programSlug]/page.tsx';
 
-  it('builds recordedKeys from the closure DTO identity set, with the calendar only as fallback', () => {
+  it('builds recorded coordinates from the closure DTO identity set, with the calendar only as fallback', () => {
     const code = codeOf(PROGRAM_DETAIL);
 
     // The AUTHORITATIVE source is the closure identity set...
     expect(code).toContain('runClosure.notPerformedInProgramOrder');
-    expect(code).toContain('recordedKeys.add(');
+    expect(code).toContain('recordedCoordinates.push(');
     // ...and the schedule-derived path is the fallback branch only.
     expect(code).toContain("schedule.status === 'loaded'");
     // Never inferred from counts, and never a second settlement read.
@@ -715,5 +720,57 @@ describe('M17 - ProgramDetail consumes application-provided settlement identitie
     expect(page).not.toContain('NotPerformedOccurrenceRepository');
     expect(page).not.toContain('runClosureFactsRepository');
     expect(page).not.toContain('listClosureFactsByEnrollment');
+  });
+});
+
+/**
+ * Codex review #5429402613 — week LIFECYCLE semantics are Domain-owned.
+ *
+ * The resolver moved out of presentation: no week lifecycle rule may remain
+ * under `src/features`, ProgramDetail may only forward business facts to the
+ * Domain-owned resolver — never deriving 'completed' / 'settled' /
+ * 'in-progress' / 'upcoming' from occurrence sets itself — and the week
+ * section renders only the already-resolved semantic value.
+ */
+describe('M17 architecture — week lifecycle resolution is Domain-owned', () => {
+  const PROGRAM_DETAIL = 'src/features/programs/components/ProgramDetail.tsx';
+  const WEEK_SECTION = 'src/features/programs/components/ProgramWeekSection.tsx';
+  const WEEK_LIFECYCLE = 'src/domain/services/program-week-lifecycle.ts';
+
+  it('no week lifecycle resolver remains under src/features', () => {
+    // The presentation-owned module is gone…
+    expect(existsSync(path.join(ROOT, 'src/features/programs/week-status.ts'))).toBe(false);
+    // …and no feature file DEFINES a week lifecycle resolver (CALLS are fine —
+    // delegation to the Domain resolver is exactly the boundary under test).
+    const definers = sourceFiles('src/features').filter((file) =>
+      /export function resolveProgramWeek/.test(codeOf(file)),
+    );
+    expect(definers).toEqual([]);
+    // The Domain owns the resolver and its four semantic values.
+    const domain = codeOf(WEEK_LIFECYCLE);
+    expect(domain).toContain('export function resolveProgramWeekLifecycle(');
+    expect(domain).toContain("'completed'");
+    expect(domain).toContain("'settled'");
+    expect(domain).toContain("'in-progress'");
+    expect(domain).toContain("'upcoming'");
+  });
+
+  it('ProgramDetail derives no lifecycle value from occurrence sets — it delegates', () => {
+    const detail = codeOf(PROGRAM_DETAIL);
+    // It forwards business facts to the Domain-owned resolver…
+    expect(detail).toContain('resolveProgramWeekLifecycle(');
+    // …and never reasons toward a semantic value itself: no status literal,
+    // no occurrence-set traversal, no hand-rolled verdict return.
+    expect(detail).not.toMatch(/'(completed|settled|in-progress|upcoming)'/);
+    expect(detail).not.toContain('.every(');
+    expect(detail).not.toContain("return '");
+  });
+
+  it('presentation only renders an already-resolved semantic status', () => {
+    const section = codeOf(WEEK_SECTION);
+    // The section consumes the resolved value…
+    expect(section).toContain('status: ProgramWeekLifecycle');
+    // …and resolves nothing itself.
+    expect(section).not.toContain('resolveProgramWeek');
   });
 });

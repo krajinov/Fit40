@@ -18,8 +18,8 @@ vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
 }));
 
 import type { ProgramWeekDto } from '@/application/dto/program';
+import type { ProgramWeekLifecycle } from '@/domain/services/program-week-lifecycle';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import type { ProgramWeekStatus } from '@/features/programs/week-status';
 
 declare global {
   // React 19's act() environment flag; not part of the DOM lib typings.
@@ -65,7 +65,7 @@ const WEEK: ProgramWeekDto = {
 
 async function renderWeek(
   options: {
-    readonly status?: ProgramWeekStatus;
+    readonly status?: ProgramWeekLifecycle;
     readonly completedIds?: ReadonlySet<string>;
     readonly recordedKeys?: ReadonlySet<string>;
     readonly upNextKey?: string | null;

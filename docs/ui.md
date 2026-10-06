@@ -856,7 +856,7 @@ M13 integration suites in
   first OPEN occurrence stays **In progress**; a concluded-but-incomplete run
   paints no week "Completed". Completion is never inferred from the first open
   occurrence, from `nextOccurrence === null`, from run conclusion, or from a
-  record (pure resolver `resolveProgramWeekStatus`).
+  record (pure Domain resolver `resolveProgramWeekLifecycle`).
 - **Restart refusal copy:** the typed `PROGRAM_NOT_COMPLETE` error renders as
   **"This run hasn't finished yet."** — restartability (complete OR
   concluded), never phrased as completion.

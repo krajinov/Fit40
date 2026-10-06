@@ -128,6 +128,8 @@ describe('GetRunClosureSummaryUseCase — the closure denominator', () => {
       isProgramComplete: false,
       restartAvailable: false,
       openInProgramOrder: [],
+      completedInProgramOrder: [],
+      notPerformedInProgramOrder: [],
     });
   });
 
@@ -377,6 +379,11 @@ describe('GetRunClosureSummaryUseCase — ownership, reads and shape', () => {
       'openWorkouts',
       'hasOpenWorkout',
       'openInProgramOrder',
+      // M17: the authored settlement IDENTITY sets ride the closure DTO, so
+      // presentation renders truthful cards/badges without inferring from
+      // counts and without depending on the M15 calendar read.
+      'completedInProgramOrder',
+      'notPerformedInProgramOrder',
       'isConcluded',
       'isProgramComplete',
       'restartAvailable',
@@ -473,5 +480,64 @@ describe('GetRunClosureSummaryUseCase — enrollment identity fencing', () => {
       completedWorkouts: 1,
       isConcluded: false,
     });
+  });
+});
+
+describe('GetRunClosureSummaryUseCase — authored settlement identities on the DTO', () => {
+  it('carries the completed and recorded occurrences in AUTHORED program order, deduplicated', async () => {
+    const harness = await makeHarness({
+      // Supplied OUT of authored order, with a repeated record, on purpose.
+      completed: [OCCURRENCE_W2_2, OCCURRENCE_W1_1],
+      facts: [
+        notPerformedFact(ENR_A, OCCURRENCE_W2_1),
+        notPerformedFact(ENR_A, OCCURRENCE_W1_3),
+        notPerformedFact(ENR_A, OCCURRENCE_W1_3, '2026-09-25T18:30:00.000Z'),
+      ],
+    });
+
+    const summary = await summarize(harness);
+
+    expect(summary?.completedInProgramOrder.map((o) => o.scheduledWorkoutId)).toEqual([
+      OCCURRENCE_W1_1,
+      OCCURRENCE_W2_2,
+    ]);
+    // Authored order, one entry per occurrence (the repeated record counts once).
+    expect(summary?.notPerformedInProgramOrder.map((o) => o.scheduledWorkoutId)).toEqual([
+      OCCURRENCE_W1_3,
+      OCCURRENCE_W2_1,
+    ]);
+    // The identity sets agree with the counts (same fact sets).
+    expect(summary?.completedInProgramOrder).toHaveLength(summary?.completedWorkouts ?? -1);
+    expect(summary?.notPerformedInProgramOrder).toHaveLength(
+      summary?.notPerformedWorkouts ?? -1,
+    );
+    // Each identity carries the labels a surface renders.
+    expect(summary?.notPerformedInProgramOrder[0]).toMatchObject({
+      scheduledWorkoutId: OCCURRENCE_W1_3,
+      weekNumber: 1,
+      workoutOrder: 3,
+      workoutName: 'Workout C',
+    });
+  });
+
+  it('excludes ids the program does not author, exactly as the counts do', async () => {
+    const harness = await makeHarness({
+      completed: [OCCURRENCE_W1_1],
+      facts: [notPerformedFact(ENR_A, 'sched-foreign-1')],
+    });
+
+    const summary = await summarize(harness);
+
+    expect(summary?.notPerformedInProgramOrder).toEqual([]);
+    expect(summary?.notPerformedWorkouts).toBe(0);
+  });
+
+  it('is empty (never fabricated) for a run with no settlement truth', async () => {
+    const harness = await makeHarness();
+
+    const summary = await summarize(harness);
+
+    expect(summary?.completedInProgramOrder).toEqual([]);
+    expect(summary?.notPerformedInProgramOrder).toEqual([]);
   });
 });

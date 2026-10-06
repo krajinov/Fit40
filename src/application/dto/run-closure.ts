@@ -17,15 +17,27 @@
  * still-open occurrences in authored program order, so presentation never
  * re-orders or re-resolves them.
  *
+ * The DTO is also authoritative for the run's AUTHORED settlement IDENTITIES:
+ * `completedInProgramOrder` and `notPerformedInProgramOrder` carry the same
+ * authored identity + labels for the completed and recorded-not-performed
+ * occurrences. Presentation therefore never has to infer settlement from
+ * counts, and never loses the recorded identities when another composed read
+ * (the M15 calendar) degrades — the closure read's snapshot is the fallback
+ * authority for truthful card and week-badge state.
+ *
  * This module projects facts only: no verdict, count or ordering is decided
  * here.
  */
 
 import type { ScheduledWorkout, TrainingProgram } from '@/domain/entities/training-program';
-import type { RunClosure } from '@/domain/services/run-closure';
+import { listScheduledWorkoutsInOrder } from '@/domain/services/program-progress';
+import type { RunClosure, RunClosureFacts } from '@/domain/services/run-closure';
 
-/** One still-open authored occurrence, with the labels a surface renders. */
-export interface RunClosureOpenWorkoutDto {
+/**
+ * One AUTHORED occurrence of the run, with the labels a surface renders — used
+ * for every closure identity set (completed, recorded-not-performed, open).
+ */
+export interface RunClosureOccurrenceDto {
   /** Authored occurrence identity — a stable render key. */
   readonly scheduledWorkoutId: string;
   readonly weekNumber: number;
@@ -43,7 +55,20 @@ export interface RunClosureSummaryDto {
   readonly openWorkouts: number;
   readonly hasOpenWorkout: boolean;
   /** The open occurrences in authored program order (Domain-resolved). */
-  readonly openInProgramOrder: ReadonlyArray<RunClosureOpenWorkoutDto>;
+  readonly openInProgramOrder: ReadonlyArray<RunClosureOccurrenceDto>;
+  /**
+   * The COMPLETED authored occurrences (M14 truth), in authored program order.
+   * Exposed so presentation can render completed state truthfully without
+   * inferring it from counts or from another read's availability.
+   */
+  readonly completedInProgramOrder: ReadonlyArray<RunClosureOccurrenceDto>;
+  /**
+   * The authored occurrences RECORDED as not performed (M17 truth), in authored
+   * program order — the identity set a surface uses for "Recorded as not
+   * performed" cards and settled week badges, even when the M15 calendar read
+   * is unavailable.
+   */
+  readonly notPerformedInProgramOrder: ReadonlyArray<RunClosureOccurrenceDto>;
   /** M17: every authored occurrence settled by a completed session or a record. */
   readonly isConcluded: boolean;
   /** M14: every authored occurrence has a completed session. Unchanged. */
@@ -58,11 +83,20 @@ export interface RunClosureVerdicts {
   readonly restartAvailable: boolean;
 }
 
-/** Projects the Domain's closure state and the read's verdicts onto the DTO. */
+/**
+ * Projects the Domain's closure state, the read's verdicts AND the run's
+ * authored settlement identities onto the DTO.
+ *
+ * `facts` are the SAME two sets the closure verdict was resolved from, so the
+ * identity lists and the counts can never disagree. Only AUTHORED occurrences
+ * appear (a foreign/unrecognized id is excluded, exactly as `resolveRunClosure`
+ * excludes it from the counts), each at most once, in authored program order.
+ */
 export function toRunClosureSummaryDto(
   program: TrainingProgram,
   closure: RunClosure,
   verdicts: RunClosureVerdicts,
+  facts: RunClosureFacts,
 ): RunClosureSummaryDto {
   return {
     programSlug: program.slug,
@@ -72,8 +106,10 @@ export function toRunClosureSummaryDto(
     openWorkouts: closure.openWorkouts,
     hasOpenWorkout: closure.openWorkouts > 0,
     openInProgramOrder: closure.openInProgramOrder.map((occurrence) =>
-      toOpenWorkoutDto(program, occurrence),
+      toOccurrenceDto(program, occurrence),
     ),
+    completedInProgramOrder: authoredOccurrencesIn(program, facts.completedIds),
+    notPerformedInProgramOrder: authoredOccurrencesIn(program, facts.notPerformedIds),
     isConcluded: closure.isConcluded,
     isProgramComplete: verdicts.programComplete,
     restartAvailable: verdicts.restartAvailable,
@@ -81,17 +117,33 @@ export function toRunClosureSummaryDto(
 }
 
 /**
- * The authored identity and labels of one open occurrence.
- *
- * The occurrence comes from the program itself (`resolveRunClosure` iterates
- * the authored schedule), so both lookups are structurally present; a miss
- * means the aggregate disagrees with itself, which fails loudly rather than
- * emitting a partial row (the schedule read's `requireOccurrence` convention).
+ * The AUTHORED occurrences whose id is in `ids`, in authored program order,
+ * each at most once — the same authored-order convention `openInProgramOrder`
+ * uses. Ids the program does not define are skipped (they settle nothing and
+ * are already reported as unrecognized by the Domain).
  */
-function toOpenWorkoutDto(
+function authoredOccurrencesIn(
+  program: TrainingProgram,
+  ids: ReadonlyArray<string>,
+): ReadonlyArray<RunClosureOccurrenceDto> {
+  const wanted = new Set<string>(ids);
+  return listScheduledWorkoutsInOrder(program)
+    .filter((occurrence) => wanted.has(occurrence.id))
+    .map((occurrence) => toOccurrenceDto(program, occurrence));
+}
+
+/**
+ * The authored identity and labels of one occurrence.
+ *
+ * The occurrence comes from the program itself (every closure identity is
+ * authored), so both lookups are structurally present; a miss means the
+ * aggregate disagrees with itself, which fails loudly rather than emitting a
+ * partial row (the schedule read's `requireOccurrence` convention).
+ */
+function toOccurrenceDto(
   program: TrainingProgram,
   occurrence: ScheduledWorkout,
-): RunClosureOpenWorkoutDto {
+): RunClosureOccurrenceDto {
   const week = program.weeks.find((candidate) =>
     candidate.scheduledWorkouts.some((scheduled) => scheduled.id === occurrence.id),
   );
@@ -99,7 +151,7 @@ function toOpenWorkoutDto(
 
   if (week === undefined || workout === undefined) {
     throw new Error(
-      `Run closure summary contract violated: open occurrence "${occurrence.id}" has no authored week or workout in program "${program.slug}"`,
+      `Run closure summary contract violated: occurrence "${occurrence.id}" has no authored week or workout in program "${program.slug}"`,
     );
   }
 

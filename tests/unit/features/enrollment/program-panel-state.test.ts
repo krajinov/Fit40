@@ -38,6 +38,8 @@ function closure(overrides: Partial<RunClosureSummaryDto> = {}): RunClosureSumma
     openWorkouts: 0,
     hasOpenWorkout: false,
     openInProgramOrder: [],
+    completedInProgramOrder: [],
+    notPerformedInProgramOrder: [],
     isConcluded: true,
     isProgramComplete: false,
     restartAvailable: true,
@@ -101,6 +103,8 @@ describe('resolveEnrolledPanelState — lifecycle', () => {
           openInProgramOrder: [
             { scheduledWorkoutId: 'sw-1', weekNumber: 3, workoutOrder: 1, workoutName: 'C' },
           ],
+          completedInProgramOrder: [],
+          notPerformedInProgramOrder: [],
           isConcluded: false,
           restartAvailable: false,
         }),
@@ -192,6 +196,8 @@ describe('resolveEnrolledPanelState — current week authority (M17 final review
           openInProgramOrder: [
             { scheduledWorkoutId: 'sw-c', weekNumber: 2, workoutOrder: 1, workoutName: 'C' },
           ],
+          completedInProgramOrder: [],
+          notPerformedInProgramOrder: [],
           isConcluded: false,
           restartAvailable: false,
         }),
@@ -215,6 +221,8 @@ describe('resolveEnrolledPanelState — current week authority (M17 final review
           openInProgramOrder: [
             { scheduledWorkoutId: 'sw-x', weekNumber: 3, workoutOrder: 2, workoutName: 'X' },
           ],
+          completedInProgramOrder: [],
+          notPerformedInProgramOrder: [],
           isConcluded: false,
           restartAvailable: false,
         }),

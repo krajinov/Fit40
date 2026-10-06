@@ -85,15 +85,22 @@ export function ProgramDetail({
     : null;
 
   // Occurrences the run has already settled as recorded-not-performed,
-  // addressed by the same route key the up-next preview uses. Built from BOTH
-  // sources of authored settlement truth: the M15 read's `not-performed` items
-  // (recorded occurrences that currently hold a planned row) AND the rowless
-  // `unplacedNotPerformedWorkouts` (recorded occurrences whose planned row is
-  // gone). Inferring from a missing session is never done — the fact is only
-  // ever read from those DTOs, so a degraded/absent read leaves the set empty
-  // (M17 Slice 11).
+  // addressed by the same route key the up-next preview uses.
+  //
+  // The AUTHORITATIVE source is the closure read's authored identity set
+  // (`notPerformedInProgramOrder`): it is Application-resolved from the run's
+  // own execution facts, so it survives an UNAVAILABLE M15 calendar read —
+  // without it, recorded cards used to render as "Scheduled" and settled weeks
+  // as "Upcoming" whenever the calendar degraded. Only when the closure read is
+  // null (failed) does this fall back to the M15 read's recorded items and
+  // rowless `unplacedNotPerformedWorkouts`. Settlement is never inferred from
+  // counts and never from a missing session.
   const recordedKeys = new Set<string>();
-  if (schedule !== null && schedule.status === 'loaded') {
+  if (runClosure !== null) {
+    for (const occurrence of runClosure.notPerformedInProgramOrder) {
+      recordedKeys.add(`${occurrence.weekNumber}-${occurrence.workoutOrder}`);
+    }
+  } else if (schedule !== null && schedule.status === 'loaded') {
     for (const item of schedule.schedule.items) {
       if (item.status === 'not-performed') {
         recordedKeys.add(`${item.weekNumber}-${item.workoutOrder}`);

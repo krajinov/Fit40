@@ -89,6 +89,8 @@ function runClosure(overrides: Partial<RunClosureSummaryDto> = {}): RunClosureSu
     openWorkouts: 0,
     hasOpenWorkout: false,
     openInProgramOrder: [],
+    completedInProgramOrder: [],
+    notPerformedInProgramOrder: [],
     isConcluded: true,
     isProgramComplete: false,
     restartAvailable: true,
@@ -128,6 +130,8 @@ describe('nextWorkoutPreviewState / M17 concluded run', () => {
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-2', weekNumber: 2, workoutOrder: 1, workoutName: 'Push A' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     );
     expect(state).toEqual({ status: 'available', workout });

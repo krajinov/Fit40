@@ -666,3 +666,54 @@ describe('M17 - composed run-scoped reads share ONE enrollment generation', () =
     }
   });
 });
+
+/**
+ * M17 - the closure read is authoritative for authored settlement IDENTITIES,
+ * not just counts: ProgramDetail renders recorded cards and settled week badges
+ * from the application-provided identity set, so the truth survives an
+ * unavailable M15 calendar read. Settlement is never inferred from counts and
+ * never re-read from a repository inside presentation.
+ */
+describe('M17 - ProgramDetail consumes application-provided settlement identities', () => {
+  const PROGRAM_DETAIL = 'src/features/programs/components/ProgramDetail.tsx';
+  const CLOSURE_DTO = 'src/application/dto/run-closure.ts';
+  const PROGRAM_DETAIL_PAGE = 'src/app/(app)/programs/[programSlug]/page.tsx';
+
+  it('builds recordedKeys from the closure DTO identity set, with the calendar only as fallback', () => {
+    const code = codeOf(PROGRAM_DETAIL);
+
+    // The AUTHORITATIVE source is the closure identity set...
+    expect(code).toContain('runClosure.notPerformedInProgramOrder');
+    expect(code).toContain('recordedKeys.add(');
+    // ...and the schedule-derived path is the fallback branch only.
+    expect(code).toContain("schedule.status === 'loaded'");
+    // Never inferred from counts, and never a second settlement read.
+    expect(code).not.toContain('notPerformedWorkouts');
+    expect(code).not.toContain('completedWorkouts');
+    expect(code).not.toContain('NotPerformedOccurrenceRepository');
+    expect(code).not.toContain('listByEnrollment');
+    expect(code).not.toContain('resolveRunClosure');
+    expect(code).not.toContain('findFenced');
+  });
+
+  it('the closure DTO carries the authored settlement identities', () => {
+    const dto = codeOf(CLOSURE_DTO);
+
+    expect(dto).toContain('readonly completedInProgramOrder: ReadonlyArray<RunClosureOccurrenceDto>;');
+    expect(dto).toContain(
+      'readonly notPerformedInProgramOrder: ReadonlyArray<RunClosureOccurrenceDto>;',
+    );
+    // Authored order, projected from the SAME fact sets as the counts.
+    expect(dto).toContain('listScheduledWorkoutsInOrder(program)');
+    expect(dto).toContain('facts.completedIds');
+    expect(dto).toContain('facts.notPerformedIds');
+  });
+
+  it('the page adds no settlement read for fallback rendering', () => {
+    const page = codeOf(PROGRAM_DETAIL_PAGE);
+
+    expect(page).not.toContain('NotPerformedOccurrenceRepository');
+    expect(page).not.toContain('runClosureFactsRepository');
+    expect(page).not.toContain('listClosureFactsByEnrollment');
+  });
+});

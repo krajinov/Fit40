@@ -272,6 +272,8 @@ function runClosureDto(overrides: Record<string, unknown> = {}) {
     openInProgramOrder: [
       { scheduledWorkoutId: 'sw-2', weekNumber: 1, workoutOrder: 2, workoutName: 'Cardio' },
     ],
+    completedInProgramOrder: [],
+    notPerformedInProgramOrder: [],
     isConcluded: false,
     isProgramComplete: false,
     restartAvailable: false,
@@ -590,6 +592,8 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
             workoutName: 'Conditioning C',
           },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     resolveNextExecute.mockResolvedValue({

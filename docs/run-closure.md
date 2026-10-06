@@ -418,6 +418,15 @@ or vanished expected run yields the same typed `ENROLLMENT_CHANGED` on every
 nested read, so one composed page can never pair old parent data with the
 replacement run's schedule, report, closure, or preview.
 
+The closure read is authoritative not only for the counts and the conclusion
+but also for the run's AUTHORED settlement IDENTITIES: the DTO carries
+`completedInProgramOrder` and `notPerformedInProgramOrder` (authored order, one
+entry per authored occurrence, projected from the SAME fact sets the verdicts
+were resolved from). Presentation therefore renders recorded cards and settled
+week badges from that identity set, so the truth survives an UNAVAILABLE M15
+calendar read — settlement is never inferred from counts, and never lost when
+another composed read degrades.
+
 None of the snapshot reads takes the enrollment write lock, retries, or
 serializes behind the write side: a coherent read needs exactly one snapshot,
 nothing more.

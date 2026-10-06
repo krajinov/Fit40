@@ -55,6 +55,8 @@ const CLOSURE: RunClosureSummaryDto = {
   openInProgramOrder: [
     { scheduledWorkoutId: 'sw-c', weekNumber: 2, workoutOrder: 1, workoutName: 'C' },
   ],
+  completedInProgramOrder: [],
+  notPerformedInProgramOrder: [],
   isConcluded: false,
   isProgramComplete: false,
   restartAvailable: false,

@@ -168,13 +168,22 @@ export class GetRunClosureSummaryUseCase {
     const closure = resolveRunClosure(program, facts);
     const programComplete = isProgramComplete(program, facts.completedIds);
 
-    return toRunClosureSummaryDto(program, closure, {
-      programComplete,
-      restartAvailable: isRunRestartable({
+    return toRunClosureSummaryDto(
+      program,
+      closure,
+      {
         programComplete,
-        runConcluded: closure.isConcluded,
-      }),
-    });
+        restartAvailable: isRunRestartable({
+          programComplete,
+          runConcluded: closure.isConcluded,
+        }),
+      },
+      // The SAME fact sets the verdicts were resolved from: the DTO's authored
+      // settlement identities can never disagree with its counts, and
+      // presentation never has to infer settlement from counts or from another
+      // read's availability.
+      facts,
+    );
   }
 
   /**

@@ -793,6 +793,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
       openInProgramOrder: [
         { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
       ],
+      completedInProgramOrder: [],
+      notPerformedInProgramOrder: [],
       isConcluded: false,
       isProgramComplete: false,
       restartAvailable: false,
@@ -828,6 +830,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     // The use case resolves the M14 preview (B); the view re-resolves for C.
@@ -855,6 +859,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-3', weekNumber: 1, workoutOrder: 3, workoutName: 'C' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     resolveNextExecute.mockResolvedValue({
@@ -885,6 +891,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openWorkouts: 0,
         hasOpenWorkout: false,
         openInProgramOrder: [],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
         isConcluded: true,
         isProgramComplete: false,
         restartAvailable: true,
@@ -921,6 +929,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openWorkouts: 0,
         hasOpenWorkout: false,
         openInProgramOrder: [],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
         isConcluded: true,
         isProgramComplete: true,
         restartAvailable: true,
@@ -958,6 +968,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-4', weekNumber: 2, workoutOrder: 2, workoutName: 'D' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     resolveNextExecute.mockResolvedValue({
@@ -992,6 +1004,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-2', weekNumber: 2, workoutOrder: 1, workoutName: 'C' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     resolveNextExecute.mockResolvedValue({ ...NEXT_DTO, weekNumber: 2, workoutOrder: 1 });
@@ -1047,6 +1061,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openInProgramOrder: [
           { scheduledWorkoutId: 'sw-3', weekNumber: 3, workoutOrder: 1, workoutName: 'C' },
         ],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
       }),
     });
     resolveNextExecute.mockResolvedValue({ ...NEXT_DTO, weekNumber: 3, workoutOrder: 1 });
@@ -1075,6 +1091,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openWorkouts: 0,
         hasOpenWorkout: false,
         openInProgramOrder: [],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
         isConcluded: true,
         isProgramComplete: false,
         restartAvailable: true,
@@ -1097,6 +1115,8 @@ describe('buildDashboardView / M17 Up next uses the authoritative open occurrenc
         openWorkouts: 0,
         hasOpenWorkout: false,
         openInProgramOrder: [],
+        completedInProgramOrder: [],
+        notPerformedInProgramOrder: [],
         isConcluded: true,
         isProgramComplete: true,
         restartAvailable: true,

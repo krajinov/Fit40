@@ -1,14 +1,21 @@
 import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
+import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
+import {
+  resolveProgramWeekLifecycle,
+  type OccurrenceCoordinates,
+} from '@/domain/services/program-week-lifecycle';
 import type { NextWorkoutPreviewState } from '@/features/sessions/next-workout-view';
+import {
+  resolveRunNextOccurrence,
+} from '@/features/enrollment/next-occurrence';
 import { JoinProgramButton } from '@/features/enrollment/components/JoinProgramButton';
 import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledProgramPanel';
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import type { ProgramWeekStatus } from '@/features/programs/components/ProgramWeekSection';
 import { PlanFollowThroughSection } from '@/features/schedule/components/PlanFollowThroughSection';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
@@ -20,9 +27,11 @@ interface ProgramDetailProps {
    */
   readonly enrollment: ProgramEnrollmentViewDto | null;
   /**
-   * Three-valued next-workout state of the enrollment (shared with the
-   * dashboard). Null when anonymous or not enrolled — no enrollment
-   * controls or up-next area then.
+   * Multi-valued next-workout state of the enrollment (shared with the
+   * dashboard): available / unavailable / complete / concluded. Null when
+   * anonymous or not enrolled — no enrollment controls or up-next area then.
+   * The panel reads its own lifecycle from `runClosure`, so a `complete` state
+   * for a concluded run still renders the factual run-closed callout.
    */
   readonly nextWorkoutPreview: NextWorkoutPreviewState | null;
   /**
@@ -41,33 +50,14 @@ interface ProgramDetailProps {
    * Composition only — every count arrives derived.
    */
   readonly followThrough: EnrollmentFollowThroughDto | null;
-}
-
-/**
- * Derives a week's status from the enrollment: weeks before the next
- * incomplete workout are completed, its own week is in progress, later ones
- * upcoming. A null next workout (everything complete) marks all weeks
- * completed. Anonymous or not-enrolled visitors see every week upcoming.
- */
-function weekStatus(
-  weekNumber: number,
-  enrollment: ProgramEnrollmentViewDto | null,
-): ProgramWeekStatus {
-  if (enrollment === null || enrollment.status !== 'enrolled') {
-    return 'upcoming';
-  }
-
-  const next = enrollment.nextWorkout;
-  if (next === null) {
-    return 'completed';
-  }
-  if (weekNumber < next.weekNumber) {
-    return 'completed';
-  }
-  if (weekNumber === next.weekNumber) {
-    return 'in-progress';
-  }
-  return 'upcoming';
+  /**
+   * The M17 run-closure summary of this run (Slice 10): factual counts plus the
+   * complete / concluded / open verdicts, or null when the read failed or the
+   * visitor has no run. Composition only — the panel renders the three states
+   * from it (M17 Slice 11) and never recomputes a verdict; the M14 completion
+   * surface remains the only completion state.
+   */
+  readonly runClosure: RunClosureSummaryDto | null;
 }
 
 /**
@@ -82,17 +72,66 @@ export function ProgramDetail({
   nextWorkoutPreview,
   schedule,
   followThrough,
+  runClosure,
 }: ProgramDetailProps) {
-  const completedIds =
-    enrollment !== null && enrollment.status === 'enrolled'
-      ? new Set<string>(enrollment.completedScheduledWorkoutIds)
-      : new Set<string>();
+  const enrolled = enrollment !== null && enrollment.status === 'enrolled';
+  const completedIds = enrolled
+    ? new Set<string>(enrollment.completedScheduledWorkoutIds)
+    : new Set<string>();
+
+  // The run's AUTHORITATIVE next occurrence (M17 Slice 11 correction): the
+  // closure-resolved FIRST OPEN authored occurrence when the closure read
+  // supplied it, else the M14 next workout. Selecting it here is composition,
+  // never a recomputation of openness — `openInProgramOrder` is Domain truth.
+  const nextOccurrence = enrolled
+    ? resolveRunNextOccurrence(enrollment.nextWorkout, runClosure)
+    : null;
+
+  // Occurrences the run has already settled as recorded-not-performed, as
+  // AUTHORED COORDINATES — the business facts the Domain week lifecycle
+  // resolver consumes. The week cards' "week-order" route keys are derived
+  // from this ONE identity set below, never re-derived from counts.
+  //
+  // The AUTHORITATIVE source is the closure read's authored identity set
+  // (`notPerformedInProgramOrder`): it is Application-resolved from the run's
+  // own execution facts, so it survives an UNAVAILABLE M15 calendar read —
+  // without it, recorded cards used to render as "Scheduled" and settled weeks
+  // as "Upcoming" whenever the calendar degraded. Only when the closure read is
+  // null (failed) does this fall back to the M15 read's recorded items and
+  // rowless `unplacedNotPerformedWorkouts`. Settlement is never inferred from
+  // counts and never from a missing session.
+  const recordedCoordinates: OccurrenceCoordinates[] = [];
+  if (runClosure !== null) {
+    for (const occurrence of runClosure.notPerformedInProgramOrder) {
+      recordedCoordinates.push({
+        weekNumber: occurrence.weekNumber,
+        workoutOrder: occurrence.workoutOrder,
+      });
+    }
+  } else if (schedule !== null && schedule.status === 'loaded') {
+    for (const item of schedule.schedule.items) {
+      if (item.status === 'not-performed') {
+        recordedCoordinates.push({
+          weekNumber: item.weekNumber,
+          workoutOrder: item.workoutOrder,
+        });
+      }
+    }
+    for (const unplaced of schedule.schedule.unplacedNotPerformedWorkouts) {
+      recordedCoordinates.push({
+        weekNumber: unplaced.weekNumber,
+        workoutOrder: unplaced.workoutOrder,
+      });
+    }
+  }
+  const recordedKeys = new Set(
+    recordedCoordinates.map(({ weekNumber, workoutOrder }) => `${weekNumber}-${workoutOrder}`),
+  );
+
   const upNextKey =
-    enrollment !== null &&
-    enrollment.status === 'enrolled' &&
-    enrollment.nextWorkout !== null
-      ? `${enrollment.nextWorkout.weekNumber}-${enrollment.nextWorkout.workoutOrder}`
-      : null;
+    nextOccurrence === null
+      ? null
+      : `${nextOccurrence.weekNumber}-${nextOccurrence.workoutOrder}`;
 
   const availableWorkout =
     nextWorkoutPreview !== null && nextWorkoutPreview.status === 'available'
@@ -133,6 +172,7 @@ export function ProgramDetail({
         <EnrolledProgramPanel
           program={program}
           enrollment={enrollment}
+          runClosure={runClosure}
           nextWorkout={
             nextWorkoutPreview === null
               ? null
@@ -174,8 +214,19 @@ export function ProgramDetail({
             key={week.weekNumber}
             programSlug={program.slug}
             week={week}
-            status={weekStatus(week.weekNumber, enrollment)}
+            status={resolveProgramWeekLifecycle({
+              enrolled,
+              weekNumber: week.weekNumber,
+              occurrences: week.scheduledWorkouts.map((scheduled) => ({
+                scheduledWorkoutId: scheduled.scheduledWorkoutId,
+                workoutOrder: scheduled.order,
+              })),
+              completedIds,
+              recordedCoordinates,
+              firstOpen: nextOccurrence,
+            })}
             completedIds={completedIds}
+            recordedKeys={recordedKeys}
             upNextKey={upNextKey}
           />
         ))}

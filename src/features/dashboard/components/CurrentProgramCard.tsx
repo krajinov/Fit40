@@ -19,12 +19,17 @@ interface CurrentProgramCardProps {
  * View program link.
  */
 export function CurrentProgramCard({ view, className }: CurrentProgramCardProps) {
-  const { program, enrollment } = view;
+  const { program, enrollment, currentWeek } = view;
   const progress = enrollment.progress;
-  const currentWeekNumber =
-    enrollment.nextWorkout === null
-      ? program.durationWeeks
-      : enrollment.nextWorkout.weekNumber;
+  // The AUTHORITATIVE current week resolved once by the view assembly from the
+  // same open occurrence Up next uses. This card must never derive it from the
+  // completion-only `enrollment.nextWorkout`, which can point at a week already
+  // settled as recorded not performed (and would then contradict Up next).
+  //
+  // A null week means the run has NO open occurrence — a concluded run (or the
+  // degraded failed-read case) — so the heading falls back to the authored
+  // duration exactly as a completed run's did, never to an old recorded week.
+  const currentWeekNumber = currentWeek?.weekNumber ?? program.durationWeeks;
 
   return (
     <section

@@ -9,6 +9,10 @@
 
 import { createPlannedWorkout, type PlannedWorkout } from '@/domain/entities/planned-workout';
 import {
+  createNotPerformedOccurrence,
+  type NotPerformedOccurrence,
+} from '@/domain/entities/not-performed-occurrence';
+import {
   createProgramEnrollment,
   type ProgramEnrollment,
 } from '@/domain/entities/program-enrollment';
@@ -28,15 +32,27 @@ import {
   createUserId,
   createWorkoutId,
   type EnrollmentId,
+  type ProgramId,
+  type ScheduledWorkoutId,
+  type UserId,
   type WorkoutId,
 } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
 import { createPlannedDate, type PlannedDate } from '@/domain/value-objects/planned-date';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
+import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
 import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-memory-workout-session-repository';
 import { vi } from 'vitest';
 
-import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
+import type { FollowThroughExecutionFactsRepository } from '@/application/ports/follow-through-execution-facts-repository';
+import type { OccurrenceExecutionFactsRepository } from '@/application/ports/occurrence-execution-facts-repository';
+import type { ScheduleExecutionFactsRepository } from '@/application/ports/schedule-execution-facts-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
+import type {
+  PlannedWorkoutRepository,
+  PlannedWorkoutRescheduleOutcome,
+} from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
 
@@ -258,7 +274,7 @@ export async function saveInProgressSession(
   repo: InMemoryWorkoutSessionRepository,
   options: SessionFixtureOptions,
 ): Promise<void> {
-  await repo.save(buildSession(options));
+  await repo.create(buildSession(options));
 }
 
 /** Saves a completed session — the completion/history fact. */
@@ -281,7 +297,7 @@ export async function saveCompletedSession(
   );
   if (!done.ok) throw new Error(done.error.message);
 
-  await repo.save(done.data);
+  await repo.create(done.data);
 }
 
 /** Catalog stub answering `findBySlug` with the supplied program. */
@@ -319,18 +335,235 @@ export function makePlannedRepo(
   options: {
     readonly rows?: ReadonlyArray<PlannedWorkout>;
     readonly replaceAllResult?: boolean;
-    readonly rescheduleResult?: boolean;
+    readonly rescheduleResult?: PlannedWorkoutRescheduleOutcome;
     readonly rescheduleError?: Error;
   } = {},
 ) {
   return {
     listByEnrollment: vi.fn(async () => options.rows ?? []),
     replaceAllForEnrollment: vi.fn(async () => options.replaceAllResult ?? true),
-    reschedule: vi.fn(async () => {
-      if (options.rescheduleError !== undefined) {
-        throw options.rescheduleError;
-      }
-      return options.rescheduleResult ?? true;
-    }),
+    reschedule: vi.fn(
+      async (): Promise<PlannedWorkoutRescheduleOutcome> => {
+        if (options.rescheduleError !== undefined) {
+          throw options.rescheduleError;
+        }
+        return options.rescheduleResult ?? { outcome: 'moved' };
+      },
+    ),
   } satisfies PlannedWorkoutRepository;
+}
+
+/** A validated not-performed fact for the fixture program (M17 Slice 8). */
+export function notPerformedFact(
+  enrollment: string,
+  occurrence: string,
+  recordedAtIso = '2026-09-24T18:30:00.000Z',
+): NotPerformedOccurrence {
+  const result = createNotPerformedOccurrence({
+    enrollmentId: enrollment,
+    scheduledWorkoutId: occurrence,
+    recordedAt: new Date(recordedAtIso),
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+/**
+ * Read-only not-performed repository stub, scoped exactly like the port: it
+ * answers only for the requested enrollment, so a test can prove cross-run
+ * isolation through the use case rather than through the stub's convenience.
+ */
+export function makeNotPerformedRepo(facts: ReadonlyArray<NotPerformedOccurrence> = []) {
+  return {
+    listByEnrollment: vi.fn(async (enrollmentId: EnrollmentId) =>
+      facts.filter((fact) => fact.enrollmentId === enrollmentId),
+    ),
+  } satisfies NotPerformedOccurrenceRepository;
+}
+
+/**
+ * Read-only closure-facts projection stub (M17 snapshot read), composed over
+ * the shared in-memory session repository and the given facts so both sets
+ * are scoped exactly like the port: the completed ids keep the in-memory
+ * projection's enrollment scoping (detached history excluded) and the
+ * recorded facts answer only for the requested enrollment.
+ */
+export function makeRunClosureFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
+) {
+  const factsFor = async (enrollmentId: EnrollmentId) => ({
+    completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
+    notPerformedIds: facts
+      .filter((fact) => fact.enrollmentId === enrollmentId)
+      .map((fact) => fact.scheduledWorkoutId),
+  });
+
+  return {
+    listClosureFactsByEnrollment: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-statement projection: the anchor
+    // check and the facts come from the same call, so a fixture enrollment
+    // that is gone (or belongs to another pair) is `matched: false` - never an
+    // empty-but-matched set.
+    findFencedClosureFactsByEnrollment: vi.fn(
+      async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
+        if (enrollments !== null) {
+          // Existence is derived from the repository's own port reads (never a
+          // by-id lookup, which the port deliberately does not offer): the run
+          // must still be one of this trusted user's enrollments of THIS
+          // program.
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return { matched: true as const, facts: await factsFor(enrollmentId) };
+      },
+    ),
+  } satisfies RunClosureFactsRepository;
+}
+
+
+/**
+ * Read-only occurrence-execution-facts stub (M17 snapshot read), composed
+ * over the shared in-memory session repository and the given facts so both
+ * halves are scoped exactly like the port: the session keeps the in-memory
+ * projection's enrollment scoping and the record answers only for the
+ * requested run and occurrence.
+ */
+export function makeOccurrenceExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
+) {
+  const factsFor = async (enrollmentId: EnrollmentId, scheduledWorkoutId: ScheduledWorkoutId) => ({
+    session: await sessions.findByEnrollmentAndScheduledWorkout(enrollmentId, scheduledWorkoutId),
+    notPerformedRecorded: facts.some(
+      (fact) =>
+        fact.enrollmentId === enrollmentId && fact.scheduledWorkoutId === scheduledWorkoutId,
+    ),
+  });
+
+  return {
+    findOccurrenceExecutionFacts: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-snapshot projection: existence is
+    // derived from the repository's own port reads, so a fixture enrollment
+    // that is gone (or belongs to another pair) is `matched: false`.
+    findFencedOccurrenceExecutionFacts: vi.fn(
+      async (
+        enrollmentId: EnrollmentId,
+        scheduledWorkoutId: ScheduledWorkoutId,
+        userId: UserId,
+        programId: ProgramId,
+      ) => {
+        if (enrollments !== null) {
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return { matched: true as const, facts: await factsFor(enrollmentId, scheduledWorkoutId) };
+      },
+    ),
+  } satisfies OccurrenceExecutionFactsRepository;
+}
+
+/**
+ * Read-only follow-through execution-facts stub (M17 snapshot read), composed
+ * over the shared in-memory session repository and the given facts so all
+ * three sets are scoped exactly like the port.
+ */
+export function makeFollowThroughExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
+  plannedWorkouts: PlannedWorkoutRepository | null = null,
+) {
+  const factsFor = async (enrollmentId: EnrollmentId) => ({
+    completedActivity: await sessions.listCompletedOccurrenceActivity(enrollmentId),
+    inProgressIds: await sessions.listInProgressScheduledWorkoutIds(enrollmentId),
+    notPerformedFacts: facts.filter((fact) => fact.enrollmentId === enrollmentId),
+  });
+
+  return {
+    listFollowThroughExecutionFactsByEnrollment: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-statement projection (the schedule
+    // fixture's convention): a fixture enrollment that is gone (or belongs to
+    // another pair) is `matched: false`. The planned rows come from the SAME
+    // projection, never a second read.
+    findFencedFollowThroughExecutionFactsByEnrollment: vi.fn(
+      async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
+        if (enrollments !== null) {
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return {
+          matched: true as const,
+          plannedRows:
+            plannedWorkouts === null ? [] : await plannedWorkouts.listByEnrollment(enrollmentId),
+          facts: await factsFor(enrollmentId),
+        };
+      },
+    ),
+  } satisfies FollowThroughExecutionFactsRepository;
+}
+
+/**
+ * Read-only schedule-execution-facts stub (M17 snapshot read), composed over
+ * the shared in-memory session repository and the given facts so all three
+ * sets are scoped exactly like the port: the session projections keep the
+ * in-memory scoping (detached history excluded) and the recorded facts
+ * answer only for the requested enrollment.
+ */
+export function makeScheduleExecutionFactsRepo(
+  sessions: InMemoryWorkoutSessionRepository,
+  facts: ReadonlyArray<NotPerformedOccurrence> = [],
+  enrollments: InMemoryProgramEnrollmentRepository | null = null,
+  plannedWorkouts: PlannedWorkoutRepository | null = null,
+) {
+  const factsFor = async (enrollmentId: EnrollmentId) => ({
+    completedIds: await sessions.listCompletedScheduledWorkoutIds(enrollmentId),
+    inProgressIds: await sessions.listInProgressScheduledWorkoutIds(enrollmentId),
+    notPerformedFacts: facts.filter((fact) => fact.enrollmentId === enrollmentId),
+  });
+
+  return {
+    listScheduleExecutionFactsByEnrollment: vi.fn(factsFor),
+    // The fenced variant, mirroring the one-statement projection: existence is
+    // derived from the repository's own port reads, so a fixture enrollment
+    // that is gone (or belongs to another pair) is `matched: false` - never an
+    // empty-but-matched set. The planned rows come from the SAME projection,
+    // never a second read.
+    findFencedScheduleExecutionFactsByEnrollment: vi.fn(
+      async (enrollmentId: EnrollmentId, userId: UserId, programId: ProgramId) => {
+        if (enrollments !== null) {
+          const runs = await enrollments.listByUserId(userId);
+          const stillExists = runs.some(
+            (run) => run.id === enrollmentId && run.programId === programId,
+          );
+          if (!stillExists) {
+            return { matched: false as const };
+          }
+        }
+        return {
+          matched: true as const,
+          plannedRows:
+            plannedWorkouts === null ? [] : await plannedWorkouts.listByEnrollment(enrollmentId),
+          facts: await factsFor(enrollmentId),
+        };
+      },
+    ),
+  } satisfies ScheduleExecutionFactsRepository;
 }

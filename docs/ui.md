@@ -208,6 +208,21 @@ the sign-in links; the menu performs no authorization itself.
   the domain has no explicit current-program concept).
 - Empty states: no enrollment → `NoProgramCard` (EmptyState + Browse
   programs CTA); program fully completed → `ProgramCompletedCard`.
+- **"Up next" authority (M17):** the dashboard "Up next" card follows the run's
+  **first OPEN authored occurrence** — the closure read's
+  `openInProgramOrder[0]` — when authoritative closure data is available, so an
+  occurrence already recorded as not performed is never offered as "Up next" /
+  "Start workout". The **"Program week" card shares that SAME occurrence** (one
+  resolution feeds both surfaces): its current week is the first open
+  occurrence's week, so it can never stay on a completion-only week while Up
+  next has advanced. When the closure read is unavailable the M14 `nextWorkout`
+  fallback stands (graceful degradation; no settlement truth is invented). A
+  **concluded-but-incomplete** run has no Up next AND no current week — the
+  "Program week" card is hidden, so no old recorded week is ever shown as
+  current: it renders the factual `ConcludedRunCallout` (**"Run closed — {n}
+  completed, {m} recorded as not performed"**, no restart control per the M14
+  dashboard decision) instead of the completed card, links to no `/completed`,
+  and suppresses the schedule card.
 
 ### Program detail structure
 
@@ -223,7 +238,10 @@ the sign-in links; the menu performs no authorization itself.
      whose panels own the start/resume semantics); mobile shows the
      compact eyebrow/track/count variant and keeps Leave reachable.
 - Weekly schedule: one card per week; in-progress weeks get the
-  accent-tint-border card treatment. Workout cards: completed (accent
+  accent-tint-border card treatment, and a **settled-but-incomplete** week
+  (every authored workout completed or recorded not performed, at least one
+  recorded) shows a neutral **"Settled"** badge — never "Completed" (M17).
+  Workout cards: completed (accent
   check circle, "Completed"), up next (accent-tint card, accent border,
   "Up next"), scheduled (bordered order circle, "Scheduled") — all links.
 - Catalog page and cards were restyled onto the same primitives; the
@@ -658,8 +676,12 @@ M13 integration suites in
   linking to `/programs/[slug]` (where the form lives). Configured runs get
   **TODAY** (accent badge + "Week N · Workout N" eyebrow + workout name;
   "Start workout" / "Resume workout" via the existing session route, or a
-  `done` badge "Completed today" with no Start), **NEXT WORKOUT** (neutral
-  badge; rendered only when nothing is actionable today; "Planned for Sep 30"
+  `done` badge "Completed today" with no Start, or — M17 — a neutral badge
+  "Recorded as not performed" with no Start: a recorded occurrence is settled
+  execution fact, never actionable), **NEXT WORKOUT** (neutral badge; rendered
+  only when nothing is actionable today — settled statuses (`completed`,
+  `not-performed`) are not actionable, so a recorded today item never hides the
+  genuine next open workout; "Planned for Sep 30"
   from the component-based date formatter; secondary "View details" only, so it
   never competes with an actionable Today), and a neutral past-due line ("N
   planned workout(s) behind schedule"). A failed read renders nothing — it
@@ -677,11 +699,13 @@ M13 integration suites in
   date label ("Sep 23" — never the raw ISO string), today marked by the word
   "Today" **and** `aria-current="date"`, empty days as neutral "No workout
   planned", statuses as text badges (Planned / In progress / Completed / Past
-  due), an in-progress "Resume" link to the session route, and a collapsed
+  due / Recorded as not performed), an in-progress "Resume" link to the session route, and a collapsed
   **"Move"** disclosure (native `type="date"` input defaulting to the canonical
   date, label "New date for {workout}", submit "Move workout") on
   never-started cells only — `planned` and `past-due` expose Move, `completed`
-  and `in-progress` never do. A collapsed **"Change training days"**
+  and `in-progress` never do. Settlement affordances (M17 — the "Didn't train
+  this" record form and the "Undo" form) are documented under
+  [Run settlement & run closure](#run-settlement--run-closure-m17) below. A collapsed **"Change training days"**
   disclosure hosts the same fresh-selection form with the replacement copy
   ("Choose a new weekly pattern. Saving replaces the dates of future
   workouts; completed workouts stay in history and in-progress workouts keep
@@ -716,15 +740,21 @@ M13 integration suites in
   weeks”**; one `<ul aria-label="Plan follow-through by week">` of rows: week
   range label (component-based from the window's own bounds — `Sep 21–27`
   inside a month, `Sep 28–Oct 4` across one, never a raw instant), `"N of M
-  done"` straight from the DTO, optional `"n started"` and `"n past due"` (only
+  done"` straight from the DTO, optional `"n started"`, `"n past due"` and
+  `"n not performed"` (only
   when non-zero), and **“This week”** with `aria-current="date"` on the open
   week containing `today`. The current week is distinguished by words and
   semantics, never colour, and no row or total is ever framed as unfinished or
   failed.
 - **Totals line:** factual fragments from the DTO totals —
   `7 planned · 5 done · 1 completed early · 1 completed late · 1 started · 3
-  past due` — with the two core counts always shown (a real zero stays a zero).
-  The configured report whose weeks are all outside the horizon renders the
+  past due · 1 not performed` — with the two core counts always shown (a real
+  zero stays a zero). When `notPerformedUnplaced` is nonzero, one pointer line
+  renders: **“1 recorded as not performed without a calendar date — see
+  Training schedule”** (plural: “2 recorded…”), linking to the M15 calendar
+  where the unplaced list and Undo live; the count itself never reaches a week
+  or total. The configured report whose weeks are all outside the horizon
+  renders the
   honest **“No planned dates in the last 8 weeks.”** instead of six zero counts.
 - **Disclosure (exactly one, M16's only new caption):** “This describes the
   dates currently on your calendar. Changing your training days replaces them.”
@@ -738,12 +768,114 @@ M13 integration suites in
   `configured: false` and never fabricates weeks.
 - **Copy bans:** never `missed`, `failed`, `skipped`, `streak`, `adherence`,
   `score`, `goal`, `on track`/`off track`, or a percentage; `past due`,
-  `completed early` and `completed late` are the approved factual terms. The
+  `completed early`, `completed late` and `recorded as not performed` are the
+  approved factual terms. The
   page provides no interactive control here (no button, link or disclosure), so
-  no target-size or focus handling applies.
+  no target-size or focus handling applies — the record and Undo forms live on
+  the M15 calendar, never in this report.
 - Regression coverage:
   `tests/unit/features/schedule/{follow-through-view,plan-follow-through-section}.test.ts`,
   `tests/unit/app/program-detail-page.test.ts`,
   `tests/unit/architecture/follow-through.test.ts`, and the real-PostgreSQL
   `tests/integration/database/follow-through-round-trip.test.ts`.
 - Canonical reference: [Plan Follow-Through](follow-through.md).
+
+
+## Run settlement & run closure (M17)
+
+- **Calendar record affordance (M15 slots):** `planned` / `past-due` cells
+  keep the Move disclosure and gain the **"Didn't train this"** submit
+  (`RecordNotPerformedForm`, pending "Saving…"); `in-progress` cells offer
+  "Didn't train this" instead of Move, with the honesty sentence **"Recording
+  removes the empty workout you have in progress."** on motion-sensitive
+  inputs; `completed` cells gain nothing.
+- **Calendar undo affordance:** a `not-performed` cell shows the status text
+  **"Recorded as not performed"** and the **"Undo"** form (subtext **"It goes
+  back to not started."**) only — no Start, no Move. Undo is the safety
+  mechanism: there is **no confirmation dialog anywhere**, and there is **no
+  bulk record/undo action** (grep-locked in architecture tests).
+- **Unplaced list** (below the calendar, `UnplacedNotPerformedList`):
+  heading/aria-label **"Recorded as not performed"**, body **"These workouts
+  are recorded as not performed and have no calendar date right now."**, each
+  row = authored week/order labels + a per-row **Undo** — never an invented
+  date.
+- **Workout detail CTA band** (`WorkoutStartPanel`, `ctaState: 'not-performed'`):
+  heading **"Recorded as not performed"**, body **"It goes back to not
+  started."**, an **Undo** form; Start is suppressed for this state. The
+  scheduled workout card shows the same status text.
+- **Session route recorded state** (`SessionRecordedPanel`, a direct/bookmarked
+  session URL): when the occurrence is recorded and no session exists, the
+  session screen renders the SAME recorded CTA band (heading **"Recorded as not
+  performed"**, **"It goes back to not started."**, an **Undo** form) and offers
+  **no** Start — recorded state dominates the not-started presentation, so a
+  bookmarked URL can never show an impossible "Start workout". The recorded
+  fact is read from `GetWorkoutSessionUseCase`; after **Undo** the next
+  authoritative read restores the normal not-started / open state and Start may
+  become available again.
+- **Concluded run panel** (`ConcludedRunCallout` inside `EnrolledProgramPanel`):
+  **"Run closed — {n} completed, {m} recorded as not performed"** (both counts
+  always rendered), shown when the run is concluded; the **restart**
+  button renders iff `restartAvailable`, and the callout never links to
+  `/completed` — completion semantics stay unreachable for concluded-but-
+  incomplete runs.
+- **Authored card identity (corrected):** a recorded occurrence is shown as
+  **"Recorded as not performed"** with **Undo** (never a Start, never "Up
+  next") on its authored week card whether it currently holds a planned row OR
+  is **rowless** — the recorded identity is built from both the M15
+  `not-performed` items and the rowless `unplacedNotPerformedWorkouts`
+  projection, so a rowless record needs no fabricated planned date to suppress
+  Start.
+- **Up-next authority:** the program panel and the **dashboard** follow the run's
+  **first OPEN authored occurrence** from the closure DTO's `openInProgramOrder`
+  when the closure read is available — an occurrence recorded as not performed
+  is settled, so it is never displayed as "Up next" or offered a Start. The M14
+  `nextWorkout` is used only as the fallback when the closure read is
+  unavailable (graceful degradation), and React never recomputes openness.
+- **Degraded next-workout preview (M17 final review):** when the closure read
+  is unavailable, the M14 `nextWorkout` fallback occurrence may still be shown —
+  but if that occurrence is RECORDED as not performed,
+  `ResolveNextWorkoutUseCase` carries `notPerformedRecorded` into the preview as
+  session state `not-performed`: the dashboard "Up next" card and the program
+  panel render the factual **"Recorded as not performed"** state with **no
+  Start/Resume** — never `not-started`. No surface inspects a repository or
+  recomputes settlement, and no client flag can spoof it.
+- **Current-week authority (M17 final review):** the same first OPEN occurrence
+  decides the **current week** on every surface that names one — the program
+  enrollment panel (`resolveEnrolledPanelState`) and the dashboard "Program
+  week" card share the ONE `resolveRunNextOccurrence` resolution the "Up next"
+  cards use, so a week holding only a recorded occurrence is never claimed as
+  current. A **concluded-but-incomplete** run has NO current/open week: the
+  panel omits the week label and the dashboard hides the "Program week" card —
+  it never falls back to the completion-only M14 `nextWorkout`. When the closure
+  read is unavailable the exact pre-M17 fallback is preserved.
+- **Week status authority (M17):** an authored week is **Completed** only when
+  EVERY authored occurrence in it has a completed session — a
+  not-performed record never counts as one. A week whose authored occurrences
+  are all settled but not all completed (a completion plus a record, or an
+  all-recorded week) is **Settled**; the current week holding the authoritative
+  first OPEN occurrence stays **In progress**; a concluded-but-incomplete run
+  paints no week "Completed". Completion is never inferred from the first open
+  occurrence, from `nextOccurrence === null`, from run conclusion, or from a
+  record (pure Domain resolver `resolveProgramWeekLifecycle`).
+- **Restart refusal copy:** the typed `PROGRAM_NOT_COMPLETE` error renders as
+  **"This run hasn't finished yet."** — restartability (complete OR
+  concluded), never phrased as completion.
+- **Follow-through pointer:** the M16 report gains only the `"n not performed"`
+  week/totals fragment and the unplaced pointer line (see the M16 section);
+  no settlement control ever appears there.
+- **Errors:** every record/undo/start/restart failure surfaces inline through
+  `ScheduleActionError` / the restart form with `role="alert"` and the typed
+  use-case copy — no toast system, and contract violations log at the boundary
+  rather than rendering raw internals.
+- **Accessibility & trust:** forms carry only server-injected public
+  coordinates (no `EnrollmentId` / `ScheduledWorkoutId` / `SessionId` /
+  `userId` in DOM or URL); interactive targets stay ≥44px; pending submits are
+  disabled; status and settlement are always text + semantics, never colour
+  alone.
+- Regression coverage:
+  `tests/unit/features/schedule/{schedule-week-view,program-schedule-section,record-not-performed-action,undo-not-performed-action}.test.ts`,
+  `tests/unit/features/sessions/{workout-cta-state,workout-start-panel}.test.ts`,
+  `tests/unit/features/enrollment/{program-panel-state,enrolled-program-panel,restart-action}.test.ts`,
+  `tests/unit/features/schedule/follow-through-view.test.ts`, and
+  `tests/unit/architecture/{settlement-presentation,session-creation-authority}.test.ts`.
+- Canonical reference: [Run Closure & Not-Performed Settlement](run-closure.md).

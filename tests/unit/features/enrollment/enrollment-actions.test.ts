@@ -32,7 +32,10 @@ import { revalidatePath } from 'next/cache';
 import { joinProgramAction } from '@/features/enrollment/actions/join-program';
 import { leaveProgramAction } from '@/features/enrollment/actions/leave-program';
 import { enrollInProgramUseCase, leaveProgramUseCase } from '@/features/enrollment/services';
-import { SESSION_PAGE_PATH_TEMPLATE } from '@/features/sessions/session-path';
+import {
+  SESSION_PAGE_PATH_TEMPLATE,
+  WORKOUT_PAGE_PATH_TEMPLATE,
+} from '@/features/sessions/session-path';
 
 const SESSION_USER = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -155,16 +158,22 @@ describe('leaveProgramAction', () => {
     });
   });
 
-  it('revalidates the catalog, program detail, and nested session page on success', async () => {
+  it('revalidates the catalog, program detail, and BOTH nested occurrence-route templates on success', async () => {
     vi.mocked(leaveProgramUseCase.execute).mockResolvedValue({ ok: true, data: undefined });
 
     await leaveProgramAction(makeFormData());
 
     expect(revalidatePath).toHaveBeenCalledWith('/programs');
     expect(revalidatePath).toHaveBeenCalledWith(PROGRAM_PATH);
-    // Mirrors the join action: an open session page must immediately reflect
-    // the detached enrollment instead of keeping its stale start/track view.
+    // Leaving cascades the run's recorded-not-performed facts with the
+    // enrollment, so a previously visited workout-detail route must stop
+    // rendering "Recorded as not performed" + Undo (which would only produce
+    // NOT_ENROLLED), exactly as its session route must stop showing a stale
+    // start/track view. Both templates are the canonical shared constants.
+    expect(revalidatePath).toHaveBeenCalledWith(WORKOUT_PAGE_PATH_TEMPLATE, 'page');
     expect(revalidatePath).toHaveBeenCalledWith(SESSION_PAGE_PATH_TEMPLATE, 'page');
+    // Exactly the closed set of FOUR targets — nothing else, nothing broad.
+    expect(revalidatePath).toHaveBeenCalledTimes(4);
   });
 
   it('propagates NOT_ENROLLED as typed action state without revalidating', async () => {

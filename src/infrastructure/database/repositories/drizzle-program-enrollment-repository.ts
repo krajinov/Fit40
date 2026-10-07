@@ -1,12 +1,14 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNotNull } from 'drizzle-orm';
 
 import {
   EnrollmentAlreadyExistsError,
   EnrollmentIdentityMismatchError,
   type ProgramEnrollmentRepository,
+  type ReplaceEnrollmentOutcome,
+  type RestartabilityDecision,
 } from '@/application/ports/program-enrollment-repository';
 import type { ProgramEnrollment } from '@/domain/entities/program-enrollment';
-import type { EnrollmentId, ProgramId, UserId } from '@/domain/types/ids';
+import type { EnrollmentId, ProgramId, ScheduledWorkoutId, UserId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
 import {
@@ -14,7 +16,7 @@ import {
   mapRowToProgramEnrollment,
 } from '../mappers/enrollment-mapper';
 import { isUniqueViolation, pgConstraintName } from '../pg-error';
-import { programEnrollments } from '../schema';
+import { notPerformedWorkouts, programEnrollments, workoutSessions } from '../schema';
 
 /**
  * The (user_id, program_id) unique constraint created by the enrollments
@@ -35,10 +37,13 @@ const USER_PROGRAM_UNIQUE_CONSTRAINT = 'program_enrollments_user_program_unique'
  * returns whether a row was matched, so an enrollment that vanished between
  * the ownership check and the write is handled as expected data.
  *
- * `replaceExpectedWithNew` is the atomic compare-and-replace: a targeted
- * delete of the EXPECTED enrollment and the insert of its replacement run in
- * ONE transaction, so the intermediate state is never observable and any
- * failure rolls the whole replacement back.
+ * `replaceExpectedWithNew` is the atomic compare-and-replace: under ONE lock on
+ * the expected enrollment row (`FOR NO KEY UPDATE`, parent-first like the
+ * settlement writes) it re-reads the run's CURRENT settlement facts, evaluates
+ * the caller-supplied restartability decision over them, and only then performs
+ * the targeted delete + insert. A run that stopped being restartable between
+ * the caller's pre-read and this transaction is refused with zero writes, so a
+ * stale restart request can never replace an open run.
  */
 export class DrizzleProgramEnrollmentRepository implements ProgramEnrollmentRepository {
   constructor(private readonly db: Database) {}
@@ -99,41 +104,85 @@ export class DrizzleProgramEnrollmentRepository implements ProgramEnrollmentRepo
   async replaceExpectedWithNew(
     expectedId: EnrollmentId,
     next: ProgramEnrollment,
-  ): Promise<boolean> {
-    // ONE transaction: the targeted delete and the fresh insert commit
-    // together or not at all. Every failure path throws from INSIDE this
-    // callback, so `db.transaction` performs the rollback (the delete — and
-    // with it the FK's ON DELETE SET NULL of the old sessions — is undone).
+    isStillRestartable: RestartabilityDecision,
+  ): Promise<ReplaceEnrollmentOutcome> {
+    // ONE transaction: the lock, the fact read, the decision and the
+    // replacement commit together or not at all. Every failure path throws from
+    // INSIDE this callback, so `db.transaction` performs the rollback (the
+    // delete — and with it the FK's ON DELETE SET NULL of the old sessions — is
+    // undone).
     return this.db.transaction(async (tx) => {
-      // Compare-and-replace keyed on the EXPECTED id only: a newer enrollment
-      // created by a concurrent replacement has a different id and can never
-      // match this predicate. RETURNING reads the deleted row's identity so
-      // it can be verified in the same transaction, before any insert.
-      const deleted = await tx
-        .delete(programEnrollments)
-        .where(eq(programEnrollments.id, expectedId))
-        .returning({
+      // Step 1 — own the EXPECTED enrollment row FIRST, with the same
+      // serialization strength (FOR NO KEY UPDATE) and parent-first order the
+      // settlement writes use. Everything below is read under this authority,
+      // so a concurrent Undo/START that targets the same run either committed
+      // before this lock or waits behind it — never interleaves.
+      const locked = await tx
+        .select({
           userId: programEnrollments.userId,
           programId: programEnrollments.programId,
-        });
+        })
+        .from(programEnrollments)
+        .where(eq(programEnrollments.id, expectedId))
+        .for('no key update');
 
-      const removed = deleted[0];
-      if (removed === undefined) {
-        // Stale expected id: nothing was deleted, so nothing is inserted and
-        // no other enrollment is touched. The transaction commits as a no-op.
-        return false;
+      const current = locked[0];
+      if (current === undefined) {
+        // Stale expected id: nothing was locked, so nothing is deleted or
+        // inserted and no other enrollment is touched. The transaction commits
+        // as a no-op.
+        return { kind: 'stale' } as const;
       }
 
       // Identity invariant: the replaced row must describe the same (user,
       // program) identity as its replacement. A mismatch is an invariant
-      // failure (never a business outcome) and rolls the delete back.
-      if (removed.userId !== next.userId || removed.programId !== next.programId) {
+      // failure (never a business outcome) and rolls the transaction back.
+      if (current.userId !== next.userId || current.programId !== next.programId) {
         throw new EnrollmentIdentityMismatchError(
           expectedId,
-          { userId: removed.userId, programId: removed.programId },
+          { userId: current.userId, programId: current.programId },
           { userId: next.userId, programId: next.programId },
         );
       }
+
+      // Step 2 — the CURRENT run-scoped execution facts, read under the lock
+      // that protects the replacement. Two bounded, enrollment-scoped
+      // projections: completed occurrence ids (M14) and recorded not-performed
+      // occurrence ids (M17). No session aggregate is hydrated.
+      const completedRows = await tx
+        .select({ scheduledWorkoutId: workoutSessions.scheduledWorkoutId })
+        .from(workoutSessions)
+        .where(
+          and(
+            eq(workoutSessions.enrollmentId, expectedId),
+            isNotNull(workoutSessions.completedAt),
+          ),
+        );
+      const recordedRows = await tx
+        .select({ scheduledWorkoutId: notPerformedWorkouts.scheduledWorkoutId })
+        .from(notPerformedWorkouts)
+        .where(eq(notPerformedWorkouts.enrollmentId, expectedId));
+
+      // Step 3 — the caller-supplied Domain decision, evaluated exactly once
+      // over those locked facts. Infrastructure authors no restartability rule;
+      // it re-evaluates the SAME authority the caller used before the write.
+      const restartable = isStillRestartable({
+        completedIds: completedRows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId),
+        notPerformedIds: recordedRows.map((row) => row.scheduledWorkoutId as ScheduledWorkoutId),
+      });
+      if (!restartable) {
+        // The run stopped being restartable after the caller's pre-read (an
+        // Undo reopened it, or a record was undone): refuse with ZERO writes.
+        // The delete, the insert and the FK's session detachment never run, and
+        // the old enrollment remains exactly as it was.
+        return { kind: 'not-restartable' } as const;
+      }
+
+      // Step 4 — the existing atomic replacement, now authorized against the
+      // authoritative locked state. The delete targets `expectedId` ONLY: a
+      // newer enrollment created by a concurrent replacement has a different id
+      // and can never match this predicate.
+      await tx.delete(programEnrollments).where(eq(programEnrollments.id, expectedId));
 
       try {
         await tx.insert(programEnrollments).values(mapProgramEnrollmentToRow(next));
@@ -151,8 +200,9 @@ export class DrizzleProgramEnrollmentRepository implements ProgramEnrollmentRepo
         throw error;
       }
 
-      // Reached only when both statements succeeded; the transaction commits.
-      return true;
+      // Reached only when the lock, the decision and both statements succeeded;
+      // the transaction commits.
+      return { kind: 'replaced' } as const;
     });
   }
 }

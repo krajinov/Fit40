@@ -50,20 +50,20 @@ describe('InMemoryWorkoutSessionRepository', () => {
     expect(await repo.findByEnrollmentAndScheduledWorkout(enid('missing'), sid('missing'))).toBeNull();
   });
 
-  it('saves and retrieves a session by ID', async () => {
+  it('creates and retrieves a session by ID', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     const s = createTestSession();
-    await repo.save(s);
+    await repo.create(s);
     const found = await repo.findById(s.id);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(s.id);
     expect(found!.scheduledWorkoutId).toBe(s.scheduledWorkoutId);
   });
 
-  it('saves and retrieves a session by enrollment and scheduled workout', async () => {
+  it('creates and retrieves a session by enrollment and scheduled workout', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     const s = createTestSession({ swId: 'sw-query' });
-    await repo.save(s);
+    await repo.create(s);
     const found = await repo.findByEnrollmentAndScheduledWorkout(enid('enr-1'), s.scheduledWorkoutId);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(s.id);
@@ -71,15 +71,15 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
   it('scopes the occurrence lookup to the enrollment: another enrollment is invisible', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
+    await repo.create(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
 
     expect(await repo.findByEnrollmentAndScheduledWorkout(enid('enr-2'), sid('sw-1'))).toBeNull();
   });
 
   it('allows two enrollments to hold sessions for the same occurrence', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
-    await repo.save(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: 'enr-2' }));
+    await repo.create(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
+    await repo.create(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: 'enr-2' }));
 
     expect((await repo.findByEnrollmentAndScheduledWorkout(enid('enr-1'), sid('sw-1')))?.id).toBe('s-1');
     expect((await repo.findByEnrollmentAndScheduledWorkout(enid('enr-2'), sid('sw-1')))?.id).toBe('s-2');
@@ -87,17 +87,17 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
   it('rejects a second session for the same enrollment and occurrence', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
+    await repo.create(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: 'enr-1' }));
 
     await expect(
-      repo.save(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: 'enr-1' })),
+      repo.create(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: 'enr-1' })),
     ).rejects.toBeInstanceOf(SessionAlreadyExistsError);
   });
 
   it('never lets detached (null-enrollment) sessions collide', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: null }));
-    await repo.save(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: null }));
+    await repo.create(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: null }));
+    await repo.create(createTestSession({ id: 's-2', swId: 'sw-1', enrollmentId: null }));
 
     const secondId = createWorkoutSessionId('s-2');
     if (!secondId.ok) throw Error();
@@ -107,7 +107,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('updates an existing session when saving the same ID', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     const s = createTestSession();
-    await repo.save(s);
+    await repo.create(s);
     const loaded = await repo.findById(s.id);
     if (!loaded) throw Error();
     const rs = logSessionSet(loaded, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
@@ -121,7 +121,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('mutating a returned session does not mutate stored state', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     const s = createTestSession();
-    await repo.save(s);
+    await repo.create(s);
     const loaded = await repo.findById(s.id);
     if (!loaded) throw Error();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- testing mutation isolation
@@ -134,7 +134,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('mutating the session object after save does not affect stored state', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     const s = createTestSession();
-    await repo.save(s);
+    await repo.create(s);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- testing mutation isolation
     (s as any).id = 'modified';
     const reloaded = await repo.findById(createTestSession().id);
@@ -143,9 +143,9 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
   it('listCompletedScheduledWorkoutIds returns only that enrollment\'s completed ids', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(completed(createTestSession({ id: 's-c1', swId: 'sw-c1', enrollmentId: 'enr-1' })));
-    await repo.save(createTestSession({ id: 's-ip', swId: 'sw-ip', enrollmentId: 'enr-1' }));
-    await repo.save(completed(createTestSession({ id: 's-c2', swId: 'sw-c2', enrollmentId: 'enr-2' })));
+    await repo.create(completed(createTestSession({ id: 's-c1', swId: 'sw-c1', enrollmentId: 'enr-1' })));
+    await repo.create(createTestSession({ id: 's-ip', swId: 'sw-ip', enrollmentId: 'enr-1' }));
+    await repo.create(completed(createTestSession({ id: 's-c2', swId: 'sw-c2', enrollmentId: 'enr-2' })));
 
     const completedForEnr1 = await repo.listCompletedScheduledWorkoutIds(enid('enr-1'));
     expect(completedForEnr1).toEqual(['sw-c1']);
@@ -157,17 +157,17 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('listCompletedScheduledWorkoutIds orders ids by start time ascending', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Saved out of order on purpose: the projection must sort by startedAt.
-    await repo.save(completed(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' })));
-    await repo.save(completed(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' })));
+    await repo.create(completed(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' })));
+    await repo.create(completed(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' })));
 
     expect(await repo.listCompletedScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
   });
 
   it('listInProgressScheduledWorkoutIds returns only that enrollment\'s in-progress ids', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-ip1', swId: 'sw-ip1', enrollmentId: 'enr-1' }));
-    await repo.save(completed(createTestSession({ id: 's-done', swId: 'sw-done', enrollmentId: 'enr-1' })));
-    await repo.save(createTestSession({ id: 's-ip2', swId: 'sw-ip2', enrollmentId: 'enr-2' }));
+    await repo.create(createTestSession({ id: 's-ip1', swId: 'sw-ip1', enrollmentId: 'enr-1' }));
+    await repo.create(completed(createTestSession({ id: 's-done', swId: 'sw-done', enrollmentId: 'enr-1' })));
+    await repo.create(createTestSession({ id: 's-ip2', swId: 'sw-ip2', enrollmentId: 'enr-2' }));
 
     // In-progress only: the completed session of enr-1 and the other
     // enrollment's live session are both excluded.
@@ -177,7 +177,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
   it('listInProgressScheduledWorkoutIds excludes detached sessions', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(createTestSession({ id: 's-det', swId: 'sw-det', enrollmentId: null }));
+    await repo.create(createTestSession({ id: 's-det', swId: 'sw-det', enrollmentId: null }));
 
     expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
   });
@@ -185,8 +185,8 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('listInProgressScheduledWorkoutIds orders ids by start time ascending', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Saved out of order on purpose: the projection must sort by startedAt.
-    await repo.save(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' }));
-    await repo.save(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' }));
+    await repo.create(createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-02T10:00:00Z' }));
+    await repo.create(createTestSession({ id: 's-early', swId: 'sw-early', startedAt: '2025-01-01T09:00:00Z' }));
 
     expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-early', 'sw-late']);
   });
@@ -194,8 +194,8 @@ describe('InMemoryWorkoutSessionRepository', () => {
   it('listInProgressScheduledWorkoutIds breaks startedAt ties by session id', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Same instant on purpose: the port's total order falls back to session id.
-    await repo.save(createTestSession({ id: 's-b', swId: 'sw-b', startedAt: '2025-01-01T09:00:00Z' }));
-    await repo.save(createTestSession({ id: 's-a', swId: 'sw-a', startedAt: '2025-01-01T09:00:00Z' }));
+    await repo.create(createTestSession({ id: 's-b', swId: 'sw-b', startedAt: '2025-01-01T09:00:00Z' }));
+    await repo.create(createTestSession({ id: 's-a', swId: 'sw-a', startedAt: '2025-01-01T09:00:00Z' }));
 
     expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual(['sw-a', 'sw-b']);
   });
@@ -205,14 +205,14 @@ describe('InMemoryWorkoutSessionRepository', () => {
     expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
 
     // Empty even when the enrollment holds only completed history.
-    await repo.save(completed(createTestSession({ id: 's-only-done', swId: 'sw-only-done' })));
+    await repo.create(completed(createTestSession({ id: 's-only-done', swId: 'sw-only-done' })));
     expect(await repo.listInProgressScheduledWorkoutIds(enid('enr-1'))).toEqual([]);
   });
 
   it('rejects saving over a row whose enrollment changed since the snapshot', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Persisted state AFTER a concurrent leave: the row is detached (null).
-    await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: null })));
+    await repo.create(completed(createTestSession({ id: 's-1', swId: 'sw-1', enrollmentId: null })));
 
     // The caller's snapshot was loaded BEFORE the leave: still enrolled
     // (enr-1). The write must not commit against detached history.
@@ -243,7 +243,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
     const skipped = skipSessionExercise(createTestSession(), { exerciseOrder: 1 });
     expect(skipped.ok).toBe(true);
     if (!skipped.ok) return;
-    await repo.save(skipped.data);
+    await repo.create(skipped.data);
 
     const stored = await repo.findById(skipped.data.id);
     expect(stored?.exerciseLogs[0]?.isSkipped).toBe(true);
@@ -270,7 +270,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     // Only the valid aggregates were saved; the stored state keeps the
     // invariant on every occurrence.
-    await repo.save(logged.data);
+    await repo.create(logged.data);
     await repo.save(skipped.data);
     for (const session of [await repo.findById(logged.data.id), await repo.findById(skipped.data.id)]) {
       for (const log of session?.exerciseLogs ?? []) {
@@ -282,7 +282,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
   describe('listCompletedByEnrollment', () => {
     it('returns hydrated completed sessions attached to the enrollment', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+      await repo.create(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
 
       const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
 
@@ -298,8 +298,8 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('excludes in-progress sessions', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-done', swId: 'sw-done' })));
-      await repo.save(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
+      await repo.create(completed(createTestSession({ id: 's-done', swId: 'sw-done' })));
+      await repo.create(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
 
       const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
 
@@ -308,8 +308,8 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('excludes sessions belonging to another enrollment', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-own', swId: 'sw-own' })));
-      await repo.save(
+      await repo.create(completed(createTestSession({ id: 's-own', swId: 'sw-own' })));
+      await repo.create(
         completed(
           createTestSession({ id: 's-other', swId: 'sw-other', enrollmentId: 'enr-2' }),
         ),
@@ -322,7 +322,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('excludes detached sessions', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 's-detached', swId: 'sw-detached', enrollmentId: null }),
         ),
@@ -333,7 +333,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it("excludes sessions belonging to another user's enrollment", async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({
             id: 's-user-2',
@@ -351,19 +351,19 @@ describe('InMemoryWorkoutSessionRepository', () => {
       const repo = new InMemoryWorkoutSessionRepository();
       // Saved deliberately out of order; ids also contradict completion order
       // so an id-ordered (or insertion-ordered) read would fail this.
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 'session-a-done-last', swId: 'sw-late' }),
           '2025-01-03T11:00:00Z',
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 'session-b-done-first', swId: 'sw-early' }),
           '2025-01-01T11:00:00Z',
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 'session-c-done-middle', swId: 'sw-mid' }),
           '2025-01-02T11:00:00Z',
@@ -384,7 +384,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
       // Both complete at the same instant; the later-starting session carries
       // the alphabetically SMALLER id, so an id tie-break would invert the
       // expected order and fail this test.
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({
             id: 'session-x',
@@ -393,7 +393,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
           }),
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({
             id: 'session-y',
@@ -412,7 +412,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
       const repo = new InMemoryWorkoutSessionRepository();
       // Identical timestamps; saved in reverse id order so an insertion-
       // ordered read would fail this.
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({
             id: 'session-b',
@@ -421,7 +421,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
           }),
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({
             id: 'session-a',
@@ -440,14 +440,14 @@ describe('InMemoryWorkoutSessionRepository', () => {
       const repo = new InMemoryWorkoutSessionRepository();
       expect(await repo.listCompletedByEnrollment(enid('enr-empty'))).toEqual([]);
 
-      await repo.save(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
+      await repo.create(createTestSession({ id: 's-progress', swId: 'sw-progress' }));
       expect(await repo.listCompletedByEnrollment(enid('enr-empty'))).toEqual([]);
       expect(await repo.listCompletedByEnrollment(enid('enr-1'))).toEqual([]);
     });
 
     it('returns defensive clones that cannot mutate stored state', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+      await repo.create(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
 
       const listed = await repo.listCompletedByEnrollment(enid('enr-1'));
       const returned = listed[0];
@@ -469,7 +469,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
   describe('listCompletedOccurrenceActivity', () => {
     it('returns the completed occurrence identity and instant for the enrollment', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+      await repo.create(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
 
       const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
 
@@ -480,17 +480,17 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('excludes in-progress sessions', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(createTestSession({ id: 's-1', swId: 'sw-1' }));
+      await repo.create(createTestSession({ id: 's-1', swId: 'sw-1' }));
 
       expect(await repo.listCompletedOccurrenceActivity(enid('enr-1'))).toEqual([]);
     });
 
     it('excludes another enrollment and detached sessions', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(
+      await repo.create(
         completed(createTestSession({ id: 's-other', swId: 'sw-other', enrollmentId: 'enr-2' })),
       );
-      await repo.save(
+      await repo.create(
         completed(createTestSession({ id: 's-detached', swId: 'sw-detached', enrollmentId: null })),
       );
 
@@ -503,9 +503,9 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('returns each completed occurrence exactly once', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-b', swId: 'sw-b' })));
-      await repo.save(completed(createTestSession({ id: 's-a', swId: 'sw-a' })));
-      await repo.save(completed(createTestSession({ id: 's-c', swId: 'sw-c' })));
+      await repo.create(completed(createTestSession({ id: 's-b', swId: 'sw-b' })));
+      await repo.create(completed(createTestSession({ id: 's-a', swId: 'sw-a' })));
+      await repo.create(completed(createTestSession({ id: 's-c', swId: 'sw-c' })));
 
       const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
       const occurrences = activity.map((item) => item.scheduledWorkoutId);
@@ -518,25 +518,25 @@ describe('InMemoryWorkoutSessionRepository', () => {
     it('orders by completedAt, then startedAt, then session id', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
       // Saved newest-first so the assertion cannot pass on insertion order.
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 's-late', swId: 'sw-late', startedAt: '2025-01-01T07:00:00Z' }),
           '2025-01-01T11:00:00Z',
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 's-tie-c', swId: 'sw-tie-c', startedAt: '2025-01-01T08:30:00Z' }),
           '2025-01-01T10:00:00Z',
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 's-tie-z', swId: 'sw-tie-z', startedAt: '2025-01-01T08:00:00Z' }),
           '2025-01-01T10:00:00Z',
         ),
       );
-      await repo.save(
+      await repo.create(
         completed(
           createTestSession({ id: 's-tie-a', swId: 'sw-tie-a', startedAt: '2025-01-01T08:00:00Z' }),
           '2025-01-01T10:00:00Z',
@@ -561,7 +561,7 @@ describe('InMemoryWorkoutSessionRepository', () => {
 
     it('returns mutation-safe completion instants', async () => {
       const repo = new InMemoryWorkoutSessionRepository();
-      await repo.save(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
+      await repo.create(completed(createTestSession({ id: 's-1', swId: 'sw-1' })));
 
       const activity = await repo.listCompletedOccurrenceActivity(enid('enr-1'));
       // Mutate the returned instant in place: stored state must not react (the

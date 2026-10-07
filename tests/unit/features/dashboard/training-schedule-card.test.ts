@@ -6,6 +6,10 @@
  * Next / Past-due rendering straight from the application DTO, the safe
  * session destination (no session id is invented), component-only date labels
  * (no timezone-sensitive parsing), and no EnrollmentId anywhere in the DOM.
+ *
+ * The M17 block additionally pins the dashboard's settled-today semantics: a
+ * recorded-not-performed occurrence is factual state — never a Start/Resume
+ * CTA — and it never suppresses the genuinely open `next` occurrence.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,7 +65,8 @@ function configuredState(focus: Partial<ScheduleFocusDto>): DashboardScheduleSta
     configured: true,
     today: '2026-09-23',
     items: [],
-    focus: { today: null, next: null, pastDue: null, ...focus },
+    unplacedNotPerformedWorkouts: [],
+    focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0, ...focus },
   };
   return { status: 'loaded', schedule };
 }
@@ -74,7 +79,8 @@ function unconfiguredState(): DashboardScheduleState {
       configured: false,
       today: '2026-09-23',
       items: [],
-      focus: { today: null, next: null, pastDue: null },
+      unplacedNotPerformedWorkouts: [],
+      focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
     },
   };
 }
@@ -251,6 +257,95 @@ describe('TrainingScheduleCard (M15)', () => {
       expect(href.startsWith(`/programs/${PROGRAM_SLUG}/weeks/`)).toBe(true);
       expect(href).not.toContain('enr-');
       expect(href).not.toContain('sw-');
+    }
+  });
+});
+
+describe('TrainingScheduleCard — recorded-not-performed today (M17)', () => {
+  it("states today's recorded occurrence as settled fact — no Start, no Resume, no open-workout CTA", async () => {
+    const container = await renderCard(
+      configuredState({ today: item({ status: 'not-performed' }) }),
+    );
+
+    expect(container.textContent).toContain('TODAY');
+    expect(container.textContent).toContain('Workout A');
+    // The locked stored-state vocabulary, matching every other surface.
+    expect(container.textContent).toContain('Recorded as not performed');
+    // Settled is not actionable: no Start, no Resume. Only "View details"
+    // remains, which is navigation — never an open-workout CTA.
+    const links = [...container.querySelectorAll('a')].map((anchor) => anchor.textContent);
+    expect(links).not.toContain('Start workout');
+    expect(links).not.toContain('Resume workout');
+    expect(links).toContain('View details');
+    // Nothing actionable today and nothing open later: no next block is invented.
+    expect(container.textContent).not.toContain('NEXT WORKOUT');
+  });
+
+  it('still surfaces the genuine open next occurrence when today is recorded', async () => {
+    const container = await renderCard(
+      configuredState({
+        today: item({ status: 'not-performed' }),
+        next: item({
+          scheduledWorkoutId: 'sw-2',
+          workoutOrder: 2,
+          workoutName: 'Workout B',
+          plannedDate: '2026-09-25',
+        }),
+      }),
+    );
+
+    // Today stays the factual calendar item…
+    expect(container.textContent).toContain('TODAY');
+    expect(container.textContent).toContain('Recorded as not performed');
+    // …and the genuinely open later occurrence is surfaced as the next
+    // actionable workout, with its planned date.
+    expect(container.textContent).toContain('NEXT WORKOUT');
+    expect(container.textContent).toContain('Workout B');
+    expect(container.textContent).toContain('Planned for Sep 25');
+    const links = [...container.querySelectorAll('a')].map((anchor) => anchor.textContent);
+    expect(links).not.toContain('Start workout');
+    expect(links).not.toContain('Resume workout');
+    expect(links).toContain('View details');
+  });
+
+  it('never lets a settled today item suppress the open next workout', async () => {
+    const container = await renderCard(
+      configuredState({
+        today: item({ status: 'not-performed' }),
+        next: item({
+          scheduledWorkoutId: 'sw-2',
+          workoutOrder: 2,
+          workoutName: 'Workout B',
+        }),
+      }),
+    );
+
+    // Both truths render together: the recorded today occurrence is factual
+    // state, the open next occurrence is still the next actionable workout.
+    expect(container.textContent).toContain('Recorded as not performed');
+    expect(container.textContent).toContain('NEXT WORKOUT');
+    expect(container.textContent).toContain('Workout B');
+  });
+
+  it('never renders Start workout for a recorded occurrence, with or without a next workout', async () => {
+    for (const focus of [
+      { next: null },
+      {
+        next: item({
+          scheduledWorkoutId: 'sw-2',
+          workoutOrder: 2,
+          workoutName: 'Workout B',
+        }),
+      },
+    ]) {
+      const container = await renderCard(
+        configuredState({ today: item({ status: 'not-performed' }), ...focus }),
+      );
+
+      const links = [...container.querySelectorAll('a')].map((anchor) => anchor.textContent);
+      expect(links).not.toContain('Start workout');
+      expect(links).not.toContain('Resume workout');
+      expect(container.textContent).toContain('Recorded as not performed');
     }
   });
 });

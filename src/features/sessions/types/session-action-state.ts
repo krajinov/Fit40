@@ -22,6 +22,13 @@ export type SessionActionErrorCode =
   | 'INVALID_WORKOUT_SESSION'
   | 'NOT_ENROLLED'
   | 'ENROLLMENT_CHANGED'
+  /**
+   * M17 Slice 6: the occurrence already carries a not-performed settlement, so
+   * starting a session for it was refused. The presentation surfaces this as
+   * generic failure state until the calendar slice owns its recovery copy (no
+   * new copy is introduced here).
+   */
+  | 'OCCURRENCE_RECORDED_NOT_PERFORMED'
   | 'FORBIDDEN'
   | 'INVALID_INPUT'
   | 'EXERCISE_HAS_LOGGED_SETS'

@@ -43,10 +43,12 @@ export type {
   RecentTrainingState,
 } from '@/features/dashboard/recent-training-view';
 import {
+  buildNextWorkoutView,
   nextWorkoutPreviewState,
   toNextWorkoutView,
   type NextWorkoutPreviewState,
 } from '@/features/sessions/next-workout-view';
+import { resolveRunNextOccurrence } from '@/features/enrollment/next-occurrence';
 
 export type WeekStatus = 'completed' | 'in-progress' | 'upcoming';
 
@@ -75,6 +77,17 @@ export interface DashboardProgramView {
    * `nextWorkoutPreview` as before.
    */
   readonly schedule: DashboardScheduleState;
+  /**
+   * The run's AUTHORITATIVE current week, resolved ONCE by the view assembly
+   * from the same open occurrence Up next uses — never re-derived by a
+   * component from the completion-only `enrollment.nextWorkout`, which would
+   * disagree with Up next / the weekly summaries whenever a recorded
+   * occurrence precedes the first open one.
+   *
+   * `null` for a concluded-but-incomplete run (no open week exists), so the
+   * card can never paint an old RECORDED week as current.
+   */
+  readonly currentWeek: WeekSummary | null;
 }
 
 /**
@@ -101,16 +114,32 @@ export interface DashboardView {
    * `currentProgram.program.weeks` order.
    */
   readonly weekSummaries: ReadonlyArray<WeekSummary>;
+  /**
+   * The dashboard's CURRENT week (M17 final review): the authored week holding
+   * the run's authoritative first OPEN occurrence — the SAME occurrence the
+   * "Up next" card uses — so the "Program week" card can never disagree with
+   * Up next. A concluded-but-incomplete run has NO current week (`null`, the
+   * card is hidden) rather than falling back to the completion-only M14
+   * `nextWorkout`; a complete run keeps its last-week presentation; a failed
+   * closure read preserves the M14 fallback.
+   */
+  readonly currentWeek: WeekSummary | null;
 }
 
 
 /**
  * Derives per-week summaries for the enrolled program view.
+ *
+ * `currentWeekNumber` is the dashboard's AUTHORITATIVE current/open week — the
+ * week of the run's first open occurrence, resolved ONCE by `buildDashboardView`
+ * and shared with Up next. It is null when the run has no open occurrence
+ * (complete or concluded), which is why the completed-run statuses stay keyed
+ * off that single input rather than a second algorithm.
  */
 function buildWeekSummaries(
   program: ProgramDetailDto,
   completedIds: ReadonlySet<string>,
-  nextWeekNumber: number | null,
+  currentWeekNumber: number | null,
 ): WeekSummary[] {
   return program.weeks.map((week) => {
     const completedCount = week.scheduledWorkouts.filter((scheduled) =>
@@ -118,11 +147,11 @@ function buildWeekSummaries(
     ).length;
 
     let status: WeekStatus;
-    if (nextWeekNumber === null) {
+    if (currentWeekNumber === null) {
       status = 'completed';
-    } else if (week.weekNumber < nextWeekNumber) {
+    } else if (week.weekNumber < currentWeekNumber) {
       status = 'completed';
-    } else if (week.weekNumber === nextWeekNumber) {
+    } else if (week.weekNumber === currentWeekNumber) {
       status = 'in-progress';
     } else {
       status = 'upcoming';
@@ -135,6 +164,30 @@ function buildWeekSummaries(
       status,
     };
   });
+}
+
+/**
+ * Selects the dashboard's current week from the summaries produced by
+ * `buildWeekSummaries` and the resolved next-workout preview state.
+ *
+ * A concluded-but-incomplete run is the ONE state with no current week: every
+ * authored occurrence is settled and none is open, so returning null hides the
+ * "Program week" card instead of painting an old RECORDED week as current.
+ * Every other state keeps the existing selection — the in-progress week, else
+ * the last authored week (a completed run) — preserved verbatim.
+ */
+function selectDashboardCurrentWeek(
+  weekSummaries: ReadonlyArray<WeekSummary>,
+  nextWorkoutPreview: NextWorkoutPreviewState,
+): WeekSummary | null {
+  if (nextWorkoutPreview.status === 'concluded') {
+    return null;
+  }
+  return (
+    weekSummaries.find((week) => week.status === 'in-progress') ??
+    weekSummaries[weekSummaries.length - 1] ??
+    null
+  );
 }
 
 /** Bounded recency window of the Recent Training card (rows shown). */
@@ -220,22 +273,65 @@ export async function buildDashboardView(
   const current = result.ok && result.data !== null ? result.data : null;
 
   let weekSummaries: ReadonlyArray<WeekSummary> = [];
+  let currentWeek: WeekSummary | null = null;
   let nextWorkoutPreview: NextWorkoutPreviewState = { status: 'complete' };
   if (current !== null) {
     const enrollment = current.enrollment;
     const completedIds = enrollment.completedScheduledWorkoutIds;
-    const nextWeekNumber =
-      enrollment.nextWorkout === null ? null : enrollment.nextWorkout.weekNumber;
 
+    // M17 final review: ONE authoritative resolution feeds BOTH Up next and the
+    // weekly summaries. Up next follows the run's FIRST OPEN authored occurrence
+    // — the closure DTO's `openInProgramOrder[0]` when the read supplied it —
+    // never the completion-only `nextWorkout`, which can point at an occurrence
+    // already SETTLED as recorded not performed. The selection is the shared
+    // pure helper (`resolveRunNextOccurrence`), never recomputed here; a null
+    // closure DTO (a failed additive read) degrades to the M14 next workout
+    // exactly as before, inventing no settlement truth.
+    //
+    // The preview is resolved for that occurrence: when it is the same
+    // occurrence the use case already resolved, the DTO is reused (no second
+    // resolve); otherwise the preview is resolved for the authoritative
+    // occurrence (one bounded resolve call, mirroring the program page).
+    const runClosure = current.runClosure;
+    const nextOccurrence = resolveRunNextOccurrence(enrollment.nextWorkout, runClosure);
+
+    // The weekly summaries share that SAME occurrence's week as the current
+    // week, so the "Program week" card can never disagree with Up next. It is
+    // never built from the completion-only `enrollment.nextWorkout` in parallel.
     weekSummaries = buildWeekSummaries(
       current.program,
       new Set(completedIds),
-      nextWeekNumber,
+      nextOccurrence === null ? null : nextOccurrence.weekNumber,
     );
-    nextWorkoutPreview = nextWorkoutPreviewState(
-      enrollment.nextWorkout,
-      current.nextWorkout === null ? null : toNextWorkoutView(current.nextWorkout),
-    );
+
+    const reusedResolvedPreview =
+      nextOccurrence !== null &&
+      enrollment.nextWorkout !== null &&
+      nextOccurrence.weekNumber === enrollment.nextWorkout.weekNumber &&
+      nextOccurrence.workoutOrder === enrollment.nextWorkout.workoutOrder;
+    const previewWorkout =
+      nextOccurrence === null
+        ? null
+        : reusedResolvedPreview
+          ? current.nextWorkout === null
+            ? null
+            : toNextWorkoutView(current.nextWorkout)
+          : await buildNextWorkoutView({
+              userId,
+              programSlug: current.program.slug,
+              weekNumber: nextOccurrence.weekNumber,
+              workoutOrder: nextOccurrence.workoutOrder,
+              // The preview is fenced to the SAME enrollment generation as the
+              // schedule and closure reads - never the replacement run.
+              expectedEnrollmentId: current.enrollment.enrollmentId,
+            });
+
+    nextWorkoutPreview = nextWorkoutPreviewState(nextOccurrence, previewWorkout, runClosure);
+    // The current week is selected ONCE here from that same authority: the
+    // in-progress week, else the last authored week for a completed run, and
+    // null for a concluded-but-incomplete run (no open week) so no old recorded
+    // week is ever shown as current.
+    currentWeek = selectDashboardCurrentWeek(weekSummaries, nextWorkoutPreview);
   }
 
   return {
@@ -248,9 +344,13 @@ export async function buildDashboardView(
             enrollment: current.enrollment,
             nextWorkoutPreview,
             schedule: current.schedule,
+            // The SAME authoritative week the assembly already resolved for Up
+            // next and the weekly summaries — passed through, never recomputed.
+            currentWeek,
           },
     recentTraining,
     weeklyInsights,
     weekSummaries,
+    currentWeek,
   };
 }

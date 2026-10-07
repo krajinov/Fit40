@@ -62,6 +62,9 @@ export function sessionActionErrorLabel(code: SessionActionErrorCode, fallback: 
     case 'INVALID_WORKOUT_SESSION':
     case 'ENROLLMENT_CHANGED':
     case 'FORBIDDEN':
+    // M17 Slice 6: the code exists so the start path can report a settled
+    // occurrence; its dedicated recovery copy belongs to the calendar slice.
+    case 'OCCURRENCE_RECORDED_NOT_PERFORMED':
       return fallback;
   }
 }

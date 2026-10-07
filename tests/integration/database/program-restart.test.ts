@@ -37,7 +37,6 @@ import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
-import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
 import { exercises, programEnrollments, workoutSessions } from '@/infrastructure/database/schema';
 
@@ -45,14 +44,28 @@ import { seedUser } from './personal-record-fixtures';
 import {
   closeDatabase,
   db,
+  notPerformedOccurrenceRepository,
   personalRecordRepository,
   programEnrollmentRepository,
   programRepository,
   resetAndSeed,
+  runClosureFactsRepository,
   trainingHistoryRepository,
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
+import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
+import type { RunClosureFactsRepository } from '@/application/ports/run-closure-facts-repository';
+import { countFacts, insertFact } from './not-performed-fixtures';
+import {
+  createGate,
+  createRaceHarness,
+  holdEnrollmentLock,
+  PENDING,
+  replaceEnrollmentRaw,
+  settleWithin,
+} from './not-performed-race-fixtures';
+import { insertSession } from './session-fixtures';
 
 const RUNNER = 'restart-runner';
 const OTHER = 'restart-other';
@@ -198,7 +211,7 @@ async function seedCompletedRun(): Promise<CompletedRun> {
     const day = String(index + 1).padStart(2, '0');
     const exercise = exerciseIds[index % exerciseIds.length];
     if (exercise === undefined) throw new Error('unreachable: the catalog is non-empty');
-    await workoutSessionRepository.save(
+    await insertSession(
       buildSession({
         id,
         owner: RUNNER,
@@ -216,12 +229,83 @@ async function seedCompletedRun(): Promise<CompletedRun> {
   return { program, enrollmentId: FIRST_ENROLLMENT, sessionIds, exerciseIds };
 }
 
+/**
+ * A MIXED run: the first `completed` authored occurrences get real completed
+ * sessions, the next `recorded` get explicit not-performed records, and
+ * whatever remains stays open. `completed + recorded === authored` is therefore
+ * a CONCLUDED run that is not complete — the M17 Slice 10 restart case.
+ */
+async function seedMixedRun(options: {
+  readonly completed: number;
+  readonly recorded: number;
+}): Promise<CompletedRun> {
+  await seedUser(RUNNER);
+  await seedUser(OTHER);
+
+  const program = await programRepository.findBySlug(PROGRAM_SLUG);
+  if (program === null) throw new Error('seed program missing');
+
+  const catalog = await db
+    .select({ id: exercises.id })
+    .from(exercises)
+    .orderBy(asc(exercises.id))
+    .limit(3);
+  const exerciseIds = catalog.map((row) => exerciseId(row.id));
+  if (exerciseIds.length === 0) throw new Error('seed catalog is empty');
+
+  await enroll(FIRST_ENROLLMENT, RUNNER, program.id);
+
+  const occurrences = listOccurrences(program);
+  const sessionIds: string[] = [];
+
+  for (let index = 0; index < options.completed; index += 1) {
+    const occurrence = requireOccurrence(occurrences, index);
+    const exercise = exerciseIds[index % exerciseIds.length];
+    if (exercise === undefined) throw new Error('unreachable: the catalog is non-empty');
+    const day = String(index + 1).padStart(2, '0');
+    const id = `mix-${index + 1}`;
+    await insertSession(
+      buildSession({
+        id,
+        owner: RUNNER,
+        enrollmentId: FIRST_ENROLLMENT,
+        occurrence,
+        startedAt: `2026-03-${day}T09:00:00Z`,
+        completedAt: `2026-03-${day}T10:00:00Z`,
+        exerciseId: exercise,
+        weightKg: 30 + index,
+      }),
+    );
+    sessionIds.push(id);
+  }
+
+  for (
+    let index = options.completed;
+    index < options.completed + options.recorded;
+    index += 1
+  ) {
+    const occurrence = requireOccurrence(occurrences, index);
+    await insertFact({
+      enrollmentId: FIRST_ENROLLMENT,
+      scheduledWorkoutId: occurrence.id,
+      recordedAt: `2026-03-25T12:00:${String(index).padStart(2, '0')}Z`,
+    });
+  }
+
+  return { program, enrollmentId: FIRST_ENROLLMENT, sessionIds, exerciseIds };
+}
+
 function restartUseCase(
-  enrollmentRepo = programEnrollmentRepository,
-  sessionRepo = workoutSessionRepository,
   programRepo = programRepository,
+  enrollmentRepo = programEnrollmentRepository,
+  closureFactsRepo = runClosureFactsRepository,
 ) {
-  return new RestartProgramUseCase(programRepo, enrollmentRepo, sessionRepo, new NodeIdGenerator());
+  return new RestartProgramUseCase(
+    programRepo,
+    enrollmentRepo,
+    closureFactsRepo,
+    new NodeIdGenerator(),
+  );
 }
 
 /** The runner's enrollment rows for the program, read straight from the table. */
@@ -360,9 +444,9 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
     try {
       const concurrentDb = drizzle(concurrentClient, { schema });
       const useCase = restartUseCase(
-        new DrizzleProgramEnrollmentRepository(concurrentDb),
-        new DrizzleWorkoutSessionRepository(concurrentDb),
         new DrizzleProgramRepository(concurrentDb),
+        new DrizzleProgramEnrollmentRepository(concurrentDb),
+        new DrizzleRunClosureFactsRepository(concurrentDb),
       );
 
       const outcomes = await Promise.all([
@@ -448,6 +532,231 @@ describe('RestartProgramUseCase — PostgreSQL end-to-end', () => {
 
     // The other user never gained an enrollment.
     expect(await enrollmentRowsFor(run.program.id, OTHER)).toEqual([]);
+  });
+
+  it('F. restarts a CONCLUDED-but-incomplete run: facts cascade, sessions survive detached', async () => {
+    // The shared fixture seeds a fully completed run; this scenario needs a
+    // mixed one, so the database is reset and re-seeded here.
+    await resetAndSeed();
+    const mixed = await seedMixedRun({ completed: 9, recorded: 3 });
+
+    // Settled everywhere (9 sessions + 3 records over 12 authored occurrences)
+    // but NOT complete — the case M14 could never restart.
+    const completedBefore = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentIdValue(mixed.enrollmentId),
+    );
+    expect(completedBefore).toHaveLength(9);
+    expect(await countFacts(mixed.enrollmentId)).toBe(3);
+
+    const result = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(true);
+
+    // Exactly one fresh enrollment for the pair.
+    const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(rows).toHaveLength(1);
+    const fresh = rows[0];
+    if (fresh === undefined) throw new Error('expected exactly one enrollment row');
+    expect(fresh.id).not.toBe(mixed.enrollmentId);
+
+    // The old run's not-performed facts cascade away with it; the fresh run
+    // inherits none of them.
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
+    expect(await countFacts(fresh.id)).toBe(0);
+    expect(
+      await notPerformedOccurrenceRepository.listByEnrollment(enrollmentIdValue(fresh.id)),
+    ).toEqual([]);
+
+    // The completed sessions survive, detached — exactly M14's behavior.
+    const sessions = await sessionRowsFor(mixed.sessionIds);
+    expect(sessions.map((session) => session.id)).toEqual([...mixed.sessionIds].sort());
+    expect(sessions.every((session) => session.enrollmentId === null)).toBe(true);
+    expect(sessions.some((session) => session.enrollmentId === fresh.id)).toBe(false);
+    expect(await historyLines(userIdValue(RUNNER))).toHaveLength(mixed.sessionIds.length);
+
+    // The fresh run is OPEN: no completions, so nothing was inherited.
+    const freshCompleted = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+      enrollmentIdValue(fresh.id),
+    );
+    expect(freshCompleted).toEqual([]);
+  });
+
+  it('G. refuses an OPEN run with PROGRAM_NOT_COMPLETE and changes nothing', async () => {
+    await resetAndSeed();
+    // 11 of 12 completed, no records: one occurrence is still open, so the run
+    // is neither complete nor concluded.
+    const mixed = await seedMixedRun({ completed: 11, recorded: 0 });
+
+    const rowsBefore = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
+
+    const result = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+
+    // Enrollment, sessions and facts are untouched by the refusal.
+    const rowsAfter = await enrollmentRowsFor(mixed.program.id, RUNNER);
+    expect(rowsAfter).toHaveLength(1);
+    expect(rowsAfter[0]?.id).toBe(rowsBefore[0]?.id);
+    expect(rowsAfter[0]?.enrolledAt.toISOString()).toBe(rowsBefore[0]?.enrolledAt.toISOString());
+
+    const sessions = await sessionRowsFor(mixed.sessionIds);
+    expect(sessions.every((session) => session.enrollmentId === mixed.enrollmentId)).toBe(true);
+    expect(
+      await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+        enrollmentIdValue(mixed.enrollmentId),
+      ),
+    ).toHaveLength(11);
+    expect(await countFacts(mixed.enrollmentId)).toBe(0);
+  });
+
+  it('H. refuses a restart reopened by a concurrent Undo before the replacement takes authority', async () => {
+    await resetAndSeed();
+    // 11 completed + 1 recorded = all 12 authored: CONCLUDED but incomplete, so
+    // restartable at the pre-read. The single record is the fact Undo removes.
+    const mixed = await seedMixedRun({ completed: 11, recorded: 1 });
+    const recordedOccurrence = requireOccurrence(listOccurrences(mixed.program), 11);
+
+    const harness = createRaceHarness();
+    try {
+      // Deterministic gate: the restart's restartability pre-read CAPTURES the
+      // settled facts, then HOLDS until the Undo has committed — so the Undo is
+      // guaranteed to take authority after the pre-read and before the
+      // replacement's lock. No sleep is used.
+      const preReadCaptured = createGate();
+      const releasePreRead = createGate();
+      // The gated preflight read: the SAME one-snapshot closure-facts
+      // projection the production preflight uses, held mid-read by a gate.
+      const closureFacts = new DrizzleRunClosureFactsRepository(harness.db);
+      const gatedClosureFacts: RunClosureFactsRepository = {
+        async listClosureFactsByEnrollment(enrollmentId) {
+          const facts = await closureFacts.listClosureFactsByEnrollment(enrollmentId);
+          preReadCaptured.open();
+          await releasePreRead.opened;
+          return facts;
+        },
+        async findFencedClosureFactsByEnrollment(expected, userId, programId) {
+          const projection = await closureFacts.findFencedClosureFactsByEnrollment(
+            expected,
+            userId,
+            programId,
+          );
+          preReadCaptured.open();
+          await releasePreRead.opened;
+          return projection;
+        },
+      };
+
+      const useCase = new RestartProgramUseCase(
+        harness.programs,
+        harness.enrollments,
+        gatedClosureFacts,
+        new NodeIdGenerator(),
+      );
+
+      const restart = useCase.execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+
+      // Step 1: the restart has read the settled (restartable) facts.
+      await preReadCaptured.opened;
+
+      // Step 2-3: Undo acquires the enrollment lock, deletes the final fact and
+      // commits — reopening the run BEFORE the replacement owns the lock.
+      const undo = await harness.writes.undoNotPerformed({
+        enrollmentId: enrollmentIdValue(mixed.enrollmentId),
+        scheduledWorkoutId: scheduledWorkoutId(recordedOccurrence.id),
+      });
+      expect(undo.kind).toBe('undo');
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+
+      // Step 4-6: the restart continues into its replacement, which acquires the
+      // same enrollment and observes the run is now OPEN.
+      releasePreRead.open();
+      const result = await restart;
+
+      // Step 7: refused with the existing typed outcome.
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('PROGRAM_NOT_COMPLETE');
+
+      // Step 8-10: no write happened — the OLD enrollment remains, no fresh one
+      // exists, and the completed sessions / facts are otherwise correct.
+      const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(mixed.enrollmentId);
+      expect(rows[0]?.enrolledAt.toISOString()).toBe('2026-01-20T00:00:00.000Z');
+      expect(
+        await workoutSessionRepository.listCompletedScheduledWorkoutIds(
+          enrollmentIdValue(mixed.enrollmentId),
+        ),
+      ).toHaveLength(11);
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+    } finally {
+      await harness.end();
+    }
+  });
+
+  it('I. lets the replacement win: a queued Undo cannot mutate the fresh run', async () => {
+    await resetAndSeed();
+    const mixed = await seedMixedRun({ completed: 11, recorded: 1 });
+    const recordedOccurrence = requireOccurrence(listOccurrences(mixed.program), 11);
+    const expected = enrollmentIdValue(mixed.enrollmentId);
+    const freshId = 'enr-race-fresh';
+
+    const harness = createRaceHarness();
+    try {
+      // The replacement OWNS the enrollment lock first: the holder takes it and
+      // runs the documented raw M14 replacement statement shape (delete the
+      // expected run, insert the fresh one) under it.
+      const holder = await holdEnrollmentLock({
+        db: harness.db,
+        enrollmentId: expected,
+        work: (tx) =>
+          replaceEnrollmentRaw(tx, {
+            expectedId: expected,
+            nextId: freshId,
+            owner: RUNNER,
+            programId: mixed.program.id,
+          }),
+      });
+
+      // The REAL Undo authority queues behind the held lock...
+      const undoPromise = harness.writes.undoNotPerformed({
+        enrollmentId: expected,
+        scheduledWorkoutId: scheduledWorkoutId(recordedOccurrence.id),
+      });
+      // ...and is provably blocked (not merely fast).
+      expect(await settleWithin(undoPromise, 150)).toBe(PENDING);
+
+      // Release: the replacement commits atomically, then the queued Undo runs.
+      await holder.release();
+      const undo = await undoPromise;
+
+      // The queued Undo finds the old run VANISHED and writes nothing — it can
+      // never mutate the fresh run, whose settlement set is empty by
+      // construction.
+      expect(undo.kind).toBe('run-vanished');
+
+      // Old gone, fresh present, facts cascaded away with the old run.
+      const rows = await enrollmentRowsFor(mixed.program.id, RUNNER);
+      expect(rows.map((row) => row.id)).toEqual([freshId]);
+      expect(await countFacts(mixed.enrollmentId)).toBe(0);
+      expect(await countFacts(freshId)).toBe(0);
+
+      // The completed sessions survive detached, exactly as M14 does.
+      const sessions = await sessionRowsFor(mixed.sessionIds);
+      expect(sessions.every((session) => session.enrollmentId === null)).toBe(true);
+
+      // The existing stale outcome remains correct: a restart request that still
+      // expected the vanished run observes the FRESH (open) run instead.
+      const stale = await restartUseCase().execute({ userId: RUNNER, programSlug: PROGRAM_SLUG });
+      expect(stale.ok).toBe(false);
+      if (stale.ok) return;
+      expect(stale.error.code).toBe('PROGRAM_NOT_COMPLETE');
+    } finally {
+      await harness.end();
+    }
   });
 });
 

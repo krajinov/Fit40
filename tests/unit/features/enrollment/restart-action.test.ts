@@ -40,7 +40,10 @@ import { revalidatePath } from 'next/cache';
 import type { RestartProgramError } from '@/application/use-cases/restart-program';
 import { restartProgramAction } from '@/features/enrollment/actions/restart-program';
 import { restartProgramUseCase } from '@/features/enrollment/services';
-import { SESSION_PAGE_PATH_TEMPLATE } from '@/features/sessions/session-path';
+import {
+  SESSION_PAGE_PATH_TEMPLATE,
+  WORKOUT_PAGE_PATH_TEMPLATE,
+} from '@/features/sessions/session-path';
 
 const SESSION_USER = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -59,14 +62,9 @@ function makeFormData(): FormData {
 }
 
 const ERROR_CASES: ReadonlyArray<[string, RestartProgramError]> = [
-  [
-    'PROGRAM_NOT_COMPLETE',
-    {
-      code: 'PROGRAM_NOT_COMPLETE',
-      programSlug: SLUG,
-      message: 'This program run is not complete yet.',
-    },
-  ],
+  // PROGRAM_NOT_COMPLETE is deliberately NOT in this table: since M17 Slice 11
+  // its presentation copy is pinned separately (the Application code is
+  // unchanged, the wording is the Slice 11 one).
   [
     'ENROLLMENT_CHANGED',
     {
@@ -166,6 +164,32 @@ describe('restartProgramAction', () => {
     },
   );
 
+  it("27. maps PROGRAM_NOT_COMPLETE to the Slice 11 copy for a run that hasn't finished", async () => {
+    vi.mocked(restartProgramUseCase.execute).mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'PROGRAM_NOT_COMPLETE',
+        programSlug: SLUG,
+        // The Application message (M14 wording) is deliberately NOT echoed:
+        // since Slice 10 this code can only mean the run is still OPEN, so the
+        // action states that truth while keeping the code unchanged.
+        message: 'This program run is not complete yet, so it cannot be restarted.',
+      },
+    });
+
+    const state = await restartProgramAction(makeFormData());
+
+    expect(state).toEqual({
+      ok: false,
+      error: { code: 'PROGRAM_NOT_COMPLETE', message: "This run hasn't finished yet." },
+    });
+    expect(state.ok).toBe(false);
+    if (state.ok) return;
+    expect(state.error.message).not.toContain('not complete yet');
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
   it('lets unexpected errors propagate instead of converting them to results', async () => {
     vi.mocked(restartProgramUseCase.execute).mockRejectedValue(new Error('connection lost'));
 
@@ -173,7 +197,7 @@ describe('restartProgramAction', () => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it('revalidates the catalog, program detail, completion page, dashboard, and nested session page on success', async () => {
+  it('revalidates the catalog, program detail, completion page, dashboard, and BOTH nested occurrence-route templates on success', async () => {
     vi.mocked(restartProgramUseCase.execute).mockResolvedValue({ ok: true, data: undefined });
 
     await expect(restartProgramAction(makeFormData())).rejects.toThrow('NEXT_REDIRECT');
@@ -182,10 +206,15 @@ describe('restartProgramAction', () => {
     expect(revalidatePath).toHaveBeenCalledWith(PROGRAM_PATH);
     expect(revalidatePath).toHaveBeenCalledWith(COMPLETED_PATH);
     expect(revalidatePath).toHaveBeenCalledWith('/dashboard');
-    // The form carries only the program slug, so the nested session route is
-    // revalidated by its dynamic template: any session page of this program
-    // left open before the restart must stop showing its stale enrollment.
+    // The form carries only the program slug, so the nested occurrence routes
+    // are revalidated by their dynamic templates: any workout-detail or
+    // session page of this program left open before the restart must stop
+    // showing the old run's stale "Recorded as not performed" band + Undo (the
+    // fresh run's Start is now valid), and its stale enrollment prompts.
+    expect(revalidatePath).toHaveBeenCalledWith(WORKOUT_PAGE_PATH_TEMPLATE, 'page');
     expect(revalidatePath).toHaveBeenCalledWith(SESSION_PAGE_PATH_TEMPLATE, 'page');
+    // Exactly the closed set of SIX targets — nothing else, nothing broad.
+    expect(revalidatePath).toHaveBeenCalledTimes(6);
   });
 
   it('redirects to the program detail on success, never back to the completed page', async () => {

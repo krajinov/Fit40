@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnrollmentAlreadyExistsError, EnrollmentIdentityMismatchError } from '@/application/ports/program-enrollment-repository';
+import {
+  EnrollmentAlreadyExistsError,
+  EnrollmentIdentityMismatchError,
+  type RestartabilityDecision,
+} from '@/application/ports/program-enrollment-repository';
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
-import { createEnrollmentId, createProgramId, createUserId } from '@/domain/types/ids';
+import { createEnrollmentId, createProgramId, createScheduledWorkoutId, createUserId } from '@/domain/types/ids';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
+
+/** The CAS-mechanics tests inject a passing gate; the gate itself has its own test. */
+const alwaysRestartable: RestartabilityDecision = () => true;
 
 function enrollment(id: string, userId: string, programId: string, enrolledAt = '2026-01-01T10:00:00Z') {
   const r = createProgramEnrollment({ id, userId, programId, enrolledAt: new Date(enrolledAt) });
@@ -14,6 +21,7 @@ function enrollment(id: string, userId: string, programId: string, enrolledAt = 
 function uid(v: string) { const r = createUserId(v); if (!r.ok) throw Error(); return r.data; }
 function pid(v: string) { const r = createProgramId(v); if (!r.ok) throw Error(); return r.data; }
 function enid(v: string) { const r = createEnrollmentId(v); if (!r.ok) throw Error(); return r.data; }
+function sid(v: string) { const r = createScheduledWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
 
 describe('InMemoryProgramEnrollmentRepository', () => {
   it('returns null when the user is not enrolled in the program', async () => {
@@ -78,16 +86,17 @@ describe('InMemoryProgramEnrollmentRepository', () => {
   });
 
   describe('replaceExpectedWithNew', () => {
-    it('replaces the expected enrollment and reports true', async () => {
+    it('replaces the expected enrollment and reports replaced', async () => {
       const repo = new InMemoryProgramEnrollmentRepository();
       await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
 
       const replaced = await repo.replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-2', 'user-1', 'program-1', '2026-04-01T10:00:00Z'),
+        alwaysRestartable,
       );
 
-      expect(replaced).toBe(true);
+      expect(replaced.kind).toBe('replaced');
       // The old identity is gone and cannot be deleted again...
       expect(await repo.delete(enid('enr-1'))).toBe(false);
       // ...the fresh identity is the one live enrollment for the pair...
@@ -97,7 +106,7 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       expect((await repo.listByUserId(uid('user-1'))).map((e) => e.id)).toEqual(['enr-2']);
     });
 
-    it('returns false for a stale expected id and leaves the store untouched', async () => {
+    it('reports stale for a stale expected id and leaves the store untouched', async () => {
       const repo = new InMemoryProgramEnrollmentRepository();
       // A concurrent replacement already swapped enr-1 for enr-2.
       await repo.create(enrollment('enr-2', 'user-1', 'program-1', '2026-04-01T10:00:00Z'));
@@ -105,9 +114,10 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       const replaced = await repo.replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-3', 'user-1', 'program-1', '2026-05-01T10:00:00Z'),
+        alwaysRestartable,
       );
 
-      expect(replaced).toBe(false);
+      expect(replaced.kind).toBe('stale');
       // The newer enrollment was neither deleted nor replaced.
       const found = await repo.findByUserAndProgram(uid('user-1'), pid('program-1'));
       expect(found?.id).toBe('enr-2');
@@ -116,17 +126,53 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       expect((await repo.listByUserId(uid('user-1'))).map((e) => e.id)).toEqual(['enr-2']);
     });
 
-    it('returns false when the expected id is unknown', async () => {
+    it('reports stale when the expected id is unknown', async () => {
       const repo = new InMemoryProgramEnrollmentRepository();
       await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
 
       const replaced = await repo.replaceExpectedWithNew(
         enid('enr-missing'),
         enrollment('enr-2', 'user-1', 'program-1'),
+        alwaysRestartable,
       );
 
-      expect(replaced).toBe(false);
+      expect(replaced.kind).toBe('stale');
       expect((await repo.listByUserId(uid('user-1'))).map((e) => e.id)).toEqual(['enr-1']);
+    });
+
+    it('refuses the replacement when the seeded facts are no longer restartable (M17 gate)', async () => {
+      const repo = new InMemoryProgramEnrollmentRepository();
+      await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
+      // The run's CURRENT facts leave one authored occurrence OPEN: the gate
+      // decision over them refuses. Zero writes, no new identity.
+      const openFacts = { completedIds: [sid('sched-a')], notPerformedIds: [] };
+      repo.setRunSettlementFacts(enid('enr-1'), openFacts);
+      const refuseOpen: RestartabilityDecision = (facts) => facts.completedIds.length === 2;
+
+      const replaced = await repo.replaceExpectedWithNew(
+        enid('enr-1'),
+        enrollment('enr-2', 'user-1', 'program-1', '2026-04-01T10:00:00Z'),
+        refuseOpen,
+      );
+
+      expect(replaced.kind).toBe('not-restartable');
+      // The old enrollment is exactly as it was and no fresh one exists.
+      const found = await repo.findByUserAndProgram(uid('user-1'), pid('program-1'));
+      expect(found?.id).toBe('enr-1');
+      expect((await repo.listByUserId(uid('user-1'))).map((e) => e.id)).toEqual(['enr-1']);
+
+      // With facts that satisfy the decision, the same call replaces.
+      const satisfy: RestartabilityDecision = (facts) => facts.notPerformedIds.length === 1;
+      repo.setRunSettlementFacts(enid('enr-1'), {
+        completedIds: [sid('sched-a')],
+        notPerformedIds: [sid('sched-b')],
+      });
+      const second = await repo.replaceExpectedWithNew(
+        enid('enr-1'),
+        enrollment('enr-2', 'user-1', 'program-1', '2026-04-01T10:00:00Z'),
+        satisfy,
+      );
+      expect(second.kind).toBe('replaced');
     });
 
     it('throws on a program identity mismatch and leaves the store untouched', async () => {
@@ -134,7 +180,11 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
 
       await expect(
-        repo.replaceExpectedWithNew(enid('enr-1'), enrollment('enr-2', 'user-1', 'program-2')),
+        repo.replaceExpectedWithNew(
+          enid('enr-1'),
+          enrollment('enr-2', 'user-1', 'program-2'),
+          alwaysRestartable,
+        ),
       ).rejects.toBeInstanceOf(EnrollmentIdentityMismatchError);
 
       // The expected enrollment survived and the replacement was not inserted.
@@ -149,7 +199,11 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
 
       await expect(
-        repo.replaceExpectedWithNew(enid('enr-1'), enrollment('enr-2', 'user-2', 'program-1')),
+        repo.replaceExpectedWithNew(
+          enid('enr-1'),
+          enrollment('enr-2', 'user-2', 'program-1'),
+          alwaysRestartable,
+        ),
       ).rejects.toBeInstanceOf(EnrollmentIdentityMismatchError);
 
       expect((await repo.listByUserId(uid('user-1'))).map((e) => e.id)).toEqual(['enr-1']);
@@ -165,6 +219,7 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       const attempt = repo.replaceExpectedWithNew(
         enid('enr-1'),
         enrollment('enr-other', 'user-1', 'program-1'),
+        alwaysRestartable,
       );
 
       // Mirrors PostgreSQL: a primary-key collision is a unique violation the
@@ -197,7 +252,11 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       // externally-corrupted state, mirroring the Drizzle implementation's
       // constraint-name backstop.
       await expect(
-        repo.replaceExpectedWithNew(enid('enr-1'), enrollment('enr-4', 'user-1', 'program-2')),
+        repo.replaceExpectedWithNew(
+          enid('enr-1'),
+          enrollment('enr-4', 'user-1', 'program-2'),
+          alwaysRestartable,
+        ),
       ).rejects.toBeInstanceOf(EnrollmentIdentityMismatchError);
 
       // Store unchanged by both refusals.
@@ -212,7 +271,9 @@ describe('InMemoryProgramEnrollmentRepository', () => {
       await repo.create(enrollment('enr-1', 'user-1', 'program-1'));
 
       const next = enrollment('enr-2', 'user-1', 'program-1', '2026-04-01T10:00:00Z');
-      expect(await repo.replaceExpectedWithNew(enid('enr-1'), next)).toBe(true);
+      expect((await repo.replaceExpectedWithNew(enid('enr-1'), next, alwaysRestartable)).kind).toBe(
+        'replaced',
+      );
 
       // Mutating the caller's aggregate after the write cannot reach stored
       // state (the store holds a clone).

@@ -129,7 +129,7 @@ async function seedAfterConcurrentReorder(): Promise<{
 }> {
   const repo = new InMemoryWorkoutSessionRepository();
   const seed = seedTwoOccurrenceSession();
-  await repo.save(seed); // persisted version 0 = the rendered V
+  await repo.create(seed); // persisted version 0 = the rendered V
 
   // The OTHER tab's concurrent mutation: move B (order 2) up.
   const loaded = await repo.findById(seed.id);
@@ -185,7 +185,7 @@ describe('stale rendered intent: occurrence-addressed commands (PR #13 Finding 1
     const seed = seedTwoOccurrenceSession();
     const skipped = skipSessionExercise(seed, { exerciseOrder: 1 });
     if (!skipped.ok) throw Error(skipped.error.message);
-    await repo.save(skipped.data); // persisted version 0 — the rendered V
+    await repo.create(skipped.data); // persisted version 0 — the rendered V
     const loaded = await repo.findById(skipped.data.id);
     if (loaded === null) throw Error();
     const moved = moveSessionExercise(loaded, { exerciseOrder: 2, direction: 'up' });
@@ -332,7 +332,7 @@ describe('stale rendered intent: occurrence-addressed commands (PR #13 Finding 1
 describe('current rendered intent: occurrence-addressed commands succeed', () => {
   it('skip succeeds when the expected version matches the loaded aggregate', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(seedTwoOccurrenceSession()); // version 0
+    await repo.create(seedTwoOccurrenceSession()); // version 0
     const uc = new SkipSessionExerciseUseCase(repo);
 
     const r = await uc.execute({
@@ -352,7 +352,7 @@ describe('current rendered intent: occurrence-addressed commands succeed', () =>
 
   it('move succeeds and the returned DTO carries the bumped version', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(seedTwoOccurrenceSession());
+    await repo.create(seedTwoOccurrenceSession());
     const uc = new MoveSessionExerciseUseCase(repo);
 
     const r = await uc.execute({
@@ -372,7 +372,7 @@ describe('current rendered intent: occurrence-addressed commands succeed', () =>
 
   it('log set succeeds and the returned DTO carries the bumped version', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(seedTwoOccurrenceSession());
+    await repo.create(seedTwoOccurrenceSession());
     const uc = new LogSessionSetUseCase(repo);
 
     const r = await uc.execute({
@@ -395,7 +395,7 @@ describe('current rendered intent: occurrence-addressed commands succeed', () =>
 
   it('substitute succeeds and the returned DTO carries the bumped version', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(seedTwoOccurrenceSession());
+    await repo.create(seedTwoOccurrenceSession());
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo(['ex-x']));
 
     const r = await uc.execute({
@@ -430,7 +430,7 @@ describe('committed version: returned DTO matches the persisted aggregate', () =
 
   it('skip returns the persisted version, and mutating again with that version succeeds', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(SESSION());
+    await repo.create(SESSION());
     const uc = new SkipSessionExerciseUseCase(repo);
 
     const first = await uc.execute({
@@ -458,7 +458,7 @@ describe('committed version: returned DTO matches the persisted aggregate', () =
 
   it('move returns the persisted version, and mutating again with that version succeeds', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(SESSION());
+    await repo.create(SESSION());
     const uc = new MoveSessionExerciseUseCase(repo);
 
     const first = await uc.execute({
@@ -486,7 +486,7 @@ describe('committed version: returned DTO matches the persisted aggregate', () =
 
   it('log set returns the persisted version, and mutating again with that version succeeds', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(SESSION());
+    await repo.create(SESSION());
     const uc = new LogSessionSetUseCase(repo);
 
     const first = await uc.execute({
@@ -520,7 +520,7 @@ describe('committed version: returned DTO matches the persisted aggregate', () =
 
   it('substitute returns the persisted version, and mutating again with that version succeeds', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.save(SESSION());
+    await repo.create(SESSION());
     const uc = new SubstituteSessionExerciseUseCase(repo, makeExerciseRepo(['ex-x', 'ex-y']));
 
     const first = await uc.execute({

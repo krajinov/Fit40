@@ -23,6 +23,12 @@
  * past. Moving a planned workout to the date it already holds is a successful
  * no-op: no write is issued.
  *
+ * M17 final review: settlement is also re-checked UNDER the reschedule
+ * transaction's enrollment lock (the port refuses with
+ * `recorded-not-performed` and ZERO planned writes), so a record that commits
+ * between this use case's pre-read and the locked update can never leave a
+ * settled occurrence moved as ordinary open intent.
+ *
  * Calendar intent only — this use case never creates, resumes or completes a
  * session, never marks a workout complete, and never touches training history,
  * progression, records or M14 completion. A workout whose planned date has
@@ -35,9 +41,11 @@
  * session-derived status, and no truth is mutated.
  */
 
+import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import {
   PlannedDateConflictError,
   type PlannedWorkoutRepository,
+  type PlannedWorkoutRescheduleOutcome,
 } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
@@ -92,6 +100,16 @@ export type ReschedulePlannedWorkoutError =
       readonly message: string;
     }
   | {
+      /**
+       * The occurrence is recorded as not performed (M17): it is settled
+       * execution truth, so it is never movable as ordinary future intent.
+       */
+      readonly code: 'OCCURRENCE_RECORDED_NOT_PERFORMED';
+      readonly programSlug: string;
+      readonly scheduledWorkoutId: string;
+      readonly message: string;
+    }
+  | {
       readonly code: 'DATE_ALREADY_PLANNED';
       readonly programSlug: string;
       readonly date: string;
@@ -117,6 +135,7 @@ export class ReschedulePlannedWorkoutUseCase {
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
+    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
   ) {}
 
   async execute(
@@ -181,10 +200,13 @@ export class ReschedulePlannedWorkoutUseCase {
       });
     }
 
-    const [currentPlan, completedIds, inProgressIds] = await Promise.all([
+    const [currentPlan, completedIds, inProgressIds, notPerformedFacts] = await Promise.all([
       this.plannedWorkoutRepository.listByEnrollment(enrollment.id),
       this.sessionRepository.listCompletedScheduledWorkoutIds(enrollment.id),
       this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
+      // ONE bounded, enrollment-scoped settlement read (M17): a recorded
+      // occurrence is settled, so it is never movable as ordinary future intent.
+      this.notPerformedRepository.listByEnrollment(enrollment.id),
     ]);
 
     if (currentPlan.length === 0) {
@@ -207,15 +229,21 @@ export class ReschedulePlannedWorkoutUseCase {
     if (inProgressIds.includes(scheduledWorkoutId)) {
       return err(sessionInProgress(program.slug, scheduledWorkoutId));
     }
+    if (notPerformedFacts.some((fact) => fact.scheduledWorkoutId === scheduledWorkoutId)) {
+      // Recorded as not performed: the occurrence is settled execution truth, not
+      // ordinary future intent, so it is never movable. The fact lives in the
+      // mutation authority; this is only M15's move-eligibility boundary.
+      return err(occurrenceRecordedNotPerformed(program.slug, scheduledWorkoutId));
+    }
 
     if (plannedDatesEqual(currentPlanned.plannedDate, targetDate)) {
       // Already where the caller wants it: success without any write.
       return ok(undefined);
     }
 
-    let moved: boolean;
+    let outcome: PlannedWorkoutRescheduleOutcome;
     try {
-      moved = await this.plannedWorkoutRepository.reschedule(
+      outcome = await this.plannedWorkoutRepository.reschedule(
         enrollment.id,
         scheduledWorkoutId,
         targetDate,
@@ -232,8 +260,16 @@ export class ReschedulePlannedWorkoutUseCase {
       throw error;
     }
 
-    if (moved) {
+    if (outcome.outcome === 'moved') {
       return ok(undefined);
+    }
+
+    if (outcome.outcome === 'recorded-not-performed') {
+      // M17 final review: the occurrence was recorded as not performed after
+      // this use case's pre-read but before the transaction's lock. The
+      // under-lock settlement truth wins — the occurrence is settled, so the
+      // move is refused with zero planned-workout writes.
+      return err(occurrenceRecordedNotPerformed(program.slug, scheduledWorkoutId));
     }
 
     // The run (or the row) vanished before the update committed. Read-only:
@@ -308,6 +344,18 @@ function sessionInProgress(
     programSlug,
     scheduledWorkoutId,
     message: 'This workout has a session in progress and cannot be rescheduled.',
+  };
+}
+
+function occurrenceRecordedNotPerformed(
+  programSlug: string,
+  scheduledWorkoutId: string,
+): ReschedulePlannedWorkoutError {
+  return {
+    code: 'OCCURRENCE_RECORDED_NOT_PERFORMED',
+    programSlug,
+    scheduledWorkoutId,
+    message: 'This workout is recorded as not performed and cannot be moved.',
   };
 }
 

@@ -23,6 +23,7 @@ import type { ProgramEnrollmentRepository } from '@/application/ports/program-en
 import type { ProgramRepository } from '@/application/ports/program-repository';
 import { toWorkoutSessionDto, type WorkoutSessionDto } from '@/application/dto/workout-session';
 import type { TrainingProgram } from '@/domain/entities/training-program';
+import { assertOccurrenceSettlementIsConsistent } from '@/domain/services/occurrence-settlement';
 import { findScheduledWorkoutOccurrence } from '@/domain/services/scheduled-workout';
 import {
   createEnrollmentId,
@@ -144,6 +145,16 @@ export class GetWorkoutSessionUseCase {
       occurrence.scheduled.id,
     );
 
+    // One settlement per occurrence (M17 I1): the coherent snapshot is checked
+    // against the existing invariant BEFORE any DTO is composed, so a completed
+    // session beside a not-performed record fails loudly here instead of
+    // reaching a surface that would resolve the contradiction its own way.
+    assertOccurrenceSettlementIsConsistent({
+      scheduledWorkoutId: occurrence.scheduled.id,
+      hasCompletedSession: facts.session !== null && facts.session.completedAt !== null,
+      hasNotPerformedRecord: facts.notPerformedRecorded,
+    });
+
     return ok({
       enrolled: true,
       session: facts.session === null ? null : toWorkoutSessionDto(facts.session),
@@ -187,6 +198,16 @@ export class GetWorkoutSessionUseCase {
     }
 
     const { session, notPerformedRecorded } = projection.facts;
+
+    // The SAME M17 I1 check on the fenced path, from the SAME coherent
+    // projection and before the DTO: both reads reject the contradiction with
+    // the same loud failure — never a precedence, never a silent choice.
+    assertOccurrenceSettlementIsConsistent({
+      scheduledWorkoutId,
+      hasCompletedSession: session !== null && session.completedAt !== null,
+      hasNotPerformedRecord: notPerformedRecorded,
+    });
+
     return ok({
       enrolled: true,
       session: session === null ? null : toWorkoutSessionDto(session),

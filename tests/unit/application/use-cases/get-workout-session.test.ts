@@ -6,7 +6,11 @@ import { InMemoryWorkoutSessionRepository } from '@/infrastructure/sessions/in-m
 import { createProgramEnrollment } from '@/domain/entities/program-enrollment';
 import { createTrainingProgram } from '@/domain/entities/training-program';
 import { createWorkout } from '@/domain/entities/workout';
-import { createWorkoutSession } from '@/domain/entities/workout-session';
+import {
+  completeWorkoutSession,
+  createWorkoutSession,
+  logSessionSet,
+} from '@/domain/entities/workout-session';
 import { Difficulty } from '@/domain/types/exercise';
 import { createEnrollmentId, createExerciseId, createScheduledWorkoutId, createUserId } from '@/domain/types/ids';
 import { ProgramGoal } from '@/domain/types/program';
@@ -44,6 +48,18 @@ function seedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, 
   const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
   return repo.create(sr.data);
+}
+
+/** A COMPLETED session for the fixture occurrence (one real logged set). */
+function seedCompletedSession(repo: InMemoryWorkoutSessionRepository, sessionId: string, userId: string, enrollmentId: string) {
+  const { swId, workoutId } = seedProgram();
+  const sr = createWorkoutSession({ id: sessionId, userId: uid(userId), enrollmentId: enid(enrollmentId), scheduledWorkoutId: swId, workoutId, startedAt: new Date('2026-09-22T17:00:00Z'), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
+  if (!sr.ok) throw Error();
+  const logged = logSessionSet(sr.data, { exerciseOrder: 1, type: 'reps', reps: 8, weightKg: 20, rpe: null });
+  if (!logged.ok) throw Error(logged.error.message);
+  const completed = completeWorkoutSession(logged.data, new Date('2026-09-22T17:45:00Z'));
+  if (!completed.ok) throw Error(completed.error.message);
+  return repo.create(completed.data);
 }
 
 function makeUseCase() {
@@ -286,5 +302,124 @@ describe('GetWorkoutSessionUseCase - enrollment identity fencing', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.session?.sessionId).toBe('s-1');
+  });
+});
+
+/**
+ * M17 I1 (the known PR #21 P2): the coherent snapshot can, under corruption,
+ * hold BOTH authoritative settlements of the same occurrence — a completed
+ * session and a not-performed record. The use case must re-check the EXISTING
+ * one-settlement invariant before composing the DTO, on BOTH the fenced and
+ * the standalone paths, and fail loudly — no precedence, no second read, no
+ * silent choice that a surface could render as "truth".
+ */
+describe('GetWorkoutSessionUseCase - occurrence settlement consistency', () => {
+  const SETTLEMENT_ERROR =
+    'Occurrence settlement contract violated: occurrence "sched-wo1" is both completed and recorded as not performed';
+
+  /** Program repo stub over the shared fixture program. */
+  function programRepo(): ProgramRepository {
+    return { list: vi.fn(), findBySlug: vi.fn().mockResolvedValue(seedProgram().program), findSessionRouteByScheduledWorkoutId: vi.fn(), listMetadataByIds: vi.fn() };
+  }
+
+  it('fails loudly on completed + not-performed (standalone path)', async () => {
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    await seedCompletedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+    const occurrenceFacts = makeOccurrenceExecutionFactsRepo(
+      sessionRepo,
+      [notPerformedFact('enr-a', 'sched-wo1')],
+      enrollmentRepo,
+    );
+    const uc = new GetWorkoutSessionUseCase(programRepo(), enrollmentRepo, occurrenceFacts);
+
+    // Contradictory truth is made visible, never reconciled into a DTO.
+    await expect(uc.execute({ ...INPUT, userId: 'user-a' })).rejects.toThrow(SETTLEMENT_ERROR);
+    // No second repository read: the invariant runs over the ONE snapshot.
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).toHaveBeenCalledTimes(1);
+    expect(occurrenceFacts.findFencedOccurrenceExecutionFacts).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly on completed + not-performed (fenced path) with the SAME failure', async () => {
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    await seedCompletedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+    const occurrenceFacts = makeOccurrenceExecutionFactsRepo(
+      sessionRepo,
+      [notPerformedFact('enr-a', 'sched-wo1')],
+      enrollmentRepo,
+    );
+    const uc = new GetWorkoutSessionUseCase(programRepo(), enrollmentRepo, occurrenceFacts);
+
+    await expect(
+      uc.execute({ ...INPUT, userId: 'user-a', expectedEnrollmentId: 'enr-a' }),
+    ).rejects.toThrow(SETTLEMENT_ERROR);
+    // No second repository read on the fenced path either.
+    expect(occurrenceFacts.findFencedOccurrenceExecutionFacts).toHaveBeenCalledTimes(1);
+    expect(occurrenceFacts.findOccurrenceExecutionFacts).not.toHaveBeenCalled();
+  });
+
+  it('accepts a completed session with no not-performed record', async () => {
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    await seedCompletedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+    const uc = new GetWorkoutSessionUseCase(
+      programRepo(),
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(sessionRepo, [], enrollmentRepo),
+    );
+
+    const r = await uc.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.session?.status).toBe('completed');
+    expect(r.data.notPerformedRecorded).toBe(false);
+  });
+
+  it('accepts a not-performed record with no session', async () => {
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const uc = new GetWorkoutSessionUseCase(
+      programRepo(),
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(
+        new InMemoryWorkoutSessionRepository(),
+        [notPerformedFact('enr-a', 'sched-wo1')],
+        enrollmentRepo,
+      ),
+    );
+
+    const r = await uc.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.session).toBeNull();
+    expect(r.data.notPerformedRecorded).toBe(true);
+  });
+
+  it('keeps in-progress + not-performed non-fatal (the locked precedence stays a no-op)', async () => {
+    const enrollmentRepo = new InMemoryProgramEnrollmentRepository();
+    await seedEnrollment(enrollmentRepo, 'enr-a', 'user-a', 'p1');
+    const sessionRepo = new InMemoryWorkoutSessionRepository();
+    await seedSession(sessionRepo, 's-1', 'user-a', 'enr-a');
+    const uc = new GetWorkoutSessionUseCase(
+      programRepo(),
+      enrollmentRepo,
+      makeOccurrenceExecutionFactsRepo(sessionRepo, [notPerformedFact('enr-a', 'sched-wo1')], enrollmentRepo),
+    );
+
+    // The live-session case is deliberately NOT rejected by M17 I1: the
+    // existing invariant behavior (in-progress outranks the record) is
+    // preserved unchanged on this read.
+    const r = await uc.execute({ ...INPUT, userId: 'user-a' });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.session?.status).toBe('in-progress');
+    expect(r.data.notPerformedRecorded).toBe(true);
   });
 });

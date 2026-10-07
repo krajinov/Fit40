@@ -43,7 +43,6 @@ import {
   trainingHistoryRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
-import { insertSession } from './session-fixtures';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -240,9 +239,10 @@ async function saveAll(...sessions: WorkoutSession[]): Promise<void> {
   }
 }
 
-/** Seeding a persisted session: the shared INSERT fixture (M17 Slice 6). */
+/** Saving via the write port exercises the real write path. */
 async function workoutSessionRepositorySave(session: WorkoutSession): Promise<void> {
-  await insertSession(session);
+  const { workoutSessionRepository } = await import('./setup');
+  await workoutSessionRepository.save(session);
 }
 
 describe('training history — listing', () => {

@@ -27,8 +27,7 @@ function schedule(overrides: Partial<EnrollmentScheduleDto> = {}): EnrollmentSch
     configured: true,
     today: TODAY_MIDWEEK,
     items: [],
-    unplacedNotPerformedWorkouts: [],
-    focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
+    focus: { today: null, next: null, pastDue: null },
     ...overrides,
   };
 }
@@ -166,8 +165,5 @@ describe('plannedStatusLabel', () => {
     expect(plannedStatusLabel('in-progress')).toBe('In progress');
     expect(plannedStatusLabel('completed')).toBe('Completed');
     expect(plannedStatusLabel('past-due')).toBe('Past due');
-    // M17 Slice 11 locked stored-state vocabulary — the fact is named in full,
-    // never shortened to an outcome word.
-    expect(plannedStatusLabel('not-performed')).toBe('Recorded as not performed');
   });
 });

@@ -7,10 +7,7 @@ import type { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-e
 import { GetProgramBySlugUseCase } from '@/application/use-cases/get-program-by-slug';
 import { GetProgramEnrollmentUseCase } from '@/application/use-cases/get-program-enrollment';
 import { GetScheduledWorkoutUseCase } from '@/application/use-cases/get-scheduled-workout';
-import { GetRunClosureSummaryUseCase } from '@/application/use-cases/get-run-closure-summary';
 import { GetWorkoutSessionUseCase } from '@/application/use-cases/get-workout-session';
-
-import { makeOccurrenceExecutionFactsRepo, makeRunClosureFactsRepo } from './schedule-fixtures';
 import { ListUserEnrollmentsUseCase } from '@/application/use-cases/list-user-enrollments';
 import { ResolveNextWorkoutUseCase } from '@/application/use-cases/resolve-next-workout';
 import { InMemoryProgramEnrollmentRepository } from '@/infrastructure/enrollments/in-memory-program-enrollment-repository';
@@ -44,8 +41,7 @@ function okSchedule(programSlug: string): { ok: true; data: EnrollmentScheduleDt
       configured: true,
       today: '2026-02-18',
       items: [],
-      unplacedNotPerformedWorkouts: [],
-      focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
+      focus: { today: null, next: null, pastDue: null },
     },
   };
 }
@@ -159,7 +155,7 @@ function seedSession(
     exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
   });
   if (!r.ok) throw Error(r.error.message);
-  return repo.create(r.data);
+  return repo.save(r.data);
 }
 
 /**
@@ -174,7 +170,6 @@ function makeUseCase(
   scheduleUseCase: Pick<GetEnrollmentScheduleUseCase, 'execute'> = {
     execute: async (input) => okSchedule(input.program.slug),
   },
-  closureUseCase: Pick<GetRunClosureSummaryUseCase, 'execute'> | null = null,
 ) {
   const programRepo: ProgramRepository = {
     list: vi.fn(),
@@ -200,21 +195,9 @@ function makeUseCase(
     new GetProgramEnrollmentUseCase(enrollmentRepo, sessionRepo),
     new ResolveNextWorkoutUseCase(
       new GetScheduledWorkoutUseCase(programRepo, exerciseRepo),
-      new GetWorkoutSessionUseCase(
-          programRepo,
-          enrollmentRepo,
-          makeOccurrenceExecutionFactsRepo(sessionRepo, [], enrollmentRepo),
-        ),
+      new GetWorkoutSessionUseCase(programRepo, sessionRepo, enrollmentRepo),
     ),
     scheduleUseCase,
-    // M17 final review: the run-closure read, composed beside the schedule read
-    // so the dashboard can resolve the run's first OPEN occurrence. A caller
-    // may stub it to observe the fencing contract.
-    closureUseCase ??
-      new GetRunClosureSummaryUseCase(
-        enrollmentRepo,
-        makeRunClosureFactsRepo(sessionRepo, [], enrollmentRepo),
-      ),
   );
   return { enrollmentRepo, sessionRepo, uc };
 }
@@ -236,34 +219,6 @@ describe('GetCurrentProgramDashboardUseCase', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBeNull();
-  });
-
-  it('fences the closure read to the enrollment the dashboard already loaded', async () => {
-    const closureInputs: { expectedEnrollmentId?: string }[] = [];
-    const closureUseCase: Pick<GetRunClosureSummaryUseCase, 'execute'> = {
-      execute: async (input) => {
-        closureInputs.push(input);
-        // The expected run was replaced mid-composition: the typed refusal.
-        return { ok: false, error: { code: 'ENROLLMENT_CHANGED', message: 'replaced' } };
-      },
-    };
-    const { enrollmentRepo, uc } = makeUseCase([P1()], METADATA, [makeExercise('ex-001')], undefined, closureUseCase);
-    await seedEnrollment(enrollmentRepo, 'enr-1', 'user-a', 'p1', '2026-01-01T10:00:00Z');
-
-    const result = await uc.execute('user-a', NOW);
-
-    // The dashboard composed the view for the enrollment it loaded, and fenced
-    // the closure read to exactly that identity; the typed refusal degrades to
-    // NO closure data — never a switch to the replacement run's facts.
-    expect(result.ok).toBe(true);
-    if (!result.ok || result.data === null) throw new Error('expected a dashboard view');
-    expect(result.data.enrollment.status).toBe('enrolled');
-    expect(result.data.runClosure).toBeNull();
-    expect(closureInputs).toHaveLength(1);
-    expect(closureInputs[0]).toMatchObject({
-      userId: 'user-a',
-      expectedEnrollmentId: 'enr-1',
-    });
   });
 
   it('hydrates the single enrollment with program detail, progress and next-workout state', async () => {
@@ -349,9 +304,8 @@ describe('GetCurrentProgramDashboardUseCase', () => {
 
   it('reads the M15 schedule with the same hydrated program aggregate (one catalog hydration)', async () => {
     const program = P1();
-    const scheduleExecute = vi.fn(
-      async (input: { program: { slug: string }; expectedEnrollmentId?: string }) =>
-        okSchedule(input.program.slug),
+    const scheduleExecute = vi.fn(async (input: { program: { slug: string } }) =>
+      okSchedule(input.program.slug),
     );
     const { enrollmentRepo, uc } = makeUseCase([program], METADATA, undefined, {
       execute: scheduleExecute,
@@ -369,10 +323,6 @@ describe('GetCurrentProgramDashboardUseCase', () => {
       userId: 'user-a',
       now: NOW,
     });
-    // M17 generation fence: the calendar is read for EXACTLY the enrollment
-    // this view already loaded - never a re-resolved current run - so the
-    // composed dashboard can never pair old enrollment data with a new run.
-    expect(scheduleExecute.mock.calls[0]?.[0].expectedEnrollmentId).toBe('enr-1');
     expect(scheduleExecute.mock.calls[0]?.[0].program).toBe(program);
     expect(result.data.schedule).toEqual({
       status: 'loaded',

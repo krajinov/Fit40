@@ -18,32 +18,13 @@
 import {
   EnrollmentAlreadyExistsError,
   EnrollmentIdentityMismatchError,
-  type LockedRunSettlementFacts,
   type ProgramEnrollmentRepository,
-  type ReplaceEnrollmentOutcome,
-  type RestartabilityDecision,
 } from '@/application/ports/program-enrollment-repository';
 import type { ProgramEnrollment } from '@/domain/entities/program-enrollment';
 import type { EnrollmentId, ProgramId, UserId } from '@/domain/types/ids';
 
 export class InMemoryProgramEnrollmentRepository implements ProgramEnrollmentRepository {
   private readonly enrollmentsById = new Map<string, ProgramEnrollment>();
-
-  /**
-   * Run-scoped settlement facts the restartability gate is evaluated over,
-   * seeded by tests that want to exercise the gate against this fake. Left
-   * empty by default: the fake cannot see the session or not-performed fact
-   * repositories, so when a run has no seeded facts it does not model the gate
-   * (the same non-modeling convention as the FK's ON DELETE SET NULL). The real
-   * PostgreSQL repository always reads the facts under the enrollment lock, and
-   * its integration suite is the authority for that behavior.
-   */
-  private readonly runSettlementFacts = new Map<string, LockedRunSettlementFacts>();
-
-  /** Test-only: models the facts the restartability decision is evaluated over. */
-  setRunSettlementFacts(enrollmentId: EnrollmentId, facts: LockedRunSettlementFacts): void {
-    this.runSettlementFacts.set(enrollmentId, facts);
-  }
 
   async findByUserAndProgram(
     userId: UserId,
@@ -79,30 +60,21 @@ export class InMemoryProgramEnrollmentRepository implements ProgramEnrollmentRep
   async replaceExpectedWithNew(
     expectedId: EnrollmentId,
     next: ProgramEnrollment,
-    isStillRestartable: RestartabilityDecision,
-  ): Promise<ReplaceEnrollmentOutcome> {
+  ): Promise<boolean> {
     const current = this.enrollmentsById.get(expectedId);
     if (current === undefined) {
       // Stale expected id: nothing to replace, the store is untouched.
-      return { kind: 'stale' };
+      return false;
     }
 
     // Identity guard, exactly as the Drizzle implementation reads it from the
-    // locked row — checked before any mutation.
+    // deleted row's RETURNING values — checked before any mutation.
     if (current.userId !== next.userId || current.programId !== next.programId) {
       throw new EnrollmentIdentityMismatchError(
         expectedId,
         { userId: current.userId, programId: current.programId },
         { userId: next.userId, programId: next.programId },
       );
-    }
-
-    // The restartability gate: evaluated over the run facts seeded for this
-    // enrollment, when any. With no seeded facts the fake does not model the
-    // gate (see `runSettlementFacts`).
-    const facts = this.runSettlementFacts.get(expectedId);
-    if (facts !== undefined && !isStillRestartable(facts)) {
-      return { kind: 'not-restartable' };
     }
 
     // Mirror PostgreSQL's primary-key uniqueness: replacing under an id that
@@ -134,6 +106,6 @@ export class InMemoryProgramEnrollmentRepository implements ProgramEnrollmentRep
     // caller's perspective, cloning per this repository's isolation rule.
     this.enrollmentsById.delete(expectedId);
     this.enrollmentsById.set(next.id, structuredClone(next));
-    return { kind: 'replaced' };
+    return true;
   }
 }

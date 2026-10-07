@@ -18,10 +18,8 @@ import { NodeIdGenerator } from '@/infrastructure/crypto/node-id-generator';
 import { getScheduledWorkoutUseCase } from '@/features/programs/services';
 import {
   exerciseRepository,
-  occurrenceExecutionFactsRepository,
   programEnrollmentRepository,
   programRepository,
-  runOccurrenceWrites,
   trainingHistoryRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
@@ -30,15 +28,15 @@ const idGenerator = new NodeIdGenerator();
 
 export const startWorkoutSessionUseCase = new StartWorkoutSessionUseCase(
   programRepository,
-  runOccurrenceWrites,
+  workoutSessionRepository,
   programEnrollmentRepository,
   idGenerator,
 );
 
 export const getWorkoutSessionUseCase = new GetWorkoutSessionUseCase(
   programRepository,
+  workoutSessionRepository,
   programEnrollmentRepository,
-  occurrenceExecutionFactsRepository,
 );
 
 export const logSessionSetUseCase = new LogSessionSetUseCase(workoutSessionRepository);

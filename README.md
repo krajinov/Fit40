@@ -52,17 +52,9 @@ history.
 - **Plan follow-through** — on program detail, directly below the weekly
   calendar: how the current run's calendar held up over the last 8 UTC weeks
   ("This plan so far"), reporting factual weekly counts (planned, done,
-  completed early/late, started, past due, recorded as not performed) for the
-  *current* plan only. It is
+  completed early/late, started, past due) for the *current* plan only. It is
   read-only and never a percentage, streak or verdict, and no historical plan is
   reconstructed (see [`docs/follow-through.md`](docs/follow-through.md)).
-- **Not-performed settlement & run closure** — "Didn't train this" records a
-  workout occurrence as not performed (with "Undo", no confirmation dialogs and
-  no bulk actions), the calendar and report show "Recorded as not performed"
-  honestly, and a run whose every occurrence is settled — completed *or*
-  recorded — is **concluded**: it shows "Run closed — n completed, m recorded
-  as not performed" and becomes restartable without ever claiming completion
-  (see [`docs/run-closure.md`](docs/run-closure.md)).
 
 ## Progressive Overload
 
@@ -258,10 +250,8 @@ enrollment-scoped workout training calendar (choose training days, get a
 deterministic planned-date schedule with Set/Change training days and a manual
 Move) are implemented. So is plan follow-through on program detail: a
 read-only report of how the current run's calendar held up over the last 8
-UTC weeks. Settlement of unperformed workouts ("Didn't train this" / "Undo")
-and honest run closure ("Run closed", restartable concluded runs) are
-implemented as well. Program generation via AI, richer progress charts, OAuth,
-and email verification are listed as planned work in the docs. No deployment or
+UTC weeks. Program generation via AI, richer progress charts, OAuth, and
+email verification are listed as planned work in the docs. No deployment or
 Docker setup is included yet.
 
 See [`docs/`](docs/) for architecture, conventions, database, testing, UI,

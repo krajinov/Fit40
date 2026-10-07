@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
-import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import {
   nextWorkoutPreviewState,
@@ -77,73 +76,5 @@ describe('nextWorkoutPreviewState', () => {
     expect(state.status).toBe('unavailable');
     expect(state.status).not.toBe('complete');
     expect(state).not.toHaveProperty('workout');
-  });
-});
-
-function runClosure(overrides: Partial<RunClosureSummaryDto> = {}): RunClosureSummaryDto {
-  return {
-    programSlug: 'prog-1',
-    totalWorkouts: 3,
-    completedWorkouts: 2,
-    notPerformedWorkouts: 1,
-    openWorkouts: 0,
-    hasOpenWorkout: false,
-    openInProgramOrder: [],
-    completedInProgramOrder: [],
-    notPerformedInProgramOrder: [],
-    isConcluded: true,
-    isProgramComplete: false,
-    restartAvailable: true,
-    ...overrides,
-  };
-}
-
-describe('nextWorkoutPreviewState / M17 concluded run', () => {
-  it('reports concluded (with factual counts, no workout) for a concluded-but-incomplete run', () => {
-    const state = nextWorkoutPreviewState(null, null, runClosure());
-    expect(state).toEqual({
-      status: 'concluded',
-      completedWorkouts: 2,
-      notPerformedWorkouts: 1,
-    });
-    expect(state).not.toHaveProperty('workout');
-  });
-
-  it('never reports concluded for a COMPLETE run (completion stays M14)', () => {
-    const state = nextWorkoutPreviewState(
-      null,
-      null,
-      runClosure({ isConcluded: true, isProgramComplete: true, notPerformedWorkouts: 0 }),
-    );
-    expect(state).toEqual({ status: 'complete' });
-  });
-
-  it('never reports concluded for an OPEN run (an open occurrence is available)', () => {
-    const workout = toNextWorkoutView(DTO);
-    const state = nextWorkoutPreviewState(
-      { weekNumber: 2, workoutOrder: 1 },
-      workout,
-      runClosure({
-        isConcluded: false,
-        openWorkouts: 1,
-        hasOpenWorkout: true,
-        openInProgramOrder: [
-          { scheduledWorkoutId: 'sw-2', weekNumber: 2, workoutOrder: 1, workoutName: 'Push A' },
-        ],
-        completedInProgramOrder: [],
-        notPerformedInProgramOrder: [],
-      }),
-    );
-    expect(state).toEqual({ status: 'available', workout });
-  });
-
-  it('degrades to the pre-M17 keying when the closure read is unavailable (null)', () => {
-    // A null closure DTO must not invent a conclusion: the M14 keying stands.
-    const workout = toNextWorkoutView(DTO);
-    expect(nextWorkoutPreviewState({ weekNumber: 2, workoutOrder: 1 }, workout, null)).toEqual({
-      status: 'available',
-      workout,
-    });
-    expect(nextWorkoutPreviewState(null, null, null)).toEqual({ status: 'complete' });
   });
 });

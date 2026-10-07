@@ -18,7 +18,6 @@ import {
 } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 import { exerciseLogs, users, workoutSessions } from '@/infrastructure/database/schema';
-import { insertSession } from './session-fixtures';
 
 import {
   closeDatabase,
@@ -133,7 +132,7 @@ describe('DrizzleWorkoutSessionRepository skip persistence (M10 Slice 2)', () =>
 
   it('round-trips isSkipped while leaving the occurrence contract untouched', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findById(sessionId(session.id));
     if (!loaded) throw new Error('session not found');
@@ -208,7 +207,7 @@ describe('DrizzleWorkoutSessionRepository skip persistence (M10 Slice 2)', () =>
     // Start from a fully unskipped aggregate (false).
     const unskipped = unskipSessionExercise(base, { exerciseOrder: 2 });
     if (!unskipped.ok) throw new Error(unskipped.error.message);
-    await insertSession(unskipped.data);
+    await workoutSessionRepository.save(unskipped.data);
     expect((await loadLogRows('session-skip-flip')).map((row) => row.isSkipped)).toEqual([
       false,
       false,

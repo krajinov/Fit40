@@ -2,9 +2,9 @@
  * Weekly aggregation for plan follow-through (M16).
  *
  * The second half of M16's domain model: `plan-follow-through.ts` decides how
- * ONE planned occurrence stands (completed early / on plan / late, started, not
- * performed, past-due, today, upcoming); this module buckets those occurrences
- * into the supplied UTC training weeks and totals them.
+ * ONE planned occurrence stands (completed early / on plan / late, started,
+ * past-due, today, upcoming); this module buckets those occurrences into the
+ * supplied UTC training weeks and totals them.
  *
  * Deliberate boundaries:
  * - **Pure and clock-free.** Windows, occurrences and `now` are all parameters.
@@ -46,12 +46,6 @@ export interface FollowThroughWeekCounts {
   readonly started: number;
   /** Occurrences with no session whose planned date has passed. */
   readonly pastDue: number;
-  /**
-   * Occurrences explicitly recorded as not performed (M17). A restatement of the
-   * recorded fact, never a judgement: the occurrence still contributes
-   * `planned`, and it never contributes completed/started/pastDue.
-   */
-  readonly notPerformed: number;
 }
 
 /** One week's counts, its window and whether the week is over. */
@@ -77,19 +71,10 @@ interface MutableCounts {
   completedLate: number;
   started: number;
   pastDue: number;
-  notPerformed: number;
 }
 
 function emptyCounts(): MutableCounts {
-  return {
-    planned: 0,
-    completed: 0,
-    completedEarly: 0,
-    completedLate: 0,
-    started: 0,
-    pastDue: 0,
-    notPerformed: 0,
-  };
+  return { planned: 0, completed: 0, completedEarly: 0, completedLate: 0, started: 0, pastDue: 0 };
 }
 
 /**
@@ -105,11 +90,6 @@ function emptyCounts(): MutableCounts {
  * - Only weeks holding at least one planned occurrence are returned; a supplied
  *   window with nothing planned is omitted rather than rendered as a fake
  *   zero-planned week. The result mirrors the given window order.
- * - A recorded occurrence (M17 `not-performed`) contributes `planned` and
- *   `notPerformed`, and no other counter: it was planned, and it was explicitly
- *   not performed. Horizon placement is unchanged by the fact — an occurrence
- *   dated outside every supplied window is ignored exactly like any other, so a
- *   record never punches through the 8-week span the caller supplied.
  * - One occurrence contributes to exactly one week and exactly one counter, so
  *   no outcome can be counted twice. The input must therefore hold one fact per
  *   occurrence — which the schema guarantees (the `planned_workouts` primary key
@@ -169,7 +149,6 @@ export function summarizeFollowThrough(
       completedLate: counts.completedLate,
       started: counts.started,
       pastDue: counts.pastDue,
-      notPerformed: counts.notPerformed,
     });
 
     totals.planned += counts.planned;
@@ -178,7 +157,6 @@ export function summarizeFollowThrough(
     totals.completedLate += counts.completedLate;
     totals.started += counts.started;
     totals.pastDue += counts.pastDue;
-    totals.notPerformed += counts.notPerformed;
   });
 
   return { weeks, totals };
@@ -207,11 +185,6 @@ function applyOutcome(counts: MutableCounts, outcome: FollowThroughOutcome): voi
       return;
     case FollowThroughOutcome.Started:
       counts.started += 1;
-      return;
-    case FollowThroughOutcome.NotPerformed:
-      // Planned and explicitly not performed — and nothing else. It is never
-      // `past-due` (a recorded day is settled, not behind) and never completed.
-      counts.notPerformed += 1;
       return;
     case FollowThroughOutcome.PastDue:
       counts.pastDue += 1;

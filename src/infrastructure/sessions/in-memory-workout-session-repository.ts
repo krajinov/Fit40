@@ -4,19 +4,13 @@
  * Stores sessions in a private Map. Read and write operations use
  * structuredClone to prevent accidental state mutation.
  *
- * This is a TEST DOUBLE. It implements the port's reads and `save`, and — like
- * the database's own seeding fixtures — it additionally keeps a `create`
- * operation so unit tests can put a session in store without going through a
- * use case. That operation is deliberately NOT part of the port: the port no
- * longer declares any insert (M17 Slice 6), because production session creation
- * is owned by the enrollment-serialized mutation authority
- * (`DrizzleRunOccurrenceWrites.createSessionForOccurrence`). No production code
- * can reach this class, and its `create` writes to a Map, never to a database.
- *
  * Persistence limitations:
  * - Sessions reset when the Node process restarts.
  * - During Next.js dev-server recompilation, HMR may reset the module state.
  * - Not suitable for serverless environments without a shared store.
+ *
+ * A future Drizzle implementation will replace this class without changing
+ * domain or application code.
  */
 
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
@@ -57,26 +51,26 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
     return null;
   }
 
-  /**
-   * Seeds a session into the store (test-double seeding, not a port operation).
-   *
-   * INSERT-only semantics are preserved so the double stays faithful to the
-   * database's creation authority: a second seeding for the same session id or
-   * for the same (enrollment, occurrence) pair is rejected. Nothing is
-   * overwritten — the pre-Slice-4 upsert could replace an existing row here,
-   * which is exactly the property M17 removed.
-   */
-  async create(session: WorkoutSession): Promise<WorkoutSession> {
-    // INSERT only: a second creation for the same session id or for the same
-    // (enrollment, occurrence) pair is rejected, mirroring the database's
-    // primary key and one-session-per-occurrence constraint. Nothing is
-    // overwritten — the pre-Slice-4 upsert could replace an existing row here,
-    // which is exactly the property M17 removed.
-    if (this.sessionsById.has(session.id)) {
-      throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
+  async save(session: WorkoutSession): Promise<WorkoutSession> {
+    // Mirror the database's write protection: an update of an existing row
+    // whose enrollment no longer matches the caller's snapshot (detached by
+    // a concurrent leave, or re-pointed) must not commit, so use-case tests
+    // observe the same detached-history race outcome as PostgreSQL.
+    const existing = this.sessionsById.get(session.id);
+    if (
+      existing !== undefined &&
+      session.enrollmentId !== null &&
+      existing.enrollmentId !== session.enrollmentId
+    ) {
+      throw new SessionEnrollmentChangedError(session.id);
     }
+
+    // Mirror the database's one-session-per-(enrollment, occurrence) unique
+    // constraint so use-case tests observe the same race outcome. Detached
+    // sessions (null enrollment) never collide, matching PostgreSQL.
     for (const other of this.sessionsById.values()) {
       if (
+        other.id !== session.id &&
         session.enrollmentId !== null &&
         other.enrollmentId === session.enrollmentId &&
         other.scheduledWorkoutId === session.scheduledWorkoutId
@@ -84,49 +78,23 @@ export class InMemoryWorkoutSessionRepository implements WorkoutSessionRepositor
         throw new SessionAlreadyExistsError(session.scheduledWorkoutId);
       }
     }
-
-    // The stored copy and the returned copy are clones (this repository's
-    // mutation isolation); a first INSERT stores the snapshot's own version,
-    // like the SQL INSERT.
-    this.sessionsById.set(session.id, structuredClone(session));
-    return structuredClone(session);
-  }
-
-  async save(session: WorkoutSession): Promise<WorkoutSession> {
-    // UPDATE only, mirroring the Drizzle implementation: a snapshot whose row
-    // no longer exists cannot recreate it, so a stale writer sees the same
-    // stale-session outcome as PostgreSQL instead of resurrecting the row.
-    const existing = this.sessionsById.get(session.id);
-    if (existing === undefined) {
-      throw new SessionStaleVersionError(session.id);
-    }
-
-    // Mirror the database's write protection: an update of an existing row
-    // whose enrollment no longer matches the caller's snapshot (detached by
-    // a concurrent leave, or re-pointed) must not commit, so use-case tests
-    // observe the same detached-history race outcome as PostgreSQL.
-    if (
-      session.enrollmentId !== null &&
-      existing.enrollmentId !== session.enrollmentId
-    ) {
-      throw new SessionEnrollmentChangedError(session.id);
-    }
-
     // Optimistic concurrency, mirroring the Drizzle implementation exactly:
-    // an UPDATE must carry the version the caller READ, and only the update
-    // path bumps the stored version by one — the INSERT path (create) stores
-    // the snapshot's own version. A stale snapshot is rejected instead of
-    // silently overwriting concurrent changes, so use-case tests observe the
-    // same race outcome as PostgreSQL.
-    if (existing.version !== session.version) {
+    // an UPDATE of an existing row must carry the version the caller READ,
+    // and only the update path bumps the stored version by one — a first
+    // save (INSERT, no existing row) stores the snapshot's own version,
+    // like the SQL upsert's insert branch. A stale snapshot is rejected
+    // instead of silently overwriting concurrent changes, so use-case tests
+    // observe the same race outcome as PostgreSQL.
+    if (existing !== undefined && existing.version !== session.version) {
       throw new SessionStaleVersionError(session.id);
     }
-
     // The returned aggregate carries the COMMITTED version (the port's
-    // contract): the update stores version + 1, so a caller building a DTO from
-    // this return value never sends a version the store did not hold. Both the
-    // stored copy and the returned copy are clones.
-    const persisted: WorkoutSession = { ...session, version: session.version + 1 };
+    // contract): the same two-branch policy the SQL upsert applies, so a
+    // caller building a DTO from this return value never sends a version the
+    // store did not hold. Both the stored copy and the returned copy are
+    // clones, preserving this repository's mutation isolation.
+    const persisted: WorkoutSession =
+      existing === undefined ? session : { ...session, version: session.version + 1 };
     this.sessionsById.set(session.id, structuredClone(persisted));
     return structuredClone(persisted);
   }

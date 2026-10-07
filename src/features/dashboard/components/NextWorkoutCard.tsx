@@ -28,15 +28,9 @@ function detailsPath(view: NextWorkoutView): string {
  * The Start CTA targets the session page, whose panels already handle the
  * Start/Resume/Join semantics — the link label reflects the resolved
  * session state so users know what will happen.
- *
- * M17 final review: when the resolved session state is `not-performed` the
- * occurrence is settled (recorded as not performed) and this card renders the
- * factual state with NO Start — a documented degraded fallback can show the
- * occurrence, but it may never advertise an impossible action.
  */
 export function NextWorkoutCard({ view, programName, className }: NextWorkoutCardProps) {
   const remaining = view.exerciseCount - view.preview.length;
-  const recorded = view.sessionState === 'not-performed';
   const startLabel =
     view.sessionState === 'in-progress' ? 'Resume workout' : 'Start workout';
 
@@ -50,11 +44,7 @@ export function NextWorkoutCard({ view, programName, className }: NextWorkoutCar
     >
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center gap-2.5">
-          {recorded ? (
-            <Badge>RECORDED</Badge>
-          ) : (
-            <Badge variant="accent">UP NEXT</Badge>
-          )}
+          <Badge variant="accent">UP NEXT</Badge>
           <p className="text-[13px] font-medium text-ink-2 md:text-sm">
             <span className="md:hidden">
               Week {view.weekNumber} · Workout {view.workoutOrder}
@@ -106,15 +96,9 @@ export function NextWorkoutCard({ view, programName, className }: NextWorkoutCar
       )}
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        {recorded ? (
-          <p className="text-sm font-semibold text-ink-2 md:text-[15px]">
-            Recorded as not performed
-          </p>
-        ) : (
-          <Link href={sessionPath(view)} className={buttonVariants({ className: 'w-full md:w-auto' })}>
-            {startLabel}
-          </Link>
-        )}
+        <Link href={sessionPath(view)} className={buttonVariants({ className: 'w-full md:w-auto' })}>
+          {startLabel}
+        </Link>
         <Link
           href={detailsPath(view)}
           className={buttonVariants({ variant: 'secondary', className: 'w-full md:w-auto' })}

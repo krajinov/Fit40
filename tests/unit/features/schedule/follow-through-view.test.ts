@@ -34,7 +34,6 @@ const ZERO_COUNTS = {
   completedLate: 0,
   started: 0,
   pastDue: 0,
-  notPerformed: 0,
 } as const;
 
 function week(overrides: Partial<FollowThroughWeekDto> = {}): FollowThroughWeekDto {
@@ -48,7 +47,6 @@ function week(overrides: Partial<FollowThroughWeekDto> = {}): FollowThroughWeekD
     completedLate: 0,
     started: 0,
     pastDue: 1,
-    notPerformed: 0,
     ...overrides,
   };
 }
@@ -66,9 +64,7 @@ function report(overrides: Partial<ConfiguredFollowThroughDto> = {}): Configured
       completedLate: 0,
       started: 0,
       pastDue: 1,
-      notPerformed: 0,
     },
-    notPerformedUnplaced: 0,
     ...overrides,
   };
 }
@@ -85,18 +81,11 @@ function allLabels(dto: ConfiguredFollowThroughDto): ReadonlyArray<string> {
             row.progressLabel,
             row.startedLabel ?? '',
             row.pastDueLabel ?? '',
-            row.notPerformedLabel ?? '',
           ]),
         ]
       : [view.summary.message];
 
-  return [
-    view.title,
-    view.horizonLabel,
-    ...summaryLabels,
-    view.unplacedNotPerformedLabel ?? '',
-    view.disclosure,
-  ];
+  return [view.title, view.horizonLabel, ...summaryLabels, view.disclosure];
 }
 
 describe('buildFollowThroughView', () => {
@@ -156,7 +145,6 @@ describe('buildFollowThroughView', () => {
           completedLate: 3,
           started: 2,
           pastDue: 7,
-          notPerformed: 0,
         },
       }),
     );
@@ -182,51 +170,8 @@ describe('buildFollowThroughView', () => {
     expect(view.summary.weeks[0]?.progressLabel).toBe('0 of 3 done');
     expect(view.summary.weeks[0]?.pastDueLabel).toBeNull();
     expect(view.summary.weeks[0]?.startedLabel).toBeNull();
-    expect(view.summary.weeks[0]?.notPerformedLabel).toBeNull();
     // The two core counts always show, even at zero.
     expect(view.summary.totalsLabel).toBe('0 planned · 0 done');
-    // No recorded occurrences without a row: no pointer line at all.
-    expect(view.unplacedNotPerformedLabel).toBeNull();
-  });
-
-  it('phrases the recorded-not-performed counts beside the other factual counts', () => {
-    const view = buildFollowThroughView(
-      report({
-        weeks: [week({ planned: 3, completed: 1, pastDue: 0, notPerformed: 2 })],
-        totals: {
-          planned: 3,
-          completed: 1,
-          completedEarly: 0,
-          completedLate: 0,
-          started: 0,
-          pastDue: 0,
-          notPerformed: 2,
-        },
-      }),
-    );
-
-    if (view.summary.status !== 'weeks') throw new Error('expected weeks');
-    // The occurrence is still planned: the record never removes it from the
-    // denominator.
-    expect(view.summary.weeks[0]?.progressLabel).toBe('1 of 3 done');
-    expect(view.summary.weeks[0]?.notPerformedLabel).toBe('2 not performed');
-    expect(view.summary.totalsLabel).toBe('3 planned · 1 done · 2 not performed');
-    // Its rows exist, so it is not unplaced and nothing points elsewhere.
-    expect(view.unplacedNotPerformedLabel).toBeNull();
-  });
-
-  it('points at the calendar, factually, when a recorded occurrence has no date', () => {
-    const one = buildFollowThroughView(report({ notPerformedUnplaced: 1 }));
-    const two = buildFollowThroughView(report({ notPerformedUnplaced: 2 }));
-
-    // The count, the absence of a date, and the surface that owns the detail —
-    // no action, no undo copy, no sentence duplicated from the calendar's list.
-    expect(one.unplacedNotPerformedLabel).toBe(
-      '1 recorded as not performed without a calendar date — see Training schedule',
-    );
-    expect(two.unplacedNotPerformedLabel).toBe(
-      '2 recorded as not performed without a calendar date — see Training schedule',
-    );
   });
 
   it('marks only the open week containing today as current', () => {
@@ -282,7 +227,6 @@ describe('buildFollowThroughView', () => {
           completedLate: 0,
           started: 0,
           pastDue: 3,
-          notPerformed: 0,
         },
       }),
     ).join(' ');

@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils';
 import { formatPlannedDateLabel } from '@/lib/dates';
 import { buildWeekSlots } from '@/features/schedule/schedule-week-view';
 import { TrainingDaysForm } from '@/features/schedule/components/TrainingDaysForm';
-import { UnplacedNotPerformedList } from '@/features/schedule/components/UnplacedNotPerformedList';
 import { WeeklyScheduleCalendar } from '@/features/schedule/components/WeeklyScheduleCalendar';
 
 interface ProgramScheduleSectionProps {
@@ -69,14 +68,6 @@ export function ProgramScheduleSection({ schedule, className }: ProgramScheduleS
           mode="setup"
           className="w-full md:max-w-xl"
         />
-
-        {/* A recorded occurrence needs no calendar row, so it stays listable
-            even while the run has no calendar at all (M17 Slice 11). */}
-        <UnplacedNotPerformedList
-          programSlug={dto.programSlug}
-          workouts={dto.unplacedNotPerformedWorkouts}
-          className="w-full"
-        />
       </section>
     );
   }
@@ -134,14 +125,6 @@ export function ProgramScheduleSection({ schedule, className }: ProgramScheduleS
       </div>
 
       <WeeklyScheduleCalendar programSlug={dto.programSlug} slots={slots} />
-
-      {/* Recorded occurrences with no current row: a distinct factual list
-          (authored labels + Undo), never planned cards and never a date
-          invented for them (M17 Slice 11). */}
-      <UnplacedNotPerformedList
-        programSlug={dto.programSlug}
-        workouts={dto.unplacedNotPerformedWorkouts}
-      />
 
       {/* Approved M15 weekly caption (2 of 2 UTC lines in this UI). */}
       <p className="text-xs text-ink-3">Weeks run Monday&ndash;Sunday (UTC).</p>

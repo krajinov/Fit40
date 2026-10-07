@@ -347,7 +347,7 @@ describe('DrizzlePlannedWorkoutRepository — reschedule', () => {
       plannedDate('2026-11-20'),
     );
 
-    expect(moved).toEqual({ outcome: 'moved' });
+    expect(moved).toBe(true);
     const after = await plannedWorkoutRepository.listByEnrollment(RUN);
     expect(after).toHaveLength(before.length);
     expect(plannedLines(after)).toContain(`${first}@2026-11-20`);
@@ -369,17 +369,17 @@ describe('DrizzlePlannedWorkoutRepository — reschedule', () => {
     );
   });
 
-  it('returns not-moved for an occurrence this run does not plan', async () => {
+  it('returns false for an occurrence this run does not plan', async () => {
     const outcome = await plannedWorkoutRepository.reschedule(
       RUN,
       scheduledWorkoutIdValue('fit40-beginner-strength-w9-9'),
       plannedDate('2026-11-20'),
     );
 
-    expect(outcome).toEqual({ outcome: 'not-moved' });
+    expect(outcome).toBe(false);
   });
 
-  it('returns not-moved and writes nothing when the run no longer exists', async () => {
+  it('returns false and writes nothing when the run no longer exists', async () => {
     const { first } = firstOccurrences(run);
     await programEnrollmentRepository.delete(RUN);
 
@@ -389,7 +389,7 @@ describe('DrizzlePlannedWorkoutRepository — reschedule', () => {
       plannedDate('2026-11-20'),
     );
 
-    expect(outcome).toEqual({ outcome: 'not-moved' });
+    expect(outcome).toBe(false);
     expect(await plannedWorkoutRepository.listByEnrollment(RUN)).toEqual([]);
   });
 });
@@ -488,7 +488,7 @@ describe('DrizzlePlannedWorkoutRepository — bounded, parent-first statements',
     expect(counts.largeCount).toBe(3);
   });
 
-  it('re-checks settlement under the parent lock, then reschedules with one update', async () => {
+  it('reschedules with a parent lock and a single update', async () => {
     const { first } = firstOccurrences(run);
     await plannedWorkoutRepository.replaceAllForEnrollment(
       RUN,
@@ -502,17 +502,10 @@ describe('DrizzlePlannedWorkoutRepository — bounded, parent-first statements',
         plannedDate('2026-12-01'),
       );
 
-      expect(moved).toEqual({ outcome: 'moved' });
-      // Lock the parent enrollment → read the occurrence's settlement fact
-      // UNDER that lock → update. The settlement check is AFTER the lock and
-      // BEFORE the write (M17 final review), so a record that committed after
-      // the caller's pre-read refuses the move with zero planned writes.
-      expect(queries).toHaveLength(3);
-      expect(queries[0]).toContain('program_enrollments');
+      expect(moved).toBe(true);
+      expect(queries).toHaveLength(2);
       expect(queries[0]).toContain('for no key update');
-      expect(queries[1]?.startsWith('select')).toBe(true);
-      expect(queries[1]).toContain('not_performed_workouts');
-      expect(queries[2]?.startsWith('update')).toBe(true);
+      expect(queries[1]?.startsWith('update')).toBe(true);
     });
   });
 });

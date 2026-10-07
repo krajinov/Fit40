@@ -8,7 +8,6 @@
 
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { ProgramDetailDto } from '@/application/dto/program';
-import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import type { ScheduleReadState } from '@/application/dto/schedule';
 import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 
@@ -23,14 +22,8 @@ import type { RepPrescription } from '@/domain/value-objects/rep-prescription';
 export type DashboardScheduleState = ScheduleReadState;
 
 
-/**
- * The next workout preview's startability, resolved from the user's own run:
- * - `not-started`: no session and no not-performed record — Start is safe;
- * - `in-progress`: the occurrence has a live session — Resume;
- * - `not-performed`: the occurrence is settled as recorded-not-performed (M17)
- *   — it has no session, but it must NEVER render as startable.
- */
-export type NextWorkoutSessionState = 'not-started' | 'in-progress' | 'not-performed';
+/** Whether the next workout's session has already been started by the user. */
+export type NextWorkoutSessionState = 'not-started' | 'in-progress';
 
 /** One previewed exercise row of the next scheduled workout. */
 export interface NextWorkoutPreviewExerciseDto {
@@ -66,14 +59,6 @@ export interface CurrentProgramDashboardDto {
   readonly program: ProgramDetailDto;
   readonly enrollment: Extract<ProgramEnrollmentViewDto, { status: 'enrolled' }>;
   readonly nextWorkout: NextWorkoutDto | null;
-  /**
-   * The run's M17 closure summary (Slice 10): factual counts plus the complete /
-   * concluded / open verdicts, or null when the additive read failed. It lets
-   * presentation resolve the first OPEN authored occurrence — the completion-only
-   * `nextWorkout` above can point at an occurrence already recorded as not
-   * performed. Composition only: no verdict is recomputed from it here.
-   */
-  readonly runClosure: RunClosureSummaryDto | null;
   /**
    * The run's M15 training calendar (Slice 5). Read with the SAME hydrated
    * program aggregate as the rest of this view, so one request hydrates the

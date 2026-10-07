@@ -4,7 +4,6 @@ import {
   assertReplaceablePlannedWorkoutSet,
   PlannedDateConflictError,
   type PlannedWorkoutRepository,
-  type PlannedWorkoutRescheduleOutcome,
 } from '@/application/ports/planned-workout-repository';
 import type { PlannedWorkout } from '@/domain/entities/planned-workout';
 import type { EnrollmentId, ScheduledWorkoutId } from '@/domain/types/ids';
@@ -16,7 +15,7 @@ import {
   mapRowToPlannedWorkout,
 } from '../mappers/planned-workout-mapper';
 import { isUniqueViolation, pgConstraintName } from '../pg-error';
-import { notPerformedWorkouts, plannedWorkouts, programEnrollments } from '../schema';
+import { plannedWorkouts, programEnrollments } from '../schema';
 
 /**
  * The (enrollment_id, planned_date) unique constraint created by migration
@@ -97,7 +96,7 @@ export class DrizzlePlannedWorkoutRepository implements PlannedWorkoutRepository
     enrollmentId: EnrollmentId,
     scheduledWorkoutId: ScheduledWorkoutId,
     plannedDate: PlannedDate,
-  ): Promise<PlannedWorkoutRescheduleOutcome> {
+  ): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       const locked = await tx
         .select({ id: programEnrollments.id })
@@ -107,26 +106,7 @@ export class DrizzlePlannedWorkoutRepository implements PlannedWorkoutRepository
 
       if (locked.length === 0) {
         // The run is gone (concurrent leave/restart): nothing to move.
-        return { outcome: 'not-moved' };
-      }
-
-      // M17 final review: settlement is re-checked UNDER the lock, BEFORE any
-      // planned write. A record that committed after the caller's pre-read is
-      // authoritative — the occurrence is settled execution truth, so the move
-      // is refused with ZERO planned-workout writes.
-      const recorded = await tx
-        .select({ scheduledWorkoutId: notPerformedWorkouts.scheduledWorkoutId })
-        .from(notPerformedWorkouts)
-        .where(
-          and(
-            eq(notPerformedWorkouts.enrollmentId, enrollmentId),
-            eq(notPerformedWorkouts.scheduledWorkoutId, scheduledWorkoutId),
-          ),
-        )
-        .limit(1);
-
-      if (recorded.length > 0) {
-        return { outcome: 'recorded-not-performed' };
+        return false;
       }
 
       try {
@@ -143,9 +123,7 @@ export class DrizzlePlannedWorkoutRepository implements PlannedWorkoutRepository
 
         // No row means this run has no planning for that occurrence (never
         // planned, or removed by a regeneration that completed it). No retry.
-        return updated.length > 0
-          ? { outcome: 'moved' }
-          : { outcome: 'not-moved' };
+        return updated.length > 0;
       } catch (error) {
         if (
           isUniqueViolation(error) &&

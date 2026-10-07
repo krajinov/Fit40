@@ -327,8 +327,7 @@ Calendar intent is enrollment-scoped and derived, never authoritative for
 history. Domain owns the `PlannedDate` / `TrainingDays` value objects, the
 `PlannedWorkout` entity (composite identity `(enrollmentId,
 scheduledWorkoutId)`), deterministic generation (`generatePlannedSchedule`:
-settled occurrences — completed **and** recorded-not-performed (M17) —
-excluded, in-progress rows frozen, occupied dates skipped) and the
+completed excluded, in-progress rows frozen, occupied dates skipped) and the
 locked status/focus precedence. Application owns
 `GetEnrollmentScheduleUseCase`, `ConfigureTrainingDaysUseCase` and
 `ReschedulePlannedWorkoutUseCase` — all three take the trusted user plus a

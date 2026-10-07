@@ -21,12 +21,6 @@ vi.mock('@/features/sessions/components/SessionExerciseCard', () => ({
   SessionExerciseCard: () => null,
 }));
 
-// M17 Slice 11: the workout detail CTA may render the Undo leaf, whose action
-// module pulls the DB composition root — stubbed at the same boundary.
-vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
-  undoNotPerformedAction: vi.fn(),
-}));
-
 import type { ScheduledWorkoutDetailDto } from '@/application/dto/program';
 import type { WorkoutSessionDto } from '@/application/dto/workout-session';
 import { buildSessionProgress } from '@/features/sessions/active-workout-views';
@@ -121,7 +115,6 @@ async function renderWorkoutDetail(): Promise<HTMLElement> {
     targets: [],
     hasRecommendations: false,
     ctaState: 'completed',
-    notPerformedRecorded: false,
   };
   const container = document.createElement('div');
   document.body.appendChild(container);

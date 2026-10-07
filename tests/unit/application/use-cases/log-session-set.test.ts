@@ -24,7 +24,7 @@ function makeSession(ownerId: string = OWNER_ID, enrollmentId: string | null = '
 describe('LogSessionSetUseCase', () => {
   it('logs a valid set and returns DTO', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.create(makeSession());
+    await repo.save(makeSession());
     const uc = new LogSessionSetUseCase(repo);
     const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: 7 , expectedSessionVersion: 0 });
     expect(r.ok).toBe(true);
@@ -42,7 +42,7 @@ describe('LogSessionSetUseCase', () => {
 
   it('returns FORBIDDEN when the session belongs to another user', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.create(makeSession('user-1'));
+    await repo.save(makeSession('user-1'));
     const uc = new LogSessionSetUseCase(repo);
     const r = await uc.execute({ sessionId: 's-1', userId: 'user-2', exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
     expect(r.ok).toBe(false);
@@ -55,7 +55,7 @@ describe('LogSessionSetUseCase', () => {
 
   it('rejects logging into a detached session (enrollment nulled by leaving)', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
-    await repo.create(makeSession(OWNER_ID, null));
+    await repo.save(makeSession(OWNER_ID, null));
     const uc = new LogSessionSetUseCase(repo);
 
     const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });
@@ -74,7 +74,7 @@ describe('LogSessionSetUseCase', () => {
     const skipped = skipSessionExercise(makeSession(), { exerciseOrder: 1 });
     expect(skipped.ok).toBe(true);
     if (!skipped.ok) return;
-    await repo.create(skipped.data);
+    await repo.save(skipped.data);
     const uc = new LogSessionSetUseCase(repo);
 
     const r = await uc.execute({ sessionId: 's-1', userId: OWNER_ID, exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null , expectedSessionVersion: 0 });

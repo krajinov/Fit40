@@ -41,16 +41,6 @@ rewrite of workout history.
 M15 reads session facts into planning through two enrollment-scoped
 projections only: `listCompletedScheduledWorkoutIds` (existing) and
 `listInProgressScheduledWorkoutIds` (M15 addition, one bounded statement).
-Since M17 the configure read additionally loads the run's
-`not_performed_workouts` facts (a third, fact-only read) and hands them to
-generation as settled input — recording a workout never rewrites a
-`planned_workouts` row itself. The schedule READ is different: session
-execution truth (completed + in-progress projections) and the
-not-performed settlement facts are mutually exclusive per occurrence, so
-the calendar read projects them from ONE coherent database snapshot
-(`ScheduleExecutionFactsRepository`, a single statement) — never from
-independent statements that could tear across a concurrent settlement
-transition (see `docs/run-closure.md` for the general invariant).
 
 ## Persistence (`planned_workouts`, migration 0013)
 
@@ -83,13 +73,6 @@ planned_workouts (
 - **No CHECK involving "today"** — past/future is time-dependent and lives in
   the Domain/application with the request clock.
 
-M17's settlement fact lives in its **own** table
-(`not_performed_workouts`, migration 0014 — see
-[Run Closure & Not-Performed Settlement](run-closure.md)); recording or undoing
-never inserts, updates or deletes a `planned_workouts` row. The row and the
-fact are two legal, independent truths until the next regeneration, which
-treats recorded occurrences as settled and may remove their rows.
-
 ## Calendar model (UTC Monday–Sunday)
 
 - A planned date is a calendar date with no time and no zone. Week boundaries
@@ -116,15 +99,12 @@ treats recorded occurrences as settled and may remove their rows.
 
 Pure domain service (`src/domain/services/planned-schedule.ts`). Inputs:
 `occurrencesInProgramOrder`, `trainingDays`, `today`, `completedIds`,
-`inProgressIds`, `notPerformedIds`, `currentPlan` (all facts supplied by the
-caller).
+`inProgressIds`, `currentPlan` (all facts supplied by the caller).
 
 **Partition** (authored occurrence order):
 
-- **settled** — completed **or** recorded as not performed (M17) → **no row**
-  (the calendar never invents intent for performed work, and a record is not
-  intent either; a recorded occurrence's existing row is dropped by
-  replacement while its fact survives).
+- **completed** → **no row** (the calendar never invents intent for performed
+  work).
 - **frozen** → has a live in-progress session **and** an existing planned row
   → the row is carried **verbatim** (never moved, its date reserved).
 - **open** → everything else: never-started occurrences, manually moved
@@ -146,8 +126,7 @@ increasing in authored order, and monotonic.
 **Output ordering** is calendar order (planned date asc, then occurrence id) —
 the persisted read order — and is deterministic for identical inputs. A row
 whose `enrollmentId` does not match the run is rejected (no cross-enrollment
-generation). All-settled (all completed and/or recorded) → `[]`; frozen-only →
-the frozen rows.
+generation). All-completed → `[]`; frozen-only → the frozen rows.
 
 Locked edge cases (each pinned in `planned-schedule.test.ts`):
 
@@ -160,7 +139,6 @@ Locked edge cases (each pinned in `planned-schedule.test.ts`):
 | E | Authored vs calendar order | May diverge around frozen rows — allowed, deterministic; authored program semantics are never reshuffled. |
 | F | Manually moved never-started rows | Open: overwritten on regeneration; their old dates reserve nothing. |
 | G | In-progress occurrence with no row (legacy bootstrap) | Open: receives a forward (today-or-next-selected) date, never a fabricated past date; freezes on later regenerations. |
-| H | Recorded occurrence, with or without a row | Settled: receives no row on regeneration; its fact survives independently (unplaced-recorded if the row is dropped). Undo never restores a row. |
 
 ## Status & focus (`resolvePlannedWorkoutStatus`, `resolveScheduleFocus`)
 
@@ -168,23 +146,19 @@ Status precedence is locked and session-derived facts always outrank dates:
 
 1. completed session → **`completed`**
 2. live in-progress session → **`in-progress`**
-3. recorded `NotPerformedOccurrence` (M17) → **`not-performed`** (an explicit
-   user attestation, never date-derived)
-4. planned date before today → **`past-due`**
-5. otherwise → **`planned`**
+3. planned date before today → **`past-due`**
+4. otherwise → **`planned`**
 
 Focus over the run's planned items (`ScheduleFocusDto`):
 
 - **today** — the item dated exactly today, whatever its status (a workout
   completed today is still today's workout); null when nothing is planned for
   today.
-- **next** — the earliest **not-completed, not-recorded** item strictly after
-  today; null when nothing future remains.
-- **pastDue** — the not-completed, not-in-progress, not-recorded items before
-  today, with `{ count, earliest }` (in-progress items are never "behind";
-  recorded occurrences are settled, not behind); null when nothing is behind.
-- **notPerformedRecorded** — the run's recorded occurrences among the planned
-  items (M17), so surfaces can count them without recomputing.
+- **next** — the earliest **not-completed** item strictly after today; null
+  when nothing future remains.
+- **pastDue** — the not-completed, not-in-progress items before today, with
+  `{ count, earliest }` (in-progress items are never "behind"); null when
+  nothing is behind.
 
 Presentation consumes these results as-is; no component recomputes status,
 focus, "today" or eligibility.
@@ -194,9 +168,8 @@ focus, "today" or eligibility.
 - **`GetEnrollmentScheduleUseCase`** — input `{ userId, program (the already
   hydrated aggregate), now }` (the `GetProgramEnrollmentUseCase` convention:
   one catalog hydration per request). Resolves the run by the trusted
-  `(userId, program.id)` pair, then reads five bounded statements: enrollment
-  lookup + planned rows + completed ids + in-progress ids + recorded-not-performed
-  facts. Not enrolled →
+  `(userId, program.id)` pair, then reads four bounded statements: enrollment
+  lookup + planned rows + completed ids + in-progress ids. Not enrolled →
   `ok(null)`; no planned rows → `configured: false` (never invented dates); a
   planned row outside the program aggregate → thrown contract violation
   (corrupt state, never silently omitted).
@@ -215,9 +188,8 @@ focus, "today" or eligibility.
   root.
 - **M16 consumes the same rows read-only:** `GetEnrollmentFollowThroughUseCase`
   issues the same bounded shape as the schedule read (enrollment lookup, planned
-  rows, and the three independent occurrence reads — completed activity,
-  in-progress ids, recorded-not-performed facts) and reports how the CURRENT
-  plan held up. See
+  rows, session-derived occurrence facts — completed activity plus in-progress
+  ids) and reports how the CURRENT plan held up. See
   [Plan Follow-Through](follow-through.md) for the shared limitations (no
   historical plan, no schedule mutation).
 
@@ -237,28 +209,18 @@ SELECT id FROM program_enrollments WHERE id = $1 FOR NO KEY UPDATE
   order and can never form a lock cycle (proved by forced-overlap integration
   tests, not by a lucky `Promise.all`).
 - `FOR NO KEY UPDATE` (not `FOR UPDATE`) keeps the lock compatible with the
-  `FOR KEY SHARE` a bare `WorkoutSession` INSERT takes for its FK check — a
-  session row's FK probe never waits on the parent lock (proved by test). The
-  **production** creation path, however, deliberately takes the enrollment lock
-  *first* (M17), so workout start queues behind planning, lifecycle and
-  settlement writes — same row, same order, no cycles, no retry.
-- **M17 settlement joins the same contract:** record, undo and start all lock
-  this row first, read their facts under the lock, and act in one transaction
-  (see [Run Closure & Not-Performed Settlement](run-closure.md) for the
-  serialization and guarded-delete rules).
+  `FOR KEY SHARE` a `WorkoutSession` INSERT takes for its FK check — training
+  never waits on scheduling and vice versa (proved by test).
 - **`replaceAllForEnrollment`** is whole-set replacement: lock → zero rows
   means `false` (nothing written) → DELETE → one multi-row INSERT (empty set
-  is valid) → `true`. **`reschedule`** locks, re-checks the occurrence's M17
-  not-performed fact **under that lock**, and only then runs one conditional
-  UPDATE — returning a typed outcome: `moved`, `not-moved` (zero rows, or a
-  vanished run), or `recorded-not-performed` (**zero planned writes**). No
-  retry loops exist anywhere in M15.
+  is valid) → `true`. **`reschedule`** locks, then performs one conditional
+  UPDATE (zero rows → `false`). No retry loops exist anywhere in M15.
 - **Constraint translation:** only a violation naming exactly
   `planned_workouts_enrollment_date_unique` during `reschedule` becomes
   `PlannedDateConflictError` (the one business conflict: the target date is
   already taken). PK/unique violations during replacement and every other
   database error stay unexpected and propagate.
-- **Stale writes:** a `not-moved` result triggers **exactly one** read-only
+- **Stale writes:** a `false` result triggers **exactly one** read-only
   `findByUserAndProgram` re-check. No current enrollment **or a different
   EnrollmentId** (an M14 restart replacement) → `NOT_ENROLLED`; the same
   enrollment → `SCHEDULE_CHANGED`. Never a second write, never a retry, and a
@@ -324,21 +286,11 @@ and the authored weeks (which are unchanged), anchored at
 - *Configured:* the past-due summary (count + earliest), the seven-slot
   Monday–Sunday week (`<ol>`, today marked with the word "Today" +
   `aria-current="date"`, empty days read "No workout planned", statuses as
-  text: Planned / In progress / Completed / Past due / Recorded as not
-  performed), the weekly caption, a collapsed **"Change training days"**
-  disclosure whose copy states the
+  text: Planned / In progress / Completed / Past due), the weekly caption, a
+  collapsed **"Change training days"** disclosure whose copy states the
   replacement semantics ("Saving replaces the dates of future workouts;
   completed workouts stay in history and in-progress workouts keep their
   current date"), and a **"Move"** disclosure on each never-started cell.
-- **Settlement affordances (M17):** `planned` / `past-due` / `in-progress`
-  cells expose the **"Didn't train this"** record form (with the
-  motion-sensitive Move disclosure warning that recording removes an empty
-  in-progress workout); a `not-performed` cell exposes **"Undo"** only — no
-  Start, no Move; `completed` cells expose no settlement control. Recorded
-  occurrences with no current row appear in the **unplaced list** below the
-  grid (authored labels, Undo, no invented date). Copy and the full state
-  matrix live in [Run Closure & Not-Performed Settlement](run-closure.md) and
-  [UI](ui.md).
 - **Move gating (display):** `planned` and `past-due` expose Move (the
   approved plan names manual rescheduling as a past-due remedy);
   `in-progress` shows the existing **Resume** link and `completed` shows no
@@ -346,34 +298,20 @@ and the authored weeks (which are unchanged), anchored at
   target today/future accepted, target in the past rejected
   (`DATE_IN_PAST`), occupied date rejected (`DATE_ALREADY_PLANNED`), same
   date = success/no-op with no write, completed/in-progress blocked, stale
-  state → typed `NOT_ENROLLED` / `SCHEDULE_CHANGED` without retry. A record
-  that committed **after** the pre-read but before the locked update is
-  re-checked under the enrollment lock and refuses the move
-  (`OCCURRENCE_RECORDED_NOT_PERFORMED`) with zero planned writes, so a settled
-  occurrence is never left looking movable.
+  state → typed `NOT_ENROLLED` / `SCHEDULE_CHANGED` without retry.
 - *Completed run:* the page renders no scheduling section at all — M14's
-  completion/restart/leave surface stays the only lifecycle state. A
-  **concluded-but-incomplete** run (M17) still reads planning and renders the
-  calendar (its remaining occurrences are recorded, shown with the
-  `not-performed` status and Undo) together with the "Run closed" callout.
+  completion/restart/leave surface stays the only lifecycle state.
 
 ## Intentional bounded race (session writes vs planning writes)
 
 Planning writes are deliberately **not** serialized against session
-**content** writes (logging sets, completing) — a session may complete between
-an eligibility read and a planning write. The consequence is bounded and
-cosmetic: the next read reports the session-derived status, and no truth is
-mutated — planning is intent, sessions are fact. M15 does not lock
-`WorkoutSession` rows for content writes, does not add cross-repository
-transactions, and never alters M14/M8 semantics to close it.
-
-Two paths were later serialized on purpose (M17): **workout start** takes the
-enrollment lock before creating its session (start queues behind planning and
-lifecycle writes instead of racing them), and **settlement** (record/undo)
-runs entirely under the same lock with a version-pinned guarded delete. So the
-residual bounded race is exactly: a content write landing between a planning
-read and a planning write — never a duplicated settlement, never a destroyed
-session.
+start/complete — that is exactly what the `NO KEY UPDATE` / `KEY SHARE`
+compatibility buys. A session may begin or complete between an eligibility
+read and a planning write. The consequence is bounded and cosmetic: the next
+read reports the session-derived status, and no truth is mutated — planning
+is intent, sessions are fact. M15 does not lock `WorkoutSession` rows, does
+not add cross-repository transactions, and never alters M14/M8 semantics to
+close it.
 
 ## Truthfulness rules (what the UI is not allowed to claim)
 
@@ -383,17 +321,9 @@ session.
 - **Missed dates stay required.** A past-due planned workout remains
   incomplete, remains part of completion, and is shown with neutral wording
   ("behind schedule") — never "failed", "missed" or "skipped" (M15 creates no
-  fact of that kind). Nothing auto-resolves or auto-skips it: a past-due date
-  never becomes a record.
-- **Regeneration never touches performed work:** settled occurrences —
-  completed **or** recorded — get no row (history and facts are untouched),
-  and frozen in-progress rows keep their date.
-- **Not-performed wording (M17, locked):** the stored status is exactly
-  **"Recorded as not performed"**, the action is **"Didn't train this"**, the
-  retraction is **"Undo"** — never `skipped` / `missed` / `failed` /
-  `incomplete` at the workout level, never a confirmation dialog, never a
-  bulk action. Recording is an explicit attestation; no surface claims the
-  system detected it. See [Run Closure & Not-Performed Settlement](run-closure.md).
+  fact of that kind). Nothing auto-reschedules or auto-skips it.
+- **Regeneration never touches performed work:** completed occurrences get no
+  row (history is untouched) and frozen in-progress rows keep their date.
 - **Completed runs are never sold as active schedules** on either surface.
 - No enrollment id, `scheduled_workout_id`, session id or user id is ever
   placed in a form, link or URL; navigation uses authored public coordinates
@@ -404,9 +334,7 @@ session.
 - **Domain:** `tests/unit/domain/value-objects/{planned-date,training-days}.test.ts`,
   `entities/planned-workout.test.ts`,
   `services/{planned-schedule,schedule-focus}.test.ts` — generation rules and
-  edge cases A–G, status/focus precedence, ordering, cross-enrollment guard;
-  `services/planned-schedule-not-performed.test.ts` — M17 settled-exclusion
-  (edge case H).
+  edge cases A–G, status/focus precedence, ordering, cross-enrollment guard.
 - **Application:** `get-enrollment-schedule`, `configure-training-days`,
   `reschedule-planned-workout` use-case tests (ownership, one hydration,
   stale mappings, no-retry, session-never-written), plus the dashboard
@@ -417,9 +345,8 @@ session.
   replacement regardless of set size), `planned-workout-lifecycle`
   (leave/restart cascade, detached history, no orphans),
   `planned-workout-concurrency` (forced-overlap matrix: configure‖configure,
-  configure/reschedule ‖ restart/leave in both orders, deadlock absence, a
-  bare session INSERT's FK probe never blocked), the InMemory/mapper fakes, and
-  the in-progress
+  configure/reschedule ‖ restart/leave in both orders, deadlock absence, the
+  session INSERT never blocked), the InMemory/mapper fakes, and the in-progress
   session projection (1-statement bound via the postgres.js debug hook).
 - **Presentation & actions:** dashboard card/view/page + `lib/dates`
   formatter; program-detail page and section (Move gating, disclosures,

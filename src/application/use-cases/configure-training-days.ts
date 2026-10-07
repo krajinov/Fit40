@@ -32,7 +32,6 @@
  * session, or change progression, records or training history.
  */
 
-import type { NotPerformedOccurrenceRepository } from '@/application/ports/not-performed-occurrence-repository';
 import type { PlannedWorkoutRepository } from '@/application/ports/planned-workout-repository';
 import type { ProgramEnrollmentRepository } from '@/application/ports/program-enrollment-repository';
 import type { ProgramRepository } from '@/application/ports/program-repository';
@@ -71,7 +70,6 @@ export class ConfigureTrainingDaysUseCase {
     private readonly enrollmentRepository: ProgramEnrollmentRepository,
     private readonly plannedWorkoutRepository: PlannedWorkoutRepository,
     private readonly sessionRepository: WorkoutSessionRepository,
-    private readonly notPerformedRepository: NotPerformedOccurrenceRepository,
   ) {}
 
   async execute(
@@ -113,14 +111,11 @@ export class ConfigureTrainingDaysUseCase {
     const today = plannedDateFromInstant(input.now);
 
     // Bounded, enrollment-scoped facts: the run's current planning, its
-    // completed occurrences, its live occurrences and its recorded-not-performed
-    // occurrences (M17 execution settlement). No session hydration, and the new
-    // fact read is exactly ONE statement — never one query per planned row.
-    const [currentPlan, completedIds, inProgressIds, notPerformedFacts] = await Promise.all([
+    // completed occurrences and its live occurrences. No session hydration.
+    const [currentPlan, completedIds, inProgressIds] = await Promise.all([
       this.plannedWorkoutRepository.listByEnrollment(enrollment.id),
       this.sessionRepository.listCompletedScheduledWorkoutIds(enrollment.id),
       this.sessionRepository.listInProgressScheduledWorkoutIds(enrollment.id),
-      this.notPerformedRepository.listByEnrollment(enrollment.id),
     ]);
 
     const generated = generatePlannedSchedule({
@@ -131,10 +126,6 @@ export class ConfigureTrainingDaysUseCase {
       completedIds,
       inProgressIds,
       currentPlan,
-      // Settled occurrences (completed ∪ recorded) receive no row: a workout the
-      // user recorded as not performed is never re-placed, and its existing row
-      // (if any) is simply not carried into the replacement.
-      notPerformedIds: notPerformedFacts.map((fact) => fact.scheduledWorkoutId),
     });
     if (!generated.ok) {
       // A contract violation, not a business outcome: a row belonging to

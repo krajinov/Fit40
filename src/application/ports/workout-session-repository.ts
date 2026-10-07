@@ -1,28 +1,12 @@
 /**
  * WorkoutSession repository port.
  *
- * Defines the contract that the in-memory and Drizzle repositories must
- * satisfy. The application layer depends only on this port.
+ * Defines the contract that the in-memory (and future Drizzle) repository
+ * must satisfy. The application layer depends only on this port.
  *
- * This port owns session CONTENT persistence and reading:
- * - {@link WorkoutSessionRepository.save} UPDATEs an existing aggregate and can
- *   never insert one — a snapshot whose row no longer exists cannot resurrect
- *   it, it fails as stale.
- *
- * Creation is deliberately NOT here (M17 Slice 6). A brand-new session is
- * written by the enrollment-serialized mutation authority
- * (`RunOccurrenceWriteRepository.createSessionForOccurrence`), because creating
- * a session must serialize on the run's enrollment row with recording a
- * not-performed settlement. There is exactly one production INSERT path into
- * `workout_sessions`, and it is that authority — this port exposes no way to
- * write a new row, so no caller can bypass the lock by accident.
- *
- * The typed errors below are the session write VOCABULARY: use cases map them
- * to business outcomes without seeing database details. `save` raises
- * `SessionStaleVersionError`, `SessionEnrollmentChangedError` and
- * `SessionOccurrenceKeyConflictError`; the creation authority raises
- * `SessionAlreadyExistsError`, `SessionEnrollmentNotFoundError` and
- * `SessionOccurrenceKeyConflictError`.
+ * `save` is an upsert by session ID, supporting both insert and update.
+ * It rejects concurrent conflicts with the typed errors below so use cases
+ * can map them to business outcomes without seeing database details.
  */
 
 import type { WorkoutSession } from '@/domain/entities/workout-session';
@@ -34,12 +18,10 @@ import type {
 import type { CompletedWorkoutSession } from '@/application/ports/training-history-repository';
 
 /**
- * Thrown when a session for the same enrollment and scheduled workout already
- * exists (the database's one-session-per-occurrence-per-enrollment
- * constraint), or when the session id is already taken. Raised by the
- * enrollment-serialized creation authority
- * (`RunOccurrenceWriteRepository.createSessionForOccurrence`). The caller
- * should map this to the `SESSION_ALREADY_EXISTS` business outcome.
+ * Thrown by `save` when a second session for the same enrollment and
+ * scheduled workout races the database's one-session-per-occurrence-per-
+ * enrollment constraint. The caller should map this to the
+ * `SESSION_ALREADY_EXISTS` business outcome.
  */
 export class SessionAlreadyExistsError extends Error {
   constructor(readonly scheduledWorkoutId: string) {
@@ -49,12 +31,10 @@ export class SessionAlreadyExistsError extends Error {
 }
 
 /**
- * Thrown when the session's enrollment does not exist: a concurrent leave
- * deleted the enrollment before the write. Raised by the enrollment-serialized
- * creation authority
- * (`RunOccurrenceWriteRepository.createSessionForOccurrence`), whose locked
- * enrollment-presence check makes it a defensive backstop. The caller should
- * re-check enrollment and map this to the `NOT_ENROLLED` business outcome.
+ * Thrown by `save` when the session's enrollment no longer exists: a
+ * concurrent leave deleted the enrollment between the caller's enrollment
+ * check and the insert. The caller should re-check enrollment and map this
+ * to the `NOT_ENROLLED` business outcome.
  */
 export class SessionEnrollmentNotFoundError extends Error {
   constructor(readonly enrollmentId: string) {
@@ -92,10 +72,9 @@ export class SessionEnrollmentChangedError extends Error {
 }
 
 /**
- * Thrown by the session INSERT (the run-occurrence write authority) and by
- * `save` when PostgreSQL rejects the whole-aggregate write on the partial
- * unique index `exercise_logs_session_occurrence_key_unique` — the database
- * backstop for the domain's session-unique `occurrenceKey`
+ * Thrown by `save` when PostgreSQL rejects the whole-aggregate write on the
+ * partial unique index `exercise_logs_session_occurrence_key_unique` — the
+ * database backstop for the domain's session-unique `occurrenceKey`
  * invariant. Distinguished from the one-session-per-(enrollment, scheduled
  * workout) constraint BY CONSTRAINT NAME, so a colliding/corrupt snapshot is
  * a typed data-integrity failure instead of `SessionAlreadyExistsError`.
@@ -147,14 +126,8 @@ export interface WorkoutSessionRepository {
   ): Promise<WorkoutSession | null>;
 
   /**
-   * Updates an EXISTING session and returns the PERSISTED aggregate carrying
-   * the committed `version`.
-   *
-   * UPDATE only: this must never insert. An aggregate whose row no longer
-   * exists can therefore not recreate it — a hard-deleted session stays
-   * deleted, and the stale writer sees {@link SessionStaleVersionError} (the
-   * same outcome as any other stale snapshot) instead of silently restoring a
-   * session the run no longer has.
+   * Saves a session (insert or update by session ID) and returns the
+   * PERSISTED aggregate carrying the committed `version`.
    *
    * Updates of enrollment-owned sessions are conditional on the snapshot's
    * version AND its enrollment identity, so a leave (or any enrollment
@@ -162,14 +135,16 @@ export interface WorkoutSessionRepository {
    * mutating detached history.
    *
    * The versioning policy belongs to the repository, not to its callers: an
-   * UPDATE commits `version + 1`. A caller that builds a DTO from a successful
-   * save MUST use this return value and never the pre-save snapshot —
-   * otherwise the DTO carries a version the database never held, and the
-   * caller's next occurrence mutation would send that stale token as
+   * UPDATE commits `version + 1` while a first INSERT stores the snapshot's
+   * own version. A caller that builds a DTO from a successful save MUST use
+   * this return value and never the pre-save snapshot — otherwise the DTO
+   * carries a version the database never held, and the caller's next
+   * occurrence mutation would send that stale token as
    * `expectedSessionVersion` and be rejected with `SESSION_MODIFIED` despite
    * the preceding write having succeeded.
    *
-   * May throw {@link SessionStaleVersionError},
+   * May throw {@link SessionAlreadyExistsError},
+   * {@link SessionEnrollmentNotFoundError}, {@link SessionStaleVersionError},
    * {@link SessionEnrollmentChangedError}, or
    * {@link SessionOccurrenceKeyConflictError}.
    */

@@ -50,29 +50,6 @@ export const reschedulePlannedWorkoutSchema = z.object({
   date: plannedDateSchema,
 });
 
-/**
- * M17 Slice 11 — the not-performed settlement actions are addressed exactly
- * like a move: the public slug plus the authored route coordinates. There is
- * deliberately NO field for an enrollment id, a scheduled-workout id, a
- * session id, a user id or `recordedAt`: the server resolves the run from the
- * trusted session and owns the attestation instant, so none of those can
- * travel in form data.
- *
- * The record and undo shapes are identical; they stay two named schemas
- * because they authorize two different settlements and may diverge.
- */
-export const recordNotPerformedSchema = z.object({
-  programSlug: programSlugSchema,
-  weekNumber: weekNumberSchema,
-  workoutOrder: workoutOrderSchema,
-});
-
-export const undoNotPerformedSchema = z.object({
-  programSlug: programSlugSchema,
-  weekNumber: weekNumberSchema,
-  workoutOrder: workoutOrderSchema,
-});
-
 /** Repeated `weekday` checkbox values as strings (the checkbox-array convention). */
 export function parseWeekdayValues(formData: FormData): ReadonlyArray<string> {
   return formData.getAll('weekday').map((value) => (typeof value === 'string' ? value : ''));
@@ -93,19 +70,6 @@ export function parseReschedulePlannedWorkoutFormData(formData: FormData) {
     weekNumber: formData.get('weekNumber'),
     workoutOrder: formData.get('workoutOrder'),
     date: formData.get('date'),
-  };
-}
-
-/**
- * The shape both M17 settlement schemas expect from a native submission: the
- * authored coordinates only. Every other submitted field (identity, clock,
- * database ids) is ignored by construction.
- */
-export function parseAuthoredOccurrenceFormData(formData: FormData) {
-  return {
-    programSlug: formData.get('programSlug'),
-    weekNumber: formData.get('weekNumber'),
-    workoutOrder: formData.get('workoutOrder'),
   };
 }
 

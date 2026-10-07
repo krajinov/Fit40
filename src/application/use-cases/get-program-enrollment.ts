@@ -71,9 +71,6 @@ export class GetProgramEnrollmentUseCase {
 
     return ok({
       status: 'enrolled',
-      // The run's identity: callers composing further run-level reads into this
-      // view fence them to exactly this enrollment (the M17 closure read).
-      enrollmentId: enrollment.id,
       enrolledAt: enrollment.enrolledAt.toISOString(),
       progress: {
         totalWorkouts: progress.totalWorkouts,

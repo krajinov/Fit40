@@ -12,45 +12,35 @@
 import { ConfigureTrainingDaysUseCase } from '@/application/use-cases/configure-training-days';
 import { GetEnrollmentFollowThroughUseCase } from '@/application/use-cases/get-enrollment-follow-through';
 import { GetEnrollmentScheduleUseCase } from '@/application/use-cases/get-enrollment-schedule';
-import { RecordNotPerformedUseCase } from '@/application/use-cases/record-not-performed';
 import { ReschedulePlannedWorkoutUseCase } from '@/application/use-cases/reschedule-planned-workout';
-import { UndoNotPerformedUseCase } from '@/application/use-cases/undo-not-performed';
 import {
-  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
-  runOccurrenceWrites,
-  followThroughExecutionFactsRepository,
-  scheduleExecutionFactsRepository,
   workoutSessionRepository,
 } from '@/infrastructure/database/repositories';
 
 /**
  * The run's training calendar (planned dates, statuses and focus). Read-only:
  * the caller passes the program aggregate it already loaded, so one request
- * hydrates the program exactly once. The session execution truth and the
- * recorded-not-performed facts come from ONE coherent snapshot port — this
- * read never touches the write authority.
+ * hydrates the program exactly once.
  */
 export const getEnrollmentScheduleUseCase = new GetEnrollmentScheduleUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
-  scheduleExecutionFactsRepository,
+  workoutSessionRepository,
 );
 
 /**
  * The run's plan follow-through (M16): the last 8 UTC weeks of calendar intent
- * reconciled with session facts — the session execution truth and the recorded
- * facts come from ONE coherent snapshot port. Read-only, and like the schedule
- * read the caller passes the program aggregate it already loaded, so one
- * request hydrates the program exactly once.
+ * reconciled with session facts. Read-only, and like the schedule read the
+ * caller passes the program aggregate it already loaded, so one request
+ * hydrates the program exactly once.
  */
 export const getEnrollmentFollowThroughUseCase = new GetEnrollmentFollowThroughUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
-  followThroughExecutionFactsRepository,
-  notPerformedOccurrenceRepository,
+  workoutSessionRepository,
 );
 
 /** Sets or changes the run's training days, regenerating its calendar. */
@@ -59,7 +49,6 @@ export const configureTrainingDaysUseCase = new ConfigureTrainingDaysUseCase(
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
-  notPerformedOccurrenceRepository,
 );
 
 /** Moves one future planned workout of the run to another calendar date. */
@@ -68,23 +57,4 @@ export const reschedulePlannedWorkoutUseCase = new ReschedulePlannedWorkoutUseCa
   programEnrollmentRepository,
   plannedWorkoutRepository,
   workoutSessionRepository,
-  notPerformedOccurrenceRepository,
-);
-
-/**
- * Records / undoes the run's not-performed settlement (M17). Both delegate to
- * the SAME `DrizzleRunOccurrenceWrites` singleton that creates workout sessions,
- * so record, undo and start serialize on one enrollment lock; constructing a
- * second instance here would be a second mutation authority.
- */
-export const recordNotPerformedUseCase = new RecordNotPerformedUseCase(
-  programRepository,
-  programEnrollmentRepository,
-  runOccurrenceWrites,
-);
-
-export const undoNotPerformedUseCase = new UndoNotPerformedUseCase(
-  programRepository,
-  programEnrollmentRepository,
-  runOccurrenceWrites,
 );

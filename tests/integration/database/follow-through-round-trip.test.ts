@@ -20,10 +20,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type {
-  ConfiguredFollowThroughDto,
-  UnconfiguredFollowThroughDto,
-} from '@/application/dto/follow-through';
+import type { ConfiguredFollowThroughDto } from '@/application/dto/follow-through';
 import {
   FOLLOW_THROUGH_WEEK_COUNT,
   GetEnrollmentFollowThroughUseCase,
@@ -36,13 +33,11 @@ import {
   type WorkoutSession,
 } from '@/domain/entities/workout-session';
 import type { ExerciseId } from '@/domain/types/ids';
-import { DrizzleFollowThroughExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository';
-import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
 import { DrizzlePlannedWorkoutRepository } from '@/infrastructure/database/repositories/drizzle-planned-workout-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
+import { DrizzleWorkoutSessionRepository } from '@/infrastructure/database/repositories/drizzle-workout-session-repository';
 import * as schema from '@/infrastructure/database/schema';
 
-import { countFacts, insertFact } from './not-performed-fixtures';
 import {
   enrollmentIdValue,
   firstCatalogExerciseId,
@@ -55,8 +50,6 @@ import {
 import { reps, seedEnrollment, userId, workoutSessionId } from './personal-record-fixtures';
 import {
   closeDatabase,
-  followThroughExecutionFactsRepository,
-  notPerformedOccurrenceRepository,
   plannedWorkoutRepository,
   programEnrollmentRepository,
   programRepository,
@@ -64,7 +57,6 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
-import { insertSession } from './session-fixtures';
 
 const PROGRAM_SLUG = 'fit40-beginner-strength';
 const OTHER_PROGRAM_SLUG = 'strong-at-home';
@@ -191,13 +183,13 @@ async function saveSession(input: {
   if (!logged.ok) throw new Error(logged.error.message);
 
   if (input.completedAt === undefined) {
-    await insertSession(logged.data);
+    await workoutSessionRepository.save(logged.data);
     return logged.data;
   }
 
   const completed = completeWorkoutSession(logged.data, new Date(input.completedAt));
   if (!completed.ok) throw new Error(completed.error.message);
-  await insertSession(completed.data);
+  await workoutSessionRepository.save(completed.data);
   return completed.data;
 }
 
@@ -206,8 +198,7 @@ function makeUseCase(): GetEnrollmentFollowThroughUseCase {
   return new GetEnrollmentFollowThroughUseCase(
     programEnrollmentRepository,
     plannedWorkoutRepository,
-    followThroughExecutionFactsRepository,
-    notPerformedOccurrenceRepository,
+    workoutSessionRepository,
   );
 }
 
@@ -221,20 +212,6 @@ async function readReport(
   if (!result.ok) throw new Error(result.error.message);
   if (result.data === null || !result.data.configured) {
     throw new Error('expected a configured follow-through report');
-  }
-  return result.data;
-}
-
-/** Runs the real read and asserts the no-calendar (unconfigured) report came back. */
-async function readUnconfiguredReport(
-  owner: string,
-  program: TrainingProgram,
-): Promise<UnconfiguredFollowThroughDto> {
-  const result = await makeUseCase().execute({ userId: owner, program, now: NOW });
-  expect(result.ok).toBe(true);
-  if (!result.ok) throw new Error(result.error.message);
-  if (result.data === null || result.data.configured) {
-    throw new Error('expected an unconfigured follow-through report');
   }
   return result.data;
 }
@@ -332,7 +309,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 0,
       started: 0,
       pastDue: 0,
-      notPerformed: 0,
     });
     expect(dto.weeks[1]).toEqual({
       weekStart: '2026-09-14T00:00:00.000Z',
@@ -344,7 +320,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 1,
       started: 0,
       pastDue: 1,
-      notPerformed: 0,
     });
     expect(dto.weeks[2]).toEqual({
       weekStart: '2026-09-21T00:00:00.000Z',
@@ -356,7 +331,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 0,
       started: 1,
       pastDue: 0,
-      notPerformed: 0,
     });
 
     // Seven planned rows, seven execution states: three completions (one early,
@@ -370,7 +344,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 1,
       started: 1,
       pastDue: 1,
-      notPerformed: 0,
     });
     expect(dto.totals.completed - (dto.totals.completedEarly + dto.totals.completedLate)).toBe(1);
     expect(
@@ -380,8 +353,7 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
     // no total (the horizon is the eight weeks ending with the current one).
     expect(dto.totals.planned).toBe(7);
 
-    // Totals are the sum of the returned rows — every counter, including the M17
-    // recorded-not-performed one, and nothing that a week did not report.
+    // Totals are the sum of the returned rows.
     const summed = dto.weeks.reduce(
       (sum, week) => ({
         planned: sum.planned + week.planned,
@@ -390,17 +362,8 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
         completedLate: sum.completedLate + week.completedLate,
         started: sum.started + week.started,
         pastDue: sum.pastDue + week.pastDue,
-        notPerformed: sum.notPerformed + week.notPerformed,
       }),
-      {
-        planned: 0,
-        completed: 0,
-        completedEarly: 0,
-        completedLate: 0,
-        started: 0,
-        pastDue: 0,
-        notPerformed: 0,
-      },
+      { planned: 0, completed: 0, completedEarly: 0, completedLate: 0, started: 0, pastDue: 0 },
     );
     expect(summed).toEqual(dto.totals);
   });
@@ -445,7 +408,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 0,
       started: 0,
       pastDue: 0,
-      notPerformed: 0,
     });
   });
 
@@ -522,7 +484,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 1,
       started: 0,
       pastDue: 0,
-      notPerformed: 0,
     });
 
     // The other run answers for itself, unaffected by this one.
@@ -534,7 +495,6 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       completedLate: 0,
       started: 0,
       pastDue: 0,
-      notPerformed: 0,
     });
 
     // Detached history survives as the owner's data, attached to no run.
@@ -545,7 +505,7 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
     ).toEqual([]);
   });
 
-  it('reads the report with five SELECTs and no write', async () => {
+  it('reads the report with four SELECTs and no write', async () => {
     const run = await seedRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN });
     const exercise = await firstCatalogExerciseId();
     await configure(run, [{ occurrence: 'fit40-beginner-strength-w1-1', date: '2026-08-04' }]);
@@ -576,8 +536,7 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       const useCase = new GetEnrollmentFollowThroughUseCase(
         new DrizzleProgramEnrollmentRepository(loggingDb),
         new DrizzlePlannedWorkoutRepository(loggingDb),
-        new DrizzleFollowThroughExecutionFactsRepository(loggingDb),
-        new DrizzleNotPerformedOccurrenceRepository(loggingDb),
+        new DrizzleWorkoutSessionRepository(loggingDb),
       );
 
       await useCase.execute({ userId: OWNER, program: run.program, now: NOW });
@@ -586,192 +545,18 @@ describe('M16 plan follow-through over real PostgreSQL', () => {
       const result = await useCase.execute({ userId: OWNER, program: run.program, now: NOW });
 
       expect(result.ok).toBe(true);
-      // THREE bounded statements: the enrollment lookup, the run's planned rows,
-      // and ONE coherent execution-facts statement (a single UNION ALL covering
-      // the completed activity, the in-progress sessions and the M17 facts) —
-      // never one query per row, and never two reads that could tear.
-      expect(queries).toHaveLength(3);
-      expect(queries.filter((query) => !query.startsWith('select') && !query.startsWith('('))).toEqual([]);
+      // Four bounded statements: the enrollment lookup, the run's planned rows,
+      // and the two independent occurrence reads — never one query per row.
+      expect(queries).toHaveLength(4);
+      expect(queries.filter((query) => !query.startsWith('select'))).toEqual([]);
       expect(queries.some((query) => query.includes('program_enrollments'))).toBe(true);
       expect(queries.some((query) => query.includes('planned_workouts'))).toBe(true);
-      // The execution facts are ONE statement touching both tables — the
-      // snapshot guarantee, observable at the wire.
-      const factsStatements = queries.filter(
-        (query) =>
-          query.includes('workout_sessions') && query.includes('not_performed_workouts'),
-      );
-      expect(factsStatements).toHaveLength(1);
+      expect(queries.filter((query) => query.includes('workout_sessions'))).toHaveLength(2);
       // Read-only: the report never inserts, updates or deletes anything.
       expect(queries.filter((query) => /^(insert|update|delete)/.test(query))).toEqual([]);
     } finally {
       await loggingClient.end();
     }
-  });
-});
-
-/**
- * M17 Slice 9 — the three locked buckets, on real PostgreSQL.
- *
- * One combined scenario, so the distinctions are proved against real rows and
- * the real read path rather than against stubs: a recorded fact whose planned row
- * is inside the reported weeks, one whose planned row is outside them, and one
- * with no row at all. A second run's record proves nothing leaks.
- */
-describe('M17 Slice 9 — recorded facts in the M16 report over real PostgreSQL', () => {
-  const IN_HORIZON_RECORDED = 'fit40-beginner-strength-w2-2';
-  const IN_HORIZON_PLAIN = 'fit40-beginner-strength-w1-3';
-  const OUT_OF_HORIZON_RECORDED = 'fit40-beginner-strength-w3-2';
-  /** An authored occurrence this run has no planned row for. */
-  const ROWLESS_RECORDED = 'fit40-beginner-strength-w3-1';
-
-  beforeEach(async () => {
-    await resetAndSeed();
-  });
-
-  it('places each recorded fact in its own bucket, widening no horizon', async () => {
-    const run = await seedRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN });
-    const other = await seedRun({
-      owner: OTHER_OWNER,
-      programSlug: OTHER_PROGRAM_SLUG,
-      enrollmentId: OTHER_RUN,
-    });
-
-    await configure(run, [
-      // Bucket 1: inside the eight reported weeks, recorded.
-      { occurrence: IN_HORIZON_RECORDED, date: '2026-09-15' },
-      // Inside the horizon, not recorded.
-      { occurrence: IN_HORIZON_PLAIN, date: '2026-09-16' },
-      // Bucket 2: the next week — beyond the last reported window, recorded.
-      { occurrence: OUT_OF_HORIZON_RECORDED, date: '2026-09-30' },
-    ]);
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: IN_HORIZON_RECORDED,
-      recordedAt: '2026-09-16T18:00:00.000Z',
-    });
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: OUT_OF_HORIZON_RECORDED,
-      recordedAt: '2026-09-30T18:00:00.000Z',
-    });
-    // Bucket 3: recorded, with no planned row for its authored occurrence.
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: ROWLESS_RECORDED,
-      recordedAt: '2026-09-24T18:00:00.000Z',
-    });
-
-    // Another run of another program with a rowed and a rowless record of its own.
-    const [otherRowed, otherRowless] = other.occurrenceIds;
-    if (otherRowed === undefined || otherRowless === undefined) {
-      throw new Error('expected the seeded program to author at least two occurrences');
-    }
-    await configure(other, [{ occurrence: otherRowed, date: '2026-09-16' }]);
-    await insertFact({
-      enrollmentId: OTHER_RUN,
-      scheduledWorkoutId: otherRowless,
-      recordedAt: '2026-09-24T18:00:00.000Z',
-    });
-
-    const dto = await readReport(OWNER, run.program);
-
-    // Bucket 1 — one week only: the recorded row is planned AND not performed
-    // (never past due), the unrecorded row is genuinely behind.
-    expect(FOLLOW_THROUGH_WEEK_COUNT).toBe(8);
-    expect(dto.weeks.map((week) => week.weekStart)).toEqual(['2026-09-14T00:00:00.000Z']);
-    expect(dto.weeks[0]).toMatchObject({
-      planned: 2,
-      // The recorded row is settled; the unrecorded row is genuinely behind.
-      completed: 0,
-      completedEarly: 0,
-      completedLate: 0,
-      started: 0,
-      pastDue: 1,
-      notPerformed: 1,
-    });
-
-    // Bucket 2 — the out-of-horizon row contributes no week, no count and no
-    // total: the fact pulled nothing into the report (2 of the 3 rows are in it).
-    expect(dto.weeks.some((week) => week.weekStart === '2026-09-28T00:00:00.000Z')).toBe(false);
-    expect(dto.totals).toEqual({
-      planned: 2,
-      completed: 0,
-      completedEarly: 0,
-      completedLate: 0,
-      started: 0,
-      pastDue: 1,
-      notPerformed: 1,
-    });
-
-    // Bucket 3 — the rowless record is a count and nothing else. The
-    // out-of-horizon occurrence has a row, so it is NOT part of this count.
-    expect(dto.notPerformedUnplaced).toBe(1);
-
-    // Read-only, and run-scoped: the persisted facts are untouched, and the other
-    // run's record is reported only to its own owner.
-    expect(await countFacts(RUN)).toBe(3);
-    expect(await countFacts(OTHER_RUN)).toBe(1);
-
-    const otherDto = await readReport(OTHER_OWNER, other.program);
-    expect(otherDto.totals.planned).toBe(1);
-    expect(otherDto.totals.notPerformed).toBe(0);
-    expect(otherDto.notPerformedUnplaced).toBe(1);
-  });
-
-  it('counts every rowless recorded fact for a run with no planned rows, still no calendar', async () => {
-    const run = await seedRun({ owner: OWNER, programSlug: PROGRAM_SLUG, enrollmentId: RUN });
-    const other = await seedRun({
-      owner: OTHER_OWNER,
-      programSlug: OTHER_PROGRAM_SLUG,
-      enrollmentId: OTHER_RUN,
-    });
-
-    const [first, second, third] = run.occurrenceIds;
-    const otherFirst = other.occurrenceIds[0];
-    if (
-      first === undefined ||
-      second === undefined ||
-      third === undefined ||
-      otherFirst === undefined
-    ) {
-      throw new Error('expected the seeded programs to author several occurrences');
-    }
-
-    // RUN holds NO planned rows at all, so every recorded fact is unplaced.
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: first,
-      recordedAt: '2026-09-16T18:00:00.000Z',
-    });
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: second,
-      recordedAt: '2026-09-20T18:00:00.000Z',
-    });
-    await insertFact({
-      enrollmentId: RUN,
-      scheduledWorkoutId: third,
-      recordedAt: '2026-09-24T18:00:00.000Z',
-    });
-    // Another run's rowless fact must never be counted for RUN.
-    await insertFact({
-      enrollmentId: OTHER_RUN,
-      scheduledWorkoutId: otherFirst,
-      recordedAt: '2026-09-24T18:00:00.000Z',
-    });
-
-    const dto = await readUnconfiguredReport(OWNER, run.program);
-
-    // Still no calendar: no week, no total and no fabricated date — but the
-    // factual unplaced count is exposed.
-    expect(dto.configured).toBe(false);
-    expect(dto.notPerformedUnplaced).toBe(3);
-    expect('weeks' in dto).toBe(false);
-    expect('totals' in dto).toBe(false);
-
-    // Run-scoped: the other run's rowless fact belongs only to its own owner.
-    const otherDto = await readUnconfiguredReport(OTHER_OWNER, other.program);
-    expect(otherDto.notPerformedUnplaced).toBe(1);
   });
 });
 

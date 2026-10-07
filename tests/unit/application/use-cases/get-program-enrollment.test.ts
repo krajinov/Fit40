@@ -75,7 +75,7 @@ async function completeSession(
   if (!logged.ok) throw Error();
   const done = completeWorkoutSession(logged.data, new Date('2026-01-02T11:00:00Z'));
   if (!done.ok) throw Error();
-  await repo.create(done.data);
+  await repo.save(done.data);
 }
 
 function createWorkoutIdForTest(v: string) { const r = createWorkoutId(v); if (!r.ok) throw Error(); return r.data; }
@@ -211,7 +211,7 @@ describe('GetProgramEnrollmentUseCase', () => {
       exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }],
     });
     if (!sr.ok) throw Error();
-    await sessionRepo.create(sr.data);
+    await sessionRepo.save(sr.data);
 
     const r = await uc.execute({ ...INPUT, userId: 'user-a' });
 

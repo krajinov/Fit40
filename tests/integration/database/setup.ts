@@ -4,12 +4,6 @@ import postgres from 'postgres';
 
 import * as schema from '@/infrastructure/database/schema';
 import { DrizzleExerciseRepository } from '@/infrastructure/database/repositories/drizzle-exercise-repository';
-import { DrizzleNotPerformedOccurrenceRepository } from '@/infrastructure/database/repositories/drizzle-not-performed-occurrence-repository';
-import { DrizzleFollowThroughExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-follow-through-execution-facts-repository';
-import { DrizzleOccurrenceExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-occurrence-execution-facts-repository';
-import { DrizzleRunClosureFactsRepository } from '@/infrastructure/database/repositories/drizzle-run-closure-facts-repository';
-import { DrizzleScheduleExecutionFactsRepository } from '@/infrastructure/database/repositories/drizzle-schedule-execution-facts-repository';
-import { DrizzleRunOccurrenceWrites } from '@/infrastructure/database/repositories/drizzle-run-occurrence-writes';
 import { DrizzleProgramRepository } from '@/infrastructure/database/repositories/drizzle-program-repository';
 import { DrizzleProgramEnrollmentRepository } from '@/infrastructure/database/repositories/drizzle-program-enrollment-repository';
 import { DrizzlePersonalRecordRepository } from '@/infrastructure/database/repositories/drizzle-personal-record-repository';
@@ -33,12 +27,6 @@ export const programRepository = new DrizzleProgramRepository(db);
 export const workoutSessionRepository = new DrizzleWorkoutSessionRepository(db);
 export const programEnrollmentRepository = new DrizzleProgramEnrollmentRepository(db);
 export const plannedWorkoutRepository = new DrizzlePlannedWorkoutRepository(db);
-export const notPerformedOccurrenceRepository = new DrizzleNotPerformedOccurrenceRepository(db);
-export const runOccurrenceWrites = new DrizzleRunOccurrenceWrites(db);
-export const runClosureFactsRepository = new DrizzleRunClosureFactsRepository(db);
-export const scheduleExecutionFactsRepository = new DrizzleScheduleExecutionFactsRepository(db);
-export const followThroughExecutionFactsRepository = new DrizzleFollowThroughExecutionFactsRepository(db);
-export const occurrenceExecutionFactsRepository = new DrizzleOccurrenceExecutionFactsRepository(db);
 export const userRepository = new DrizzleUserRepository(db);
 export const sessionRepository = new DrizzleSessionRepository(db);
 export const registrationRepository = new DrizzleRegistrationRepository(db);
@@ -58,7 +46,6 @@ export async function resetDatabase(): Promise<void> {
       exercise_logs,
       workout_sessions,
       planned_workouts,
-      not_performed_workouts,
       program_enrollments,
       scheduled_workouts,
       program_weeks,

@@ -36,8 +36,7 @@ import {
 } from '@/infrastructure/database/schema';
 
 import { exerciseId, reps, seedEnrollment, seedUser, userId } from './personal-record-fixtures';
-import { db, programRepository } from './setup';
-import { insertSession } from './session-fixtures';
+import { db, programRepository, workoutSessionRepository } from './setup';
 
 export function plannedDate(value: string): PlannedDate {
   const result = createPlannedDate(value);
@@ -186,7 +185,7 @@ export async function seedCompletedRun(input: {
     const done = completeWorkoutSession(logged.data, new Date(`2026-09-${day}T10:00:00Z`));
     if (!done.ok) throw new Error(done.error.message);
 
-    await insertSession(done.data);
+    await workoutSessionRepository.save(done.data);
     sessionIds.push(id);
   }
 

@@ -6,14 +6,8 @@
  * existing plan and the weekday selection; this module decides every date.
  *
  * Partition, per authored occurrence (authored program order):
- * - `settled`    → no PlannedWorkout row at all, so the calendar never invents
- *                  intent for work that is already accounted for by execution
- *                  truth: a `completedIds` occurrence (a completed session,
- *                  M14) or a `notPerformedIds` occurrence (an explicit "did not
- *                  perform this" record, M17). Both are ONE set here — a
- *                  settled occurrence is never re-placed, so the two facts can
- *                  never produce two rows for one occurrence. With an empty
- *                  `notPerformedIds` the partition is exactly the M15 one.
+ * - `completed`  → no PlannedWorkout row at all, so the calendar never invents
+ *                  intent for work that was actually performed.
  * - `frozen`     → an occurrence with a live in-progress session AND an
  *                  existing row keeps that row verbatim: a workout the user is
  *                  performing right now never silently moves.
@@ -45,10 +39,7 @@
  * Trusted inputs: `occurrencesInProgramOrder` (the program aggregate
  * guarantees unique ids and sequential orders) and `currentPlan` (at most one
  * row per occurrence, all belonging to `enrollmentId`). A row belonging to
- * another run is rejected rather than carried into this one. Both fact lists
- * must already be scoped to `enrollmentId` — an authored occurrence id is
- * shared by every run of the program, so occurrence ids alone cannot
- * distinguish runs and cross-run scoping is the caller's contract.
+ * another run is rejected rather than carried into this one.
  */
 
 import { err, ok, type Result } from '@/domain/types/result';
@@ -79,16 +70,6 @@ export interface GeneratePlannedScheduleInput {
   readonly today: PlannedDate;
   /** The run's completed occurrences (session-derived facts). */
   readonly completedIds: ReadonlyArray<ScheduledWorkoutId>;
-  /**
-   * The run's recorded-not-performed occurrences (M17 execution facts).
-   *
-   * Optional so every pre-M17 caller keeps its exact behavior: absent and empty
-   * are the same thing, namely "no occurrence is settled by this fact". It is a
-   * separate input from `completedIds` because the two are different truths
-   * (performed vs explicitly not performed) that reporting must keep
-   * distinguishable, while scheduling treats their union as settled.
-   */
-  readonly notPerformedIds?: ReadonlyArray<ScheduledWorkoutId>;
   /** The run's occurrences with a live in-progress session. */
   readonly inProgressIds: ReadonlyArray<ScheduledWorkoutId>;
   /** The run's existing planned rows, as read before regeneration. */
@@ -121,14 +102,7 @@ interface OccurrencePartition {
 function partitionOccurrences(
   input: GeneratePlannedScheduleInput,
 ): Result<OccurrencePartition, GeneratePlannedScheduleError> {
-  // Settled = completed ∪ not-performed: ONE set for scheduling, because a
-  // settled occurrence must never receive a generated row. The two inputs stay
-  // separate so callers never lose which truth settled an occurrence, and an
-  // absent list is simply an empty one.
-  const settled = new Set<ScheduledWorkoutId>([
-    ...input.completedIds,
-    ...(input.notPerformedIds ?? []),
-  ]);
+  const completed = new Set<ScheduledWorkoutId>(input.completedIds);
   const inProgress = new Set<ScheduledWorkoutId>(input.inProgressIds);
   const existingByScheduledWorkout = new Map<ScheduledWorkoutId, PlannedWorkout>();
 
@@ -147,7 +121,7 @@ function partitionOccurrences(
   const occupiedDates = new Set<PlannedDate>();
 
   for (const occurrence of input.occurrencesInProgramOrder) {
-    if (settled.has(occurrence.id)) {
+    if (completed.has(occurrence.id)) {
       continue;
     }
 

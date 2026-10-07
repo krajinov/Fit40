@@ -34,20 +34,6 @@ import {
 export const SESSION_PAGE_PATH_TEMPLATE =
   '/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session';
 
-/**
- * The workout-detail route as a dynamic template — the session route's parent,
- * paired with the 'page' revalidation type in callers.
- *
- * Same rationale as `SESSION_PAGE_PATH_TEMPLATE`: a form that carries only the
- * program slug cannot name a concrete occurrence, yet EVERY occurrence route of
- * that program can render settlement or enrollment state (the recorded CTA band
- * with Undo, or a stale join/Start prompt). `revalidatePath(template, 'page')`
- * invalidates every concrete URL matching the template, so a previously visited
- * workout-detail route is invalidated alongside its session route.
- */
-export const WORKOUT_PAGE_PATH_TEMPLATE =
-  '/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]';
-
 export function sessionPathFromFormData(formData: FormData): string | null {
   const slug = programSlugSchema.safeParse(formData.get('programSlug'));
   const week = weekNumberSchema.safeParse(formData.get('weekNumber'));
@@ -63,24 +49,12 @@ export function sessionPathFromFormData(formData: FormData): string | null {
   });
 }
 
-/**
- * The authored coordinates every occurrence route uses: the public program
- * slug plus the authored week number and workout order. Structurally identical
- * to `SessionRoute` on the ProgramRepository port; kept named locally so both
- * route builders below accept trusted coordinates only.
- */
-interface OccurrenceRoute {
+function buildSessionPath(coordinates: {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
-}
-
-function buildWorkoutPath(coordinates: OccurrenceRoute): string {
-  return `/programs/${coordinates.programSlug}/weeks/${coordinates.weekNumber}/workouts/${coordinates.workoutOrder}`;
-}
-
-function buildSessionPath(coordinates: OccurrenceRoute): string {
-  return `${buildWorkoutPath(coordinates)}/session`;
+}): string {
+  return `/programs/${coordinates.programSlug}/weeks/${coordinates.weekNumber}/workouts/${coordinates.workoutOrder}/session`;
 }
 
 /**
@@ -88,18 +62,6 @@ function buildSessionPath(coordinates: OccurrenceRoute): string {
  */
 export function programPathFromSlug(programSlug: string): string {
   return `/programs/${programSlug}`;
-}
-
-/**
- * The canonical workout-detail route path for a trusted server-resolved
- * occurrence route (SessionRoute on the ProgramRepository port): the session
- * route's parent. That page renders the occurrence's recorded state too (the
- * CTA band's recorded branch), so a settlement change must invalidate it
- * alongside the session route. Unlike sessionPathFromFormData, its inputs can
- * never come from client fields.
- */
-export function workoutPathFromRoute(route: SessionRoute): string {
-  return buildWorkoutPath(route);
 }
 
 /**

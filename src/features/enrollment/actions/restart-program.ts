@@ -7,10 +7,7 @@ import { requireUser } from '@/features/auth/current-user';
 import { enrollmentFormSchema } from '@/features/enrollment/schemas/enrollment-actions-schema';
 import { restartProgramUseCase } from '@/features/enrollment/services';
 import type { EnrollmentActionState } from '@/features/enrollment/types/enrollment-action-state';
-import {
-  SESSION_PAGE_PATH_TEMPLATE,
-  WORKOUT_PAGE_PATH_TEMPLATE,
-} from '@/features/sessions/session-path';
+import { SESSION_PAGE_PATH_TEMPLATE } from '@/features/sessions/session-path';
 
 /**
  * Restarts the authenticated user's completed program run.
@@ -40,19 +37,13 @@ export async function restartProgramAction(
     programSlug: parsed.data.programSlug,
   });
   if (!result.ok) {
-    return { ok: false, error: { code: result.error.code, message: restartErrorMessage(result) } };
+    return { ok: false, error: { code: result.error.code, message: result.error.message } };
   }
 
   revalidatePath('/programs');
   revalidatePath(`/programs/${parsed.data.programSlug}`);
   revalidatePath(`/programs/${parsed.data.programSlug}/completed`);
   revalidatePath('/dashboard');
-  // Both nested occurrence-route templates: the restart deletes the old run's
-  // recorded facts and detaches its sessions, so a previously visited
-  // workout-detail route must stop showing "Recorded as not performed" + Undo
-  // (which would hide the fresh run's now-valid Start) alongside its session
-  // route, exactly as the join/leave actions invalidate us.
-  revalidatePath(WORKOUT_PAGE_PATH_TEMPLATE, 'page');
   revalidatePath(SESSION_PAGE_PATH_TEMPLATE, 'page');
 
   redirect(`/programs/${parsed.data.programSlug}`);
@@ -68,20 +59,4 @@ function completedRedirectTarget(formData: FormData): string {
   return parsed.success
     ? `/programs/${parsed.data.programSlug}/completed`
     : '/programs';
-}
-
-/**
- * Presentation copy for a restart refusal (M17 Slice 11).
- *
- * The Application error CODE stays exactly `PROGRAM_NOT_COMPLETE` (no new
- * vocabulary), but its M14 wording — "not complete yet, so it cannot be
- * restarted" — is now false: since Slice 10 a run restarts when it is
- * complete **or** concluded, so this code can only reach us for a run that is
- * still open. The action therefore states that truth instead, and passes every
- * other outcome's own message through unchanged.
- */
-function restartErrorMessage(result: { readonly error: { readonly code: string; readonly message: string } }): string {
-  return result.error.code === 'PROGRAM_NOT_COMPLETE'
-    ? "This run hasn't finished yet."
-    : result.error.message;
 }

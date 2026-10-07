@@ -18,7 +18,7 @@ async function sessionWithSet(ownerId: string = OWNER_ID, enrollmentId: string |
   const repo = new InMemoryWorkoutSessionRepository();
   const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
-  await repo.create(sr.data);
+  await repo.save(sr.data);
   const loaded = await repo.findById(sr.data.id);
   if (!loaded) throw Error();
   const rs = logSessionSet(loaded, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: 20, rpe: null });

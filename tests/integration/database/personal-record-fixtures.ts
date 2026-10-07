@@ -37,9 +37,8 @@ import * as schema from '@/infrastructure/database/schema';
 import { users } from '@/infrastructure/database/schema';
 import { DrizzlePersonalRecordRepository } from '@/infrastructure/database/repositories/drizzle-personal-record-repository';
 
-import { db, programEnrollmentRepository } from './setup';
+import { db, programEnrollmentRepository, workoutSessionRepository } from './setup';
 import { getTestDatabaseUrl } from './test-env';
-import { insertSession } from './session-fixtures';
 
 export function exerciseId(value: string): ExerciseId {
   const result = createExerciseId(value);
@@ -224,7 +223,7 @@ export function prSession(spec: PrSessionSpec): WorkoutSession {
 /** Persists sessions through the real write port (whole-aggregate saves). */
 export async function savePrSessions(...sessions: ReadonlyArray<WorkoutSession>): Promise<void> {
   for (const session of sessions) {
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
   }
 }
 

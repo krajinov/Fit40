@@ -8,7 +8,7 @@ import {
   plannedStatusLabel,
   type WeekDaySlotView,
 } from '@/features/schedule/schedule-week-view';
-import { ScheduleSlotControls } from '@/features/schedule/components/ScheduleSlotControls';
+import { MovePlannedWorkoutForm } from '@/features/schedule/components/MovePlannedWorkoutForm';
 import { sessionPathFromRoute } from '@/features/sessions/session-path';
 
 interface WeeklyScheduleCalendarProps {
@@ -22,7 +22,6 @@ const STATUS_VARIANT: Record<PlannedWorkoutStatus, 'neutral' | 'accent' | 'done'
   planned: 'neutral',
   'in-progress': 'accent',
   completed: 'done',
-  'not-performed': 'neutral',
   'past-due': 'neutral',
 };
 
@@ -39,10 +38,9 @@ function detailsPath(programSlug: string, item: PlannedWorkoutDto): string {
  * Every position is truthful DTO state: statuses are labelled with text (never
  * colour alone), today is marked with the words "Today" plus `aria-current`,
  * empty days read "No workout planned" (neutral — never "rest day"), and the
- * in-progress affordance stays a read-only link to the existing session route,
- * whose own page resolves Resume. M15 Slice 7 added Move; M17 Slice 11 adds the
- * record/undo settlement controls — all of them keyed by the DTO's resolved
- * status (see `ScheduleSlotControls`), so this component still derives nothing.
+ * single approved in-progress affordance is a read-only link to the existing
+ * session route, whose own page resolves Resume. No mutation controls exist
+ * here; Slice 7 adds rescheduling.
  */
 export function WeeklyScheduleCalendar({
   programSlug,
@@ -101,12 +99,20 @@ export function WeeklyScheduleCalendar({
                   Resume
                 </Link>
               )}
-              {/* Settlement and Move affordances, keyed by the DTO status the
-                  application already resolved: Move stays limited to
-                  NEVER-STARTED workouts, `Didn't train this` is offered wherever
-                  the use case may accept a record, a recorded slot offers Undo
-                  only, and a completed slot offers none of them. */}
-              <ScheduleSlotControls programSlug={programSlug} item={slot.item} />
+              {/* Move is offered for NEVER-STARTED workouts only: `planned`
+                  and `past-due` (the approved plan names manual rescheduling
+                  as a past-due remedy, and the use case accepts any target
+                  today-or-later). Completed and in-progress cells stay
+                  read-only — the use case rejects those moves authoritatively. */}
+              {(slot.item.status === 'planned' || slot.item.status === 'past-due') && (
+                <MovePlannedWorkoutForm
+                  programSlug={programSlug}
+                  weekNumber={slot.item.weekNumber}
+                  workoutOrder={slot.item.workoutOrder}
+                  plannedDate={slot.item.plannedDate}
+                  workoutName={slot.item.workoutName}
+                />
+              )}
             </div>
           )}
         </li>

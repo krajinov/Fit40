@@ -88,14 +88,9 @@ src/infrastructure/database/repositories/
 ├── drizzle-registration-repository.ts
 ├── drizzle-session-repository.ts
 ├── drizzle-workout-session-repository.ts
-├── workout-session-writes.ts            (sole workout_sessions INSERT site, M17)
-├── drizzle-run-occurrence-writes.ts     (settlement transaction, M17)
-├── drizzle-not-performed-occurrence-repository.ts (read-only, M17)
 ├── drizzle-training-history-repository.ts
-├── drizzle-personal-record-repository.ts
 ├── drizzle-program-repository.ts
 ├── drizzle-program-enrollment-repository.ts
-├── drizzle-planned-workout-repository.ts
 └── drizzle-exercise-repository.ts
 ```
 
@@ -573,9 +568,7 @@ Migration **0013** adds the single scheduling table `planned_workouts`:
   touching `planned_workouts` — parent-first, so planning and M14
   restart/leave contend on the same row in the same order (no lock cycles),
   while the `NO KEY UPDATE` strength stays compatible with the `FOR KEY SHARE`
-  a session INSERT takes for its FK check (and since M17 the **production**
-  creation path takes the parent lock first itself, so a real workout start
-  queues instead of racing). A zero-row lock read means a
+  a session INSERT takes for its FK check. A zero-row lock read means a
   lifecycle write won: nothing is written and the caller performs exactly one
   read-only re-check — never a retry. Statement bounds are pinned in
   `planned-workout-repository.test.ts` (1-statement read; constant
@@ -585,48 +578,4 @@ Migration **0013** adds the single scheduling table `planned_workouts`:
   NULL`, one statement, no hydration) — a read-only addition, no schema
   change.
 - See [Workout Scheduling & Training Calendar](scheduling.md).
-
-## Not-Performed Settlement (M17)
-
-Migration **0014** adds the single settlement table `not_performed_workouts`:
-
-- `enrollment_id` → `program_enrollments.id` **ON DELETE CASCADE** (leave and
-  restart delete the run's facts with it), `scheduled_workout_id` →
-  `scheduled_workouts.id` **ON DELETE RESTRICT** (authored structure is never
-  deletable), `recorded_at timestamptz NOT NULL` (the attestation instant,
-  supplied by the action boundary), **composite PK**
-  `(enrollment_id, scheduled_workout_id)`, and an index on
-  `scheduled_workout_id` (the FK's RESTRICT check cannot use the
-  enrollment-leading PK). Deliberately absent: any `user_id`, planned date,
-  session id, reason/note/status/source/kind column, conclusion column or
-  undo flag — none of those concepts exists in this table.
-- **Settlement writes** live in `DrizzleRunOccurrenceWrites`
-  (`drizzle-run-occurrence-writes.ts`): record, undo and session-for-occurrence
-  each run ONE transaction that opens with
-  `SELECT id FROM program_enrollments WHERE id = $1 FOR NO KEY UPDATE`,
-  reads its facts under that lock, calls the Domain decision exactly once,
-  then writes. No retry loop, no advisory lock, no `SERIALIZABLE` requirement,
-  no occurrence-lock table.
-- The record transaction's **guarded zero-set session DELETE** pins the
-  diagnosed session `version` in addition to `completed_at IS NULL` and
-  `NOT EXISTS (set_logs)` — closing the READ COMMITTED first-snapshot window
-  where a concurrently committed set would otherwise be destroyed; a pin miss
-  returns zero rows, raises `NotPerformedWriteContractViolationError` and rolls
-  back (a loud failure, never a retried write).
-- **Session create/update split:** `workout-session-writes.ts` is the only
-  module that INSERTs a `workout_sessions` row (through
-  `createSessionForOccurrence`, under the parent lock), the production
-  `WorkoutSessionRepository.save` is update-only, and no settlement write uses
-  `onConflict` on sessions — a deleted session can never be resurrected.
-- **Read side:** `DrizzleNotPerformedOccurrenceRepository` implements the
-  read-only `NotPerformedOccurrenceRepository` port (enrollment-scoped list,
-  one bounded statement).
-- **Nothing else persisted:** no run-status/closure column, no run archive, no
-  enrollment-history table; `isProgramComplete` / `isRunConcluded` remain
-  derived reads. The fact contributes to no Personal Record, history or
-  progression query.
-- Statement bounds and lock ordering are pinned by
-  `not-performed-concurrency.test.ts` (statement/lock discipline) and
-  `not-performed-settlement.test.ts`. See
-  [Run Closure & Not-Performed Settlement](run-closure.md).
 

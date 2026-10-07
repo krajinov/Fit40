@@ -9,7 +9,6 @@
  */
 
 import type { NextWorkoutDto } from '@/application/dto/dashboard';
-import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
 import { NEXT_WORKOUT_PREVIEW_LIMIT } from '@/application/use-cases/resolve-next-workout';
 import { formatPrescription } from '@/features/programs/program-labels';
 import { resolveNextWorkoutUseCase } from '@/features/sessions/services';
@@ -25,12 +24,7 @@ export interface NextWorkoutExercisePreview {
 /** How many exercise rows the cards preview before the "+ N more" row. */
 export const NEXT_WORKOUT_PREVIEW_COUNT = NEXT_WORKOUT_PREVIEW_LIMIT;
 
-/**
- * Startability of the previewed occurrence (mirrors the application DTO):
- * `not-performed` means the occurrence is settled as recorded-not-performed
- * (M17), so it has no session but must never render a Start/Resume CTA.
- */
-export type NextWorkoutSessionState = 'not-started' | 'in-progress' | 'not-performed';
+export type NextWorkoutSessionState = 'not-started' | 'in-progress';
 
 export interface NextWorkoutView {
   readonly programSlug: string;
@@ -48,42 +42,24 @@ export interface NextWorkoutInput {
   readonly programSlug: string;
   readonly weekNumber: number;
   readonly workoutOrder: number;
-  /**
-   * The SPECIFIC enrollment the caller already loaded and is composing this
-   * preview into (the dashboard's / program detail's enrollment view). Passed
-   * straight through to the resolver: the session-state read is fenced to
-   * exactly that generation, so a concurrent restart/leave cannot hand back
-   * the replacement run's session state for an old-enrollment preview.
-   */
-  readonly expectedEnrollmentId?: string;
 }
 
 /**
  * Presentation state of the enrollment's next-workout preview. Deliberately
- * multi-valued: an unresolvable preview (catalog change or lookup failure) is
- * NOT program completion and must never render as one, and a CONCLUDED run
- * (M17) is not completion either.
+ * three-valued: an unresolvable preview (catalog change or lookup failure)
+ * is NOT program completion, and must never render as one.
  *
- * - `available`:   the enrollment has a next OPEN workout and its preview resolved.
+ * - `available`:   the enrollment has a next workout and its preview resolved.
  * - `unavailable`: the enrollment still has a next workout
  *                  (`NextScheduledWorkoutDto` non-null) but its preview could
  *                  not be resolved — degraded state, no workout data shown.
  * - `complete`:    the enrollment has no next workout — every scheduled
- *                  workout is done (M14 completion).
- * - `concluded`:   the run is settled but INCOMPLETE (M17): every authored
- *                  occurrence is settled by a completion or a not-performed
- *                  record, yet not every one is completed. Carries only the
- *                  DTO's factual counts — never completion copy, never a Start.
+ *                  workout is done.
  */
 export type NextWorkoutPreviewState =
   | { readonly status: 'available'; readonly workout: NextWorkoutView }
   | { readonly status: 'unavailable' }
-  | { readonly status: 'complete' }
-  | {
-      readonly status: 'concluded';
-      readonly completedWorkouts: number;
-      readonly notPerformedWorkouts: number;
-    };
+  | { readonly status: 'complete' };
 
 /**
  * Maps the enrollment's scheduled next workout and the (possibly failed)
@@ -91,24 +67,11 @@ export type NextWorkoutPreviewState =
  * exclusively on the application layer's `nextWorkout: null`; a non-null
  * scheduled workout with a null preview stays "unavailable" — never
  * "complete", and no workout data is fabricated.
- *
- * When the M17 closure DTO is supplied and the run is concluded-but-incomplete,
- * the `concluded` state wins: the run has no next workout to offer, but it is
- * NOT complete, so a `complete` (completion) state would be a lie. A null DTO
- * (a failed additive read) degrades to the pre-M17 keying exactly.
  */
 export function nextWorkoutPreviewState(
   scheduled: { readonly weekNumber: number; readonly workoutOrder: number } | null,
   workout: NextWorkoutView | null,
-  runClosure: RunClosureSummaryDto | null = null,
 ): NextWorkoutPreviewState {
-  if (runClosure !== null && runClosure.isConcluded && !runClosure.isProgramComplete) {
-    return {
-      status: 'concluded',
-      completedWorkouts: runClosure.completedWorkouts,
-      notPerformedWorkouts: runClosure.notPerformedWorkouts,
-    };
-  }
   if (scheduled === null) {
     return { status: 'complete' };
   }

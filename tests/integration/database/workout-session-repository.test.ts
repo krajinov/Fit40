@@ -21,7 +21,9 @@ import {
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
 
 import {
+  SessionAlreadyExistsError,
   SessionEnrollmentChangedError,
+  SessionEnrollmentNotFoundError,
   SessionStaleVersionError,
 } from '@/application/ports/workout-session-repository';
 import { users, workoutSessions } from '@/infrastructure/database/schema';
@@ -40,7 +42,6 @@ import {
   workoutSessionRepository,
 } from './setup';
 import { getTestDatabaseUrl } from './test-env';
-import { insertSession } from './session-fixtures';
 
 function exerciseId(value: string) {
   const result = createExerciseId(value);
@@ -184,10 +185,10 @@ describe('DrizzleWorkoutSessionRepository', () => {
     await seedEnrollment('enrollment-test-b', 'user-test-b', 'prog-beginner-strength');
   });
 
-  it('the seeding fixture inserts a new aggregate and findById() retrieves it', async () => {
+  it('save() inserts a new aggregate and findById() retrieves it', async () => {
     const session = makeSession();
 
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findById(session.id);
     expect(loaded).not.toBeNull();
@@ -203,7 +204,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('save() updates an existing aggregate (adds a set)', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findById(session.id);
     expect(loaded).not.toBeNull();
@@ -221,7 +222,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('save() handles an edited set', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const withSet = withOneRepSet(session);
     await workoutSessionRepository.save(withSet);
@@ -253,7 +254,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('save() handles a deleted set and renumbers remaining sets', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     await workoutSessionRepository.save(withTwoRepSets(session));
 
@@ -273,7 +274,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('save() persists the completion timestamp', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const completed = completeWorkoutSession(withOneRepSet(session), new Date('2025-01-01T11:00:00Z'));
     expect(completed.ok).toBe(true);
@@ -286,7 +287,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('findByEnrollmentAndScheduledWorkout() returns the session', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(
       session.enrollmentId!,
@@ -297,7 +298,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('findByEnrollmentAndScheduledWorkout() never returns another enrollment\'s session', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(
       enrollmentId('enrollment-test-b'),
@@ -313,9 +314,9 @@ describe('DrizzleWorkoutSessionRepository', () => {
       scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
       workoutId: 'wo-beginner-strength-b',
     });
-    await insertSession(own);
-    await insertSession(otherUser);
-    await insertSession(inProgress);
+    await workoutSessionRepository.save(own);
+    await workoutSessionRepository.save(otherUser);
+    await workoutSessionRepository.save(inProgress);
 
     const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -332,8 +333,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
       startedAt: '2025-01-02T10:00:00Z',
     }));
     const early = completed(makeSession('session-early', { startedAt: '2025-01-01T09:00:00Z' }));
-    await insertSession(late);
-    await insertSession(early);
+    await workoutSessionRepository.save(late);
+    await workoutSessionRepository.save(early);
 
     const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -344,7 +345,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('listCompletedScheduledWorkoutIds() excludes detached sessions after rejoin', async () => {
     const detached = completed(makeSession('session-detached', { enrollmentId: null }));
-    await insertSession(detached);
+    await workoutSessionRepository.save(detached);
 
     const listed = await workoutSessionRepository.listCompletedScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -367,9 +368,9 @@ describe('DrizzleWorkoutSessionRepository', () => {
         workoutId: 'wo-beginner-strength-c',
       }),
     );
-    await insertSession(inProgress);
-    await insertSession(otherEnrollment);
-    await insertSession(completedOwn);
+    await workoutSessionRepository.save(inProgress);
+    await workoutSessionRepository.save(otherEnrollment);
+    await workoutSessionRepository.save(completedOwn);
 
     const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -381,7 +382,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
   });
 
   it('listInProgressScheduledWorkoutIds() excludes detached sessions', async () => {
-    await insertSession(
+    await workoutSessionRepository.save(
       makeSession('session-detached-in-progress', { enrollmentId: null }),
     );
 
@@ -402,8 +403,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
     const early = makeSession('session-early-in-progress', {
       startedAt: '2025-01-01T09:00:00Z',
     });
-    await insertSession(late);
-    await insertSession(early);
+    await workoutSessionRepository.save(late);
+    await workoutSessionRepository.save(early);
 
     const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -425,8 +426,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
       workoutId: 'wo-beginner-strength-c',
       startedAt: '2025-01-01T09:00:00Z',
     });
-    await insertSession(second);
-    await insertSession(first);
+    await workoutSessionRepository.save(second);
+    await workoutSessionRepository.save(first);
 
     const listed = await workoutSessionRepository.listInProgressScheduledWorkoutIds(
       enrollmentId('enrollment-test-a'),
@@ -436,7 +437,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
   });
 
   it('listInProgressScheduledWorkoutIds() returns [] when nothing is in progress', async () => {
-    await insertSession(
+    await workoutSessionRepository.save(
       completed(
         makeSession('session-only-completed', {
           scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
@@ -453,17 +454,17 @@ describe('DrizzleWorkoutSessionRepository', () => {
   });
 
   it('listInProgressScheduledWorkoutIds() issues exactly one statement (no N+1)', async () => {
-    await insertSession(
+    await workoutSessionRepository.save(
       makeSession('session-batch-ip-1', { startedAt: '2025-01-01T08:00:00Z' }),
     );
-    await insertSession(
+    await workoutSessionRepository.save(
       makeSession('session-batch-ip-2', {
         scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
         workoutId: 'wo-beginner-strength-b',
         startedAt: '2025-01-01T08:30:00Z',
       }),
     );
-    await insertSession(
+    await workoutSessionRepository.save(
       makeSession('session-batch-ip-3', {
         scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
         workoutId: 'wo-beginner-strength-c',
@@ -507,7 +508,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('leaving a program detaches sessions and they survive as user history', async () => {
     const session = completed(makeSession());
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     // Leaving the program deletes the enrollment; the FK detaches the session.
     const deleted = await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
@@ -528,7 +529,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('save() maps and reloads user ownership fields', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findById(session.id);
     expect(loaded?.userId).toBe(userId('user-test-a'));
@@ -537,24 +538,36 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('enforces at most one session per enrollment per scheduled occurrence', async () => {
     const first = makeSession('session-test-1');
-    await insertSession(first);
+    await workoutSessionRepository.save(first);
 
     const second = makeSession('session-test-2');
 
-    // The unique constraint the creation authority relies on for the
-    // established duplicate-session outcome. Its typed mapping belongs to
-    // `createSessionForOccurrence` (see the M17 Slice 6 suite); seeding talks to
-    // the INSERT statements directly, so it sees the raw database error.
-    await expect(insertSession(second)).rejects.toBeInstanceOf(Error);
+    await expect(workoutSessionRepository.save(second)).rejects.toBeInstanceOf(
+      SessionAlreadyExistsError,
+    );
+  });
+
+  it('maps a concurrently deleted enrollment to SessionEnrollmentNotFoundError', async () => {
+    // Simulates LeaveProgram deleting the enrollment between the use case's
+    // enrollment check and the session insert: the enrollment FK violation on
+    // insert must surface as the typed race error, not an untyped 500.
+    const deleted = await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
+    expect(deleted).toBe(true);
+
+    const session = makeSession('session-race-orphan');
+
+    await expect(workoutSessionRepository.save(session)).rejects.toBeInstanceOf(
+      SessionEnrollmentNotFoundError,
+    );
   });
 
   it('allows two users to log sessions for the same scheduled occurrence', async () => {
     const first = makeSession('session-user-a', { userId: 'user-test-a' });
-    await insertSession(first);
+    await workoutSessionRepository.save(first);
 
     const second = makeSession('session-user-b', { userId: 'user-test-b', enrollmentId: 'enrollment-test-b' });
     // save resolves with the persisted aggregate (PR #13 Finding 5 contract).
-    const persisted = await insertSession(second);
+    const persisted = await workoutSessionRepository.save(second);
     expect(persisted.id).toBe('session-user-b');
 
     const firstLoaded = await workoutSessionRepository.findByEnrollmentAndScheduledWorkout(
@@ -571,7 +584,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('rejects a stale-version save instead of overwriting concurrent changes', async () => {
     const session = makeSession(); // version 0
-    await insertSession(session); // insert -> persisted version 0
+    await workoutSessionRepository.save(session); // insert -> persisted version 0
 
     // Simulate a concurrent modification that bumps the persisted version.
     await workoutSessionRepository.save(withOneRepSet(session)); // update 0 -> 1
@@ -588,7 +601,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('rejects a save whose enrollment detached between load and save (leave race)', async () => {
     const session = makeSession(); // version 0, enrollment-test-a
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
     const loaded = await workoutSessionRepository.findById(session.id);
     if (!loaded) throw new Error('session not found');
 
@@ -613,7 +626,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('rejects a save when the row was re-pointed to a different enrollment', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
     const loaded = await workoutSessionRepository.findById(session.id);
     if (!loaded) throw new Error('session not found');
 
@@ -638,7 +651,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('persists and returns the session version', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const inserted = await workoutSessionRepository.findById(session.id);
     expect(inserted?.version).toBe(0);
@@ -653,7 +666,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     // PR #13 Finding 5: the INSERT branch stores the snapshot's own version,
     // and the returned aggregate must carry exactly what the row now holds.
     const session = makeSession(); // version 0
-    const persisted = await insertSession(session);
+    const persisted = await workoutSessionRepository.save(session);
 
     const reloaded = await workoutSessionRepository.findById(session.id);
     expect(persisted.version).toBe(reloaded?.version);
@@ -666,7 +679,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     // caller building a DTO from it can feed `version` straight back as its
     // next mutation's `expectedSessionVersion` and succeed.
     const session = makeSession(); // version 0
-    await insertSession(session); // insert -> 0
+    await workoutSessionRepository.save(session); // insert -> 0
 
     const persisted = await workoutSessionRepository.save(withOneRepSet(session)); // update -> 1
 
@@ -678,7 +691,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
   it('returns isolated objects (mutating a loaded session does not persist)', async () => {
     const session = makeSession();
-    await insertSession(session);
+    await workoutSessionRepository.save(session);
 
     const loaded = await workoutSessionRepository.findById(session.id);
     expect(loaded).not.toBeNull();
@@ -727,7 +740,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     it("returns the enrollment's completed sessions as fully hydrated aggregates", async () => {
       const session = completed(makeSession('session-list-1'));
-      await insertSession(session);
+      await workoutSessionRepository.save(session);
 
       const listed = await listedBy('enrollment-test-a');
 
@@ -745,8 +758,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('excludes in-progress sessions', async () => {
-      await insertSession(completed(makeSession('session-done')));
-      await insertSession(
+      await workoutSessionRepository.save(completed(makeSession('session-done')));
+      await workoutSessionRepository.save(
         makeSession('session-in-progress', {
           scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
           workoutId: 'wo-beginner-strength-b',
@@ -759,8 +772,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('excludes sessions belonging to another enrollment', async () => {
-      await insertSession(completed(makeSession('session-own')));
-      await insertSession(
+      await workoutSessionRepository.save(completed(makeSession('session-own')));
+      await workoutSessionRepository.save(
         completed(
           makeSession('session-other-enrollment', {
             enrollmentId: 'enrollment-test-a2',
@@ -780,7 +793,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     it('excludes detached sessions', async () => {
       const session = completed(makeSession('session-detached'));
-      await insertSession(session);
+      await workoutSessionRepository.save(session);
 
       // Leaving the program deletes the enrollment; the FK detaches the row.
       const deleted = await programEnrollmentRepository.delete(enrollmentId('enrollment-test-a'));
@@ -794,7 +807,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it("excludes sessions belonging to another user's enrollment", async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         completed(
           makeSession('session-user-b', {
             userId: 'user-test-b',
@@ -828,9 +841,9 @@ describe('DrizzleWorkoutSessionRepository', () => {
         }),
         '2025-01-02T11:00:00Z',
       );
-      await insertSession(doneLast);
-      await insertSession(doneFirst);
-      await insertSession(doneMiddle);
+      await workoutSessionRepository.save(doneLast);
+      await workoutSessionRepository.save(doneFirst);
+      await workoutSessionRepository.save(doneMiddle);
 
       const listed = await listedBy('enrollment-test-a');
 
@@ -855,8 +868,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
       const earlierStart = completed(
         makeSession('session-y-earlier-start', { startedAt: '2025-01-01T09:00:00Z' }),
       );
-      await insertSession(laterStart);
-      await insertSession(earlierStart);
+      await workoutSessionRepository.save(laterStart);
+      await workoutSessionRepository.save(earlierStart);
 
       const listed = await listedBy('enrollment-test-a');
 
@@ -879,8 +892,8 @@ describe('DrizzleWorkoutSessionRepository', () => {
       const second = completed(
         makeSession('session-tie-a', { startedAt: '2025-01-01T10:00:00Z' }),
       );
-      await insertSession(first);
-      await insertSession(second);
+      await workoutSessionRepository.save(first);
+      await workoutSessionRepository.save(second);
 
       const listed = await listedBy('enrollment-test-a');
 
@@ -927,7 +940,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
       const withSets = withTwoRepSets(substituted.data);
       const done = completeWorkoutSession(withSets, new Date('2025-01-01T12:00:00Z'));
       if (!done.ok) throw new Error(done.error.message);
-      await insertSession(done.data);
+      await workoutSessionRepository.save(done.data);
 
       const listed = await listedBy('enrollment-test-a');
 
@@ -975,14 +988,14 @@ describe('DrizzleWorkoutSessionRepository', () => {
     it('returns [] for an enrollment with no completed sessions', async () => {
       // Another enrollment has data, so this emptiness is scoped — not an
       // artifact of an empty database.
-      await insertSession(completed(makeSession('session-somewhere')));
+      await workoutSessionRepository.save(completed(makeSession('session-somewhere')));
 
       expect(await listedBy('enrollment-test-empty')).toEqual([]);
     });
 
     it('issues a fixed three statements regardless of session count (no N+1)', async () => {
-      await insertSession(completed(makeSession('session-batch-1')));
-      await insertSession(
+      await workoutSessionRepository.save(completed(makeSession('session-batch-1')));
+      await workoutSessionRepository.save(
         completed(
           makeSession('session-batch-2', {
             scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
@@ -990,7 +1003,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           }),
         ),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completed(
           makeSession('session-batch-3', {
             scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
@@ -1071,7 +1084,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     }
 
     it('returns the completed occurrence identity and instant for the run', async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-single',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
@@ -1090,7 +1103,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('excludes in-progress sessions', async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         makeSession('activity-in-progress', { startedAt: '2026-03-01T09:00:00Z' }),
       );
 
@@ -1098,7 +1111,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('excludes completed sessions of another enrollment', async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-other-run',
           enrollmentId: 'enrollment-test-b',
@@ -1113,7 +1126,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('excludes detached (null-enrollment) completed sessions', async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-detached',
           enrollmentId: null,
@@ -1129,7 +1142,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     it('returns each completed occurrence exactly once', async () => {
       // Saved out of chronological order on purpose: the order under test is
       // the query's, never the insertion order.
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-multi-b',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
@@ -1138,7 +1151,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-02T10:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-multi-c',
           scheduledWorkoutId: 'fit40-beginner-strength-w2-1',
@@ -1147,7 +1160,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-04T13:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-multi-a',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
@@ -1171,7 +1184,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
 
     it('orders by completedAt, then startedAt, then session id', async () => {
       // Saved newest-first so the assertion cannot pass on insertion order.
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-late',
           scheduledWorkoutId: 'fit40-beginner-strength-w2-1',
@@ -1180,7 +1193,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-01T11:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-tie-c',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-3',
@@ -1189,7 +1202,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-01T10:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-tie-z',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-2',
@@ -1198,7 +1211,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-01T10:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-tie-a',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
@@ -1220,7 +1233,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
     });
 
     it('reads with exactly one fan-out-free statement and no write', async () => {
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-query-1',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-1',
@@ -1228,7 +1241,7 @@ describe('DrizzleWorkoutSessionRepository', () => {
           completedAt: '2026-03-01T11:00:00Z',
         }),
       );
-      await insertSession(
+      await workoutSessionRepository.save(
         completedOccurrence({
           id: 'activity-query-2',
           scheduledWorkoutId: 'fit40-beginner-strength-w1-2',

@@ -2,14 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   configureTrainingDaysSchema,
-  parseAuthoredOccurrenceFormData,
   parseConfigureTrainingDaysFormData,
   parseReschedulePlannedWorkoutFormData,
   parseWeekdayValues,
   programRedirectTarget,
-  recordNotPerformedSchema,
   reschedulePlannedWorkoutSchema,
-  undoNotPerformedSchema,
 } from '@/features/schedule/schemas/schedule-actions-schema';
 
 function formData(entries: ReadonlyArray<readonly [string, string]>): FormData {
@@ -166,64 +163,5 @@ describe('programRedirectTarget', () => {
     expect(programRedirectTarget(formData([['programSlug', '../../etc/passwd']]))).toBe(
       '/programs',
     );
-  });
-});
-
-describe('recordNotPerformedSchema / undoNotPerformedSchema (M17 Slice 11)', () => {
-  for (const [name, schema] of [
-    ['record', recordNotPerformedSchema],
-    ['undo', undoNotPerformedSchema],
-  ] as const) {
-    it(`accepts only the authored coordinates for ${name}, coercing them`, () => {
-      const parsed = schema.safeParse({
-        programSlug: 'fit40-beginner-strength',
-        weekNumber: '2',
-        workoutOrder: '3',
-      });
-
-      expect(parsed.success).toBe(true);
-      if (!parsed.success) return;
-      expect(parsed.data).toEqual({
-        programSlug: 'fit40-beginner-strength',
-        weekNumber: 2,
-        workoutOrder: 3,
-      });
-      // Nothing else survives the schema — no identity, no clock, no database id.
-      expect(Object.keys(parsed.data).sort()).toEqual([
-        'programSlug',
-        'weekNumber',
-        'workoutOrder',
-      ]);
-    });
-
-    it(`rejects malformed coordinates and a malformed slug for ${name}`, () => {
-      for (const raw of [
-        { weekNumber: '0', workoutOrder: '1' },
-        { weekNumber: 'abc', workoutOrder: '1' },
-        { weekNumber: '1', workoutOrder: '1.5' },
-        { programSlug: 'Not A Slug!', weekNumber: '1', workoutOrder: '1' },
-        { programSlug: 'fit40-beginner-strength', weekNumber: '', workoutOrder: '1' },
-      ]) {
-        expect(schema.safeParse(raw).success).toBe(false);
-      }
-    });
-  }
-
-  it('parses only the three authored fields out of form data', () => {
-    const fd = formData([
-      ['programSlug', 'fit40-beginner-strength'],
-      ['weekNumber', '2'],
-      ['workoutOrder', '3'],
-      ['enrollmentId', 'enr-attacker'],
-      ['scheduledWorkoutId', 'sw-attacker'],
-      ['recordedAt', '1999-01-01T00:00:00.000Z'],
-      ['userId', 'attacker'],
-    ]);
-
-    expect(parseAuthoredOccurrenceFormData(fd)).toEqual({
-      programSlug: 'fit40-beginner-strength',
-      weekNumber: '2',
-      workoutOrder: '3',
-    });
   });
 });

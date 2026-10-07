@@ -32,19 +32,11 @@ export interface EnrollmentProgressDto {
  * - `enrolled`: `nextWorkout` is null when every scheduled workout of the
  *   program has been completed within this enrollment;
  *   `completedScheduledWorkoutIds` drives the Done markers in the schedule.
- *
- * The enrolled variant carries the run's `enrollmentId` so a caller composing
- * additional run-level reads into this view can fence them to the SAME
- * enrollment (the M17 closure read's `expectedEnrollmentId`): the id is data
- * for composition, never an address a client may substitute — nested reads
- * still resolve ownership server-side from the trusted user.
  */
 export type ProgramEnrollmentViewDto =
   | { readonly status: 'not-enrolled' }
   | {
       readonly status: 'enrolled';
-      /** The run's enrollment identity — the composition fence for nested reads. */
-      readonly enrollmentId: string;
       readonly enrolledAt: string;
       readonly progress: EnrollmentProgressDto;
       readonly nextWorkout: NextScheduledWorkoutDto | null;

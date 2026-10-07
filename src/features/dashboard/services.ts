@@ -15,7 +15,6 @@ import {
 } from '@/infrastructure/database/repositories';
 import {
   getProgramEnrollmentUseCase,
-  getRunClosureSummaryUseCase,
   listUserEnrollmentsUseCase,
 } from '@/features/enrollment/services';
 import { getProgramBySlugUseCase } from '@/features/programs/services';
@@ -30,10 +29,6 @@ export const getCurrentProgramDashboardUseCase = new GetCurrentProgramDashboardU
   // M15 (Slice 5): the schedule read is composed here so it reuses the same
   // hydrated program aggregate as the rest of the current-program view.
   getEnrollmentScheduleUseCase,
-  // M17 (Slice 10): the run-closure read, composed for the same reason — the
-  // dashboard resolves its Up next from the run's first OPEN authored
-  // occurrence, never the completion-only nextWorkout.
-  getRunClosureSummaryUseCase,
 );
 
 /**

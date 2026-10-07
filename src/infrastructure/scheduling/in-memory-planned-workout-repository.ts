@@ -13,13 +13,12 @@
  *
  * Consequence for this port: the fake has no way to observe whether an
  * enrollment exists — that knowledge lives in `program_enrollments`, another
- * repository's aggregate, and modelling it here would couple the fakes. The
- * same holds for the M17 not-performed fact `reschedule` re-checks under the
- * lock: it belongs to `NotPerformedOccurrenceRepository`/`RunOccurrenceWrites`.
- * So the `not-moved` (vanished run) and `recorded-not-performed` outcomes are
- * NOT reproduced here; the fake always reports the write it performed.
- * PostgreSQL integration tests are the authority for those outcomes, exactly as
- * they are for the enrollment fake's ON DELETE SET NULL boundary.
+ * repository's aggregate, and modelling it here would couple the fakes. So the
+ * enrollment-missing outcomes (`replaceAllForEnrollment` returning false for a
+ * vanished run, and the same possibility for `reschedule`) are NOT reproduced;
+ * the fake always reports the write it performed. PostgreSQL integration tests
+ * are the authority for those lifecycle outcomes, exactly as they are for the
+ * enrollment fake's ON DELETE SET NULL boundary.
  *
  * Every other port guarantee IS reproduced single-threadedly: input validation
  * before mutation, whole-set replacement, one occurrence and one date per run,
@@ -31,7 +30,6 @@ import {
   assertReplaceablePlannedWorkoutSet,
   PlannedDateConflictError,
   type PlannedWorkoutRepository,
-  type PlannedWorkoutRescheduleOutcome,
 } from '@/application/ports/planned-workout-repository';
 import {
   reschedulePlannedWorkout,
@@ -76,11 +74,11 @@ export class InMemoryPlannedWorkoutRepository implements PlannedWorkoutRepositor
     enrollmentId: EnrollmentId,
     scheduledWorkoutId: ScheduledWorkoutId,
     plannedDate: PlannedDate,
-  ): Promise<PlannedWorkoutRescheduleOutcome> {
+  ): Promise<boolean> {
     const rows = this.plannedByEnrollment.get(enrollmentId);
     const existing = rows?.get(scheduledWorkoutId);
     if (rows === undefined || existing === undefined) {
-      return { outcome: 'not-moved' };
+      return false;
     }
 
     // One planned workout per calendar date per run: the date unique
@@ -93,7 +91,7 @@ export class InMemoryPlannedWorkoutRepository implements PlannedWorkoutRepositor
     }
 
     rows.set(scheduledWorkoutId, structuredClone(reschedulePlannedWorkout(existing, plannedDate)));
-    return { outcome: 'moved' };
+    return true;
   }
 }
 

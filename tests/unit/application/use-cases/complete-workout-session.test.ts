@@ -35,7 +35,7 @@ async function seedSession(ownerId: string = OWNER_ID, enrollmentId: string | nu
   const repo = new InMemoryWorkoutSessionRepository();
   const sr = createWorkoutSession({ id: 's-1', userId: uid(ownerId), enrollmentId: enrollmentId === null ? null : enid(enrollmentId), scheduledWorkoutId: swid('sw-1'), workoutId: wid('w-1'), startedAt: new Date(), exerciseLogs: [{ authoredExerciseId: eid('ex-001'), order: 1, prescription: rep(), restSeconds: 60 }] });
   if (!sr.ok) throw Error();
-  await repo.create(sr.data);
+  await repo.save(sr.data);
   const loaded = await repo.findById(sr.data.id);
   if (!loaded) throw Error();
   const rs = logSessionSet(loaded, { exerciseOrder: 1, type: 'reps', reps: 10, weightKg: null, rpe: null });
@@ -120,7 +120,7 @@ describe('CompleteWorkoutSessionUseCase', () => {
   it('maps an enrollment detached between load and save to NOT_ENROLLED (write-boundary race)', async () => {
     const repo = new InMemoryWorkoutSessionRepository();
     // Persisted state AFTER the leave: the row is detached (enrollment nulled).
-    await repo.create(sessionSnapshot(null));
+    await repo.save(sessionSnapshot(null));
     // The use case's snapshot was loaded BEFORE the leave: still enrolled.
     const preLeave = sessionSnapshot('enr-1');
     const findByIdSpy = vi.spyOn(repo, 'findById').mockResolvedValue(preLeave);

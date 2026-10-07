@@ -35,7 +35,6 @@ const ZERO_COUNTS = {
   completedLate: 0,
   started: 0,
   pastDue: 0,
-  notPerformed: 0,
 } as const;
 
 function week(overrides: Partial<FollowThroughWeekDto> = {}): FollowThroughWeekDto {
@@ -49,7 +48,6 @@ function week(overrides: Partial<FollowThroughWeekDto> = {}): FollowThroughWeekD
     completedLate: 0,
     started: 0,
     pastDue: 1,
-    notPerformed: 0,
     ...overrides,
   };
 }
@@ -67,15 +65,13 @@ function report(overrides: Partial<ConfiguredFollowThroughDto> = {}): Configured
       completedLate: 0,
       started: 0,
       pastDue: 1,
-      notPerformed: 0,
     },
-    notPerformedUnplaced: 0,
     ...overrides,
   };
 }
 
 function unconfigured(): EnrollmentFollowThroughDto {
-  return { programSlug: 'prog-1', today: TODAY, configured: false, notPerformedUnplaced: 0 };
+  return { programSlug: 'prog-1', today: TODAY, configured: false };
 }
 
 function render(dto: EnrollmentFollowThroughDto): HTMLElement {
@@ -118,7 +114,6 @@ describe('PlanFollowThroughSection', () => {
             planned: 2,
             completed: 1,
             pastDue: 1,
-            notPerformed: 0,
           }),
           week({ closed: false, planned: 3, completed: 2, pastDue: 0 }),
         ],
@@ -177,7 +172,6 @@ describe('PlanFollowThroughSection', () => {
           completedLate: 1,
           started: 1,
           pastDue: 3,
-          notPerformed: 0,
         },
       }),
     );
@@ -224,50 +218,12 @@ describe('PlanFollowThroughSection', () => {
           completedLate: 0,
           started: 0,
           pastDue: 0,
-          notPerformed: 0,
         },
       }),
     );
 
     expect(container.textContent).toContain('4 of 1 done');
     expect(container.textContent).toContain('1 planned · 4 done · 4 completed early');
-  });
-
-  it('renders the weekly and total recorded-not-performed counts', () => {
-    const container = render(
-      report({
-        weeks: [week({ planned: 3, completed: 1, pastDue: 0, notPerformed: 2 })],
-        totals: {
-          planned: 3,
-          completed: 1,
-          completedEarly: 0,
-          completedLate: 0,
-          started: 0,
-          pastDue: 0,
-          notPerformed: 2,
-        },
-      }),
-    );
-
-    // The week row restates the record; the planned count is untouched by it.
-    expect(container.textContent).toContain('1 of 3 done');
-    expect(container.textContent).toContain('2 not performed');
-    expect(container.textContent).toContain('3 planned · 1 done · 2 not performed');
-  });
-
-  it('points at the training calendar when a recorded occurrence has no date', () => {
-    const withUnplaced = render(report({ notPerformedUnplaced: 1 }));
-    const without = render(report());
-
-    expect(withUnplaced.textContent).toContain(
-      '1 recorded as not performed without a calendar date — see Training schedule',
-    );
-    // No unplaced records: nothing is said about them at all.
-    expect(without.textContent).not.toContain('without a calendar date');
-    // A pointer, not a control: the section stays non-interactive.
-    expect(withUnplaced.querySelectorAll('button, a, input, select, textarea, details')).toHaveLength(
-      0,
-    );
   });
 
   it('carries no CTA, percentage or judgemental vocabulary', () => {

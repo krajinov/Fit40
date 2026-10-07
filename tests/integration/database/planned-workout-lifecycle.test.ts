@@ -40,7 +40,8 @@ import {
   programRepository,
   resetAndSeed,
   trainingHistoryRepository,
-  workoutSessionRepository, runClosureFactsRepository} from './setup';
+  workoutSessionRepository,
+} from './setup';
 
 const OWNER = 'planned-lifecycle-owner';
 const PROGRAM_SLUG = 'strong-at-home';
@@ -55,7 +56,7 @@ function restartUseCase(): RestartProgramUseCase {
   return new RestartProgramUseCase(
     programRepository,
     programEnrollmentRepository,
-    runClosureFactsRepository,
+    workoutSessionRepository,
     new NodeIdGenerator(),
   );
 }
@@ -189,11 +190,9 @@ describe('planned_workouts lifecycle — M14 restart', () => {
     const replaced = await programEnrollmentRepository.replaceExpectedWithNew(
       runEnrollment(run),
       fresh,
-      // Lifecycle-cascade suite: always pass the restartability gate.
-      () => true,
     );
 
-    expect(replaced.kind).toBe('replaced');
+    expect(replaced).toBe(true);
     expect(await allPlannedRows()).toEqual([]);
     expect(
       await plannedWorkoutRepository.listByEnrollment(enrollmentIdValue('enr-lifecycle-replacement')),
@@ -219,7 +218,7 @@ describe('planned_workouts lifecycle — planning never outlives its run', () =>
     );
 
     const fresh = await replacementEnrollment('enr-lifecycle-rewrite-2', run.program.id, '2026-12-01T00:00:00Z');
-    await programEnrollmentRepository.replaceExpectedWithNew(runEnrollment(run), fresh, () => true);
+    await programEnrollmentRepository.replaceExpectedWithNew(runEnrollment(run), fresh);
 
     // The stale run id can no longer be written into (it is gone)...
     const staleWrite = await plannedWorkoutRepository.replaceAllForEnrollment(

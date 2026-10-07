@@ -7,9 +7,8 @@ import { PageContainer } from '@/components/shared/PageContainer';
 import { requireUser } from '@/features/auth/current-user';
 import { getUserProfileUseCase } from '@/features/profile/services';
 import { formatDashboardDate } from '@/features/dashboard/dashboard-labels';
-import { buildDashboardView } from '@/features/dashboard/dashboard-view';
+import { buildDashboardView, type WeekSummary } from '@/features/dashboard/dashboard-view';
 import { CurrentProgramCard } from '@/features/dashboard/components/CurrentProgramCard';
-import { ConcludedRunCallout } from '@/features/enrollment/components/ConcludedRunCallout';
 import { NextWorkoutCard } from '@/features/dashboard/components/NextWorkoutCard';
 import { NextWorkoutUnavailableCard } from '@/features/dashboard/components/NextWorkoutUnavailableCard';
 import { NoProgramCard } from '@/features/dashboard/components/NoProgramCard';
@@ -43,10 +42,12 @@ export default async function DashboardPage() {
   const view = await buildDashboardView(user.id, profile, now);
 
   const currentProgram = view.currentProgram;
-  // The current week is resolved ONCE in the view assembly from the SAME
-  // authoritative open occurrence as Up next — null for a concluded run, so the
-  // "Program week" card is hidden rather than showing an old recorded week.
-  const currentWeek = view.currentWeek;
+  const currentWeek: WeekSummary | null =
+    currentProgram === null
+      ? null
+      : view.weekSummaries.find((week) => week.status === 'in-progress') ??
+        view.weekSummaries[view.weekSummaries.length - 1] ??
+        null;
 
   return (
     <PageContainer>
@@ -104,20 +105,6 @@ export default async function DashboardPage() {
                 />
               ) : currentProgram.nextWorkoutPreview.status === 'unavailable' ? (
                 <NextWorkoutUnavailableCard />
-              ) : currentProgram.nextWorkoutPreview.status === 'concluded' ? (
-                /* M17 final review: the run is settled but INCOMPLETE — every
-                   authored occurrence is completed or recorded as not
-                   performed, yet not all are completed. There is no Up next /
-                   Start to offer, and this is NOT M14 completion: no
-                   "Program completed" copy and no /completed link. Restart
-                   stays off the dashboard (the M14 locked product decision);
-                   the factual run-level copy is shown instead. */
-                <ConcludedRunCallout
-                  programSlug={currentProgram.program.slug}
-                  completedWorkouts={currentProgram.nextWorkoutPreview.completedWorkouts}
-                  notPerformedWorkouts={currentProgram.nextWorkoutPreview.notPerformedWorkouts}
-                  restartAvailable={false}
-                />
               ) : (
                 <ProgramCompletedCard
                   programName={currentProgram.program.name}
@@ -131,16 +118,13 @@ export default async function DashboardPage() {
                   both breakpoints. Additive only, and deliberately NOT rendered
                   for a completed run — the M14 ProgramCompletedCard above stays
                   the authoritative state, so no "next workout" can appear
-                  against it — nor for a concluded-but-incomplete run, whose
-                  settled occurrences must not surface a Start here either. The
-                  card itself returns null for a failed read. */}
-              {currentProgram.nextWorkoutPreview.status !== 'complete' &&
-                currentProgram.nextWorkoutPreview.status !== 'concluded' && (
-                  <TrainingScheduleCard
-                    state={currentProgram.schedule}
-                    programName={currentProgram.program.name}
-                  />
-                )}
+                  against it. The card itself returns null for a failed read. */}
+              {currentProgram.nextWorkoutPreview.status !== 'complete' && (
+                <TrainingScheduleCard
+                  state={currentProgram.schedule}
+                  programName={currentProgram.program.name}
+                />
+              )}
             </div>
             <div className="order-2">
               <WeeklyInsightsCard state={view.weeklyInsights} />

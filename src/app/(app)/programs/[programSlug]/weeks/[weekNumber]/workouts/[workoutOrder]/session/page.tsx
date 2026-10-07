@@ -13,7 +13,6 @@ import { buildActiveWorkoutView } from '@/features/sessions/active-workout-view'
 import { ActiveWorkoutScreen } from '@/features/sessions/components/ActiveWorkoutScreen';
 import { SessionCompletedPanel } from '@/features/sessions/components/SessionCompletedPanel';
 import { SessionJoinPanel } from '@/features/sessions/components/SessionJoinPanel';
-import { SessionRecordedPanel } from '@/features/sessions/components/SessionRecordedPanel';
 import { SessionStartPanel } from '@/features/sessions/components/SessionStartPanel';
 
 interface Props {
@@ -74,13 +73,6 @@ export default async function SessionPage({ params }: Props) {
     <PageContainer className="pb-6 md:pb-20">
       {view.screenState === 'not-enrolled' ? (
         <SessionJoinPanel
-          workout={view.workout}
-          programSlug={ps}
-          weekNumber={wn}
-          workoutOrder={wo}
-        />
-      ) : view.screenState === 'not-performed' ? (
-        <SessionRecordedPanel
           workout={view.workout}
           programSlug={ps}
           weekNumber={wn}

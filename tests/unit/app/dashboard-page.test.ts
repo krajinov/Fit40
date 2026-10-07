@@ -39,14 +39,6 @@ vi.mock('@/features/dashboard/dashboard-view', () => ({
   buildDashboardView: buildViewMock,
 }));
 
-// The M17 concluded-run surface reuses `ConcludedRunCallout`, whose restart leaf
-// posts to the enrollment Server Action (which pulls the DB composition root).
-// Stubbed at the module boundary — the program-detail-page test pattern — so the
-// dashboard route stays DB-free under test.
-vi.mock('@/features/enrollment/actions/restart-program', () => ({
-  restartProgramAction: vi.fn(),
-}));
-
 import DashboardPage from '@/app/(app)/dashboard/page';
 import type { DashboardView } from '@/features/dashboard/dashboard-view';
 import type { DashboardScheduleState } from '@/application/dto/dashboard';
@@ -113,19 +105,10 @@ const PROGRAM_DETAIL = {
 
 const ENROLLED = {
   status: 'enrolled',
-  enrollmentId: 'enr-dashboard-test',
   enrolledAt: '2026-01-01T10:00:00.000Z',
   progress: { totalWorkouts: 12, completedWorkouts: 3, percentage: 25 },
   nextWorkout: { weekNumber: 1, workoutOrder: 4 },
   completedScheduledWorkoutIds: [],
-} as const;
-
-/** The authoritative current week the view assembly resolves for the fixture. */
-const CURRENT_WEEK_ONE = {
-  weekNumber: 1,
-  totalWorkouts: 3,
-  completedCount: 1,
-  status: 'in-progress',
 } as const;
 
 const NEXT_PREVIEW = {
@@ -158,8 +141,7 @@ function configuredSchedule(): DashboardScheduleState {
       configured: true,
       today: '2026-02-18',
       items: [item],
-      unplacedNotPerformedWorkouts: [],
-      focus: { today: item, next: null, pastDue: null, notPerformedRecorded: 0 },
+      focus: { today: item, next: null, pastDue: null },
     },
   };
 }
@@ -171,7 +153,6 @@ function view(currentProgram: DashboardView['currentProgram']): DashboardView {
     recentTraining: RECENT_TRAINING,
     weeklyInsights: LOADED_INSIGHTS,
     weekSummaries: [],
-    currentWeek: null,
   };
 }
 
@@ -189,7 +170,6 @@ function activeProgram(schedule: DashboardScheduleState): NonNullable<
     enrollment: ENROLLED,
     nextWorkoutPreview: NEXT_PREVIEW,
     schedule,
-    currentWeek: CURRENT_WEEK_ONE,
   };
 }
 
@@ -232,8 +212,7 @@ describe('/dashboard page (M15 Slice 5)', () => {
         configured: false,
         today: '2026-02-18',
         items: [],
-        unplacedNotPerformedWorkouts: [],
-        focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
+        focus: { today: null, next: null, pastDue: null },
       },
     };
     const markup = await renderPage(activeProgram(unconfigured));
@@ -247,38 +226,6 @@ describe('/dashboard page (M15 Slice 5)', () => {
     expect(markup).toContain('Choose your training days to put this program on your calendar.');
   });
 
-  it('renders a recorded fallback preview with no Start (degraded closure, M17 final review)', async () => {
-    // Unconfigured calendar: the only Start/Resume CTA this occurrence could
-    // produce is the Up next card's, so its absence proves the recorded preview
-    // is non-startable.
-    const unconfigured: DashboardScheduleState = {
-      status: 'loaded',
-      schedule: {
-        programSlug: 'fit40-beginner-strength',
-        configured: false,
-        today: '2026-02-18',
-        items: [],
-        unplacedNotPerformedWorkouts: [],
-        focus: { today: null, next: null, pastDue: null, notPerformedRecorded: 0 },
-      },
-    };
-    const recorded: NonNullable<DashboardView['currentProgram']> = {
-      program: PROGRAM_DETAIL,
-      enrollment: ENROLLED,
-      nextWorkoutPreview: {
-        status: 'available',
-        workout: { ...NEXT_PREVIEW.workout, sessionState: 'not-performed' },
-      },
-      schedule: unconfigured,
-      currentWeek: CURRENT_WEEK_ONE,
-    };
-    const markup = await renderPage(recorded);
-
-    expect(markup).toContain('Recorded as not performed');
-    expect(markup).not.toContain('Start workout');
-    expect(markup).not.toContain('Resume workout');
-  });
-
   it('keeps the M14 completed card authoritative — no schedule section or next-workout CTA', async () => {
     const completed: DashboardView['currentProgram'] = {
       program: PROGRAM_DETAIL,
@@ -286,9 +233,6 @@ describe('/dashboard page (M15 Slice 5)', () => {
       nextWorkoutPreview: { status: 'complete' },
       // Even a configured schedule must not appear against a completed run.
       schedule: configuredSchedule(),
-      // No open week: the heading falls back to the authored duration, exactly
-      // as the completed card always did.
-      currentWeek: null,
     };
     const markup = await renderPage(completed);
 
@@ -309,114 +253,10 @@ describe('/dashboard page (M15 Slice 5)', () => {
     expect(markup).toContain('Full Body A');
   });
 
-  it('renders the factual run-closed state for a concluded run — no Start, no completion copy', async () => {
-    const concluded: NonNullable<DashboardView['currentProgram']> = {
-      program: PROGRAM_DETAIL,
-      enrollment: ENROLLED,
-      nextWorkoutPreview: {
-        status: 'concluded',
-        completedWorkouts: 3,
-        notPerformedWorkouts: 2,
-      },
-      // Even a configured schedule must not surface a Start against a settled run.
-      schedule: configuredSchedule(),
-      // Concluded-but-incomplete: NO open week, so the heading must not name an
-      // old recorded occurrence's week.
-      currentWeek: null,
-    };
-    const markup = await renderPage(concluded);
-
-    // Honest run-level copy: concluded is not completion.
-    expect(markup).toContain('Run closed — 3 completed, 2 recorded as not performed');
-    expect(markup).not.toContain('UP NEXT');
-    expect(markup).not.toContain('Start workout');
-    expect(markup).not.toContain('Resume workout');
-    // No M14 completion surface and no /completed link for a concluded-but-incomplete run.
-    expect(markup).not.toContain('Program completed');
-    expect(markup).not.toContain('/completed');
-    // The M15 schedule card is suppressed for a settled run too.
-    expect(markup).not.toContain('aria-label="Training schedule"');
-  });
-
   it('exposes no EnrollmentId anywhere in the rendered markup', async () => {
     const markup = await renderPage(activeProgram(configuredSchedule()));
 
     expect(markup).not.toContain('enr-');
     expect(markup).not.toContain(SESSION_USER.id);
-  });
-});
-/**
- * M17 — the CurrentProgramCard heading consumes the AUTHORITATIVE current week
- * the view assembly resolves, never the completion-only
- * `enrollment.nextWorkout` (which can point at a week already settled as
- * recorded not performed, contradicting Up next and the weekly summaries).
- */
-describe('/dashboard page — CurrentProgramCard uses the authoritative week', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    requireUserMock.mockResolvedValue(SESSION_USER);
-    profileExecuteMock.mockResolvedValue(PROFILE);
-  });
-
-  /** The active-run view with an explicit authoritative week and next workout. */
-  function programView(
-    overrides: {
-      readonly nextWorkout: { readonly weekNumber: number; readonly workoutOrder: number } | null;
-      readonly currentWeek: NonNullable<DashboardView['currentProgram']>['currentWeek'];
-      readonly nextWorkoutPreview: NonNullable<
-        DashboardView['currentProgram']
-      >['nextWorkoutPreview'];
-    },
-  ): NonNullable<DashboardView['currentProgram']> {
-    return {
-      ...activeProgram(configuredSchedule()),
-      enrollment: { ...ENROLLED, nextWorkout: overrides.nextWorkout },
-      nextWorkoutPreview: overrides.nextWorkoutPreview,
-      currentWeek: overrides.currentWeek,
-    };
-  }
-
-  it('A. recorded week 1 + first open week 2: the card shows week 2, never the stale week 1', async () => {
-    const program = programView({
-      // The completion-only next workout still points at the recorded week 1…
-      nextWorkout: { weekNumber: 1, workoutOrder: 4 },
-      // …while the authoritative open occurrence is week 2.
-      nextWorkoutPreview: {
-        status: 'available',
-        workout: { ...NEXT_PREVIEW.workout, weekNumber: 2, workoutOrder: 1 },
-      },
-      currentWeek: { weekNumber: 2, totalWorkouts: 3, completedCount: 0, status: 'in-progress' },
-    });
-
-    const markup = await renderPage(program);
-
-    expect(markup).toContain('Week 2 of 4');
-    expect(markup).not.toContain('Week 1 of 4');
-  });
-
-  it('B. concluded-but-incomplete: no stale recorded week, the authored duration is the fallback', async () => {
-    const program = programView({
-      nextWorkout: { weekNumber: 1, workoutOrder: 4 },
-      nextWorkoutPreview: { status: 'concluded', completedWorkouts: 3, notPerformedWorkouts: 2 },
-      // No open occurrence → no authoritative week.
-      currentWeek: null,
-    });
-
-    const markup = await renderPage(program);
-
-    expect(markup).toContain('Week 4 of 4');
-    expect(markup).not.toContain('Week 1 of 4');
-  });
-
-  it('C. completed run: the completion-only presentation is unchanged', async () => {
-    const program = programView({
-      nextWorkout: null,
-      nextWorkoutPreview: { status: 'complete' },
-      currentWeek: null,
-    });
-
-    const markup = await renderPage(program);
-
-    expect(markup).toContain('Week 4 of 4');
   });
 });

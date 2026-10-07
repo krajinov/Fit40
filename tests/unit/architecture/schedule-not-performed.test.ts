@@ -492,3 +492,62 @@ describe('M17 final review — recorded truth flows through the next-workout pre
     expect(codeOf(PANEL)).toContain('Recorded as not performed');
   });
 });
+
+describe('PR #21 P2 follow-up — the session read enforces settlement consistency before the DTO', () => {
+  const DETAIL_VIEWS = 'src/features/sessions/workout-detail-view.ts';
+  const ACTIVE_VIEW = 'src/features/sessions/active-workout-view.ts';
+  const CTA_STATE = 'src/features/sessions/workout-cta-state.ts';
+  const SETTLEMENT_SERVICE = 'src/domain/services/occurrence-settlement.ts';
+
+  it('runs assertOccurrenceSettlementIsConsistent on BOTH read paths, before each DTO', () => {
+    const code = codeOf(DETAIL_READ);
+
+    // Reuses the EXISTING invariant — no local re-implementation, no second rule.
+    expect(code).toContain(
+      "import { assertOccurrenceSettlementIsConsistent } from '@/domain/services/occurrence-settlement'",
+    );
+    expect(code.match(/assertOccurrenceSettlementIsConsistent\(/g)).toHaveLength(2);
+
+    // Ordering per path: check first, DTO second (execute, then executeFenced).
+    const firstAssert = code.indexOf('assertOccurrenceSettlementIsConsistent(');
+    const secondAssert = code.indexOf('assertOccurrenceSettlementIsConsistent(', firstAssert + 1);
+    const firstDto = code.indexOf('toWorkoutSessionDto(');
+    const secondDto = code.indexOf('toWorkoutSessionDto(', firstDto + 1);
+
+    expect(firstAssert).toBeGreaterThan(-1);
+    expect(secondAssert).toBeGreaterThan(-1);
+    expect(firstDto).toBeGreaterThan(firstAssert);
+    expect(secondDto).toBeGreaterThan(secondAssert);
+  });
+
+  it('introduces no second settlement read, no write authority and no transaction', () => {
+    const code = codeOf(DETAIL_READ);
+
+    // Exactly the one coherent snapshot read per path — never a second read.
+    expect(code.match(/findOccurrenceExecutionFacts\(/g)).toHaveLength(1);
+    expect(code.match(/findFencedOccurrenceExecutionFacts\(/g)).toHaveLength(1);
+    expect(code).not.toContain('notPerformedRepository');
+    expect(code).not.toContain('listByEnrollment(');
+    // No lock, retry, sleep, SERIALIZABLE or transaction in this read.
+    expect(code).not.toContain('transaction(');
+    expect(code).not.toContain('serializable');
+    expect(code).not.toContain('RunOccurrenceWriteRepository');
+    expect(code).not.toContain('recordNotPerformed');
+    expect(code).not.toContain('undoNotPerformed');
+  });
+
+  it('keeps presentation from resolving the contradiction itself', () => {
+    // The surfaces consume the DTO as data; they never import the invariant
+    // (nor re-check settlement) — the use case already refused the pair, so a
+    // contradictory DTO cannot exist for any component to interpret.
+    for (const file of [DETAIL_VIEWS, ACTIVE_VIEW, CTA_STATE]) {
+      const code = codeOf(file);
+      expect(code).not.toContain('assertOccurrenceSettlementIsConsistent');
+      expect(code).not.toContain('occurrence-settlement');
+    }
+    // The invariant stays domain-owned and is thrown only where facts are read.
+    expect(codeOf(SETTLEMENT_SERVICE)).toContain(
+      'export function assertOccurrenceSettlementIsConsistent',
+    );
+  });
+});

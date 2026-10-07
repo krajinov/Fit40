@@ -483,6 +483,12 @@ M17 never touched the M14 completion surface:
 | Generation-fenced occurrence preview/session projection (identity + occurrence facts in ONE bounded read-only snapshot) | Infrastructure (anchored projection) / Application (refusal mapping) | `drizzle-occurrence-execution-facts-repository.ts` (`findFencedOccurrenceExecutionFacts`) |
 | Auth, validation, request-clock boundary; copy; forms | Presentation | Server Actions, `program-panel-state.ts`, `workout-cta-state.ts`, `schedule-week-view.ts` |
 
+The authored program-week LIFECYCLE (completed / settled / in-progress /
+upcoming) is Application meaning too: it is resolved by the Application-owned
+pure `resolveProgramWeekLifecycle` (`src/application/dto/program-week-lifecycle.ts`)
+from authored occurrence facts, and presentation only renders the returned value
+(label, badge style, icon). No week-lifecycle rule lives under `src/features`.
+
 Presentation never decides settlement or closure: Server Actions own auth,
 validation and the request clock, then delegate; the CTA state and panel state
 resolve *display* rules from computed flags only.

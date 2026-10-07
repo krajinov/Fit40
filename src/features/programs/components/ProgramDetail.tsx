@@ -12,7 +12,7 @@ import { EnrolledProgramPanel } from '@/features/enrollment/components/EnrolledP
 import { AnonymousVisitorCard } from '@/features/enrollment/components/AnonymousVisitorCard';
 import { ProgramDetailHeader } from '@/features/programs/components/ProgramDetailHeader';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import { resolveProgramWeekStatus } from '@/features/programs/week-status';
+import { resolveProgramWeekLifecycle } from '@/application/dto/program-week-lifecycle';
 import { PlanFollowThroughSection } from '@/features/schedule/components/PlanFollowThroughSection';
 import { ProgramScheduleSection } from '@/features/schedule/components/ProgramScheduleSection';
 
@@ -84,8 +84,8 @@ export function ProgramDetail({
     ? resolveRunNextOccurrence(enrollment.nextWorkout, runClosure)
     : null;
 
-  // Occurrences the run has already settled as recorded-not-performed,
-  // addressed by the same route key the up-next preview uses.
+  // The authored occurrence identities the run has settled as recorded not
+  // performed.
   //
   // The AUTHORITATIVE source is the closure read's authored identity set
   // (`notPerformedInProgramOrder`): it is Application-resolved from the run's
@@ -95,26 +95,26 @@ export function ProgramDetail({
   // null (failed) does this fall back to the M15 read's recorded items and
   // rowless `unplacedNotPerformedWorkouts`. Settlement is never inferred from
   // counts and never from a missing session.
-  const recordedKeys = new Set<string>();
+  const notPerformedIds = new Set<string>();
   if (runClosure !== null) {
     for (const occurrence of runClosure.notPerformedInProgramOrder) {
-      recordedKeys.add(`${occurrence.weekNumber}-${occurrence.workoutOrder}`);
+      notPerformedIds.add(occurrence.scheduledWorkoutId);
     }
   } else if (schedule !== null && schedule.status === 'loaded') {
     for (const item of schedule.schedule.items) {
       if (item.status === 'not-performed') {
-        recordedKeys.add(`${item.weekNumber}-${item.workoutOrder}`);
+        notPerformedIds.add(item.scheduledWorkoutId);
       }
     }
     for (const unplaced of schedule.schedule.unplacedNotPerformedWorkouts) {
-      recordedKeys.add(`${unplaced.weekNumber}-${unplaced.workoutOrder}`);
+      notPerformedIds.add(unplaced.scheduledWorkoutId);
     }
   }
 
-  const upNextKey =
-    nextOccurrence === null
-      ? null
-      : `${nextOccurrence.weekNumber}-${nextOccurrence.workoutOrder}`;
+  // The authored identity of the run's next/open occurrence, resolved from the
+  // authored coordinates above — composition, never a lifecycle decision.
+  const upNextOccurrenceId =
+    nextOccurrence === null ? null : authoredOccurrenceId(program, nextOccurrence);
 
   const availableWorkout =
     nextWorkoutPreview !== null && nextWorkoutPreview.status === 'available'
@@ -197,20 +197,22 @@ export function ProgramDetail({
             key={week.weekNumber}
             programSlug={program.slug}
             week={week}
-            status={resolveProgramWeekStatus({
-              enrolled,
+            // The week's lifecycle is DOMAIN meaning, resolved by the pure
+            // Domain service from authored facts — this component renders the
+            // returned value and decides nothing.
+            status={resolveProgramWeekLifecycle({
               weekNumber: week.weekNumber,
               occurrences: week.scheduledWorkouts.map((scheduled) => ({
                 scheduledWorkoutId: scheduled.scheduledWorkoutId,
-                key: `${week.weekNumber}-${scheduled.order}`,
+                workoutOrder: scheduled.order,
               })),
               completedIds,
-              recordedKeys,
-              upNext: nextOccurrence,
+              notPerformedIds,
+              firstOpenOccurrence: nextOccurrence,
             })}
             completedIds={completedIds}
-            recordedKeys={recordedKeys}
-            upNextKey={upNextKey}
+            notPerformedIds={notPerformedIds}
+            upNextOccurrenceId={upNextOccurrenceId}
           />
         ))}
       </div>
@@ -218,3 +220,18 @@ export function ProgramDetail({
   );
 }
 
+/**
+ * The authored occurrence id at a trusted authored coordinate, or null when the
+ * program does not author that coordinate (structurally unreachable for a
+ * resolved occurrence — the coordinate came from this program).
+ */
+function authoredOccurrenceId(
+  program: ProgramDetailDto,
+  coordinate: { readonly weekNumber: number; readonly workoutOrder: number },
+): string | null {
+  const week = program.weeks.find((candidate) => candidate.weekNumber === coordinate.weekNumber);
+  const scheduled = week?.scheduledWorkouts.find(
+    (candidate) => candidate.order === coordinate.workoutOrder,
+  );
+  return scheduled?.scheduledWorkoutId ?? null;
+}

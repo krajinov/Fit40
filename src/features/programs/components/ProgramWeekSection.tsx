@@ -5,31 +5,38 @@ import {
   ScheduledWorkoutCard,
   type ScheduledWorkoutState,
 } from '@/features/programs/components/ScheduledWorkoutCard';
-import type { ProgramWeekStatus } from '@/features/programs/week-status';
+import type { ProgramWeekLifecycle } from '@/application/dto/program-week-lifecycle';
 
 /**
  * Lifecycle of one program week for the enrolled visitor. Re-exported from the
- * pure status resolver (M17 final review) so importers keep one source of truth.
+ * APPLICATION-owned resolver (M17 architecture review) so importers keep one
+ * source of truth: the meaning is resolved in the Application layer and this
+ * component only renders it.
  */
-export type { ProgramWeekStatus } from '@/features/programs/week-status';
+export type { ProgramWeekLifecycle } from '@/application/dto/program-week-lifecycle';
 
 interface ProgramWeekSectionProps {
   readonly programSlug: string;
   readonly week: ProgramWeekDto;
-  readonly status: ProgramWeekStatus;
+  /**
+   * The week's ALREADY-RESOLVED lifecycle, produced by the Application-owned
+   * `resolveProgramWeekLifecycle`. This component renders it (label, badge
+   * style) and never derives the meaning from occurrence sets.
+   */
+  readonly status: ProgramWeekLifecycle;
   readonly completedIds: ReadonlySet<string>;
   /**
-   * Route keys ("week-order") of occurrences the M15 read resolved as
-   * `not-performed` (M17 Slice 11). Empty for anonymous visitors or a
-   * degraded schedule read — the recorded fact is never guessed from a
-   * missing session.
+   * Authored occurrence ids the run settled as recorded not performed (M17),
+   * from the closure read's identity set (or the M15 read's fallback). Empty
+   * for anonymous visitors or when neither read supplied one — the recorded
+   * fact is never guessed from a missing session.
    */
-  readonly recordedKeys?: ReadonlySet<string>;
+  readonly notPerformedIds?: ReadonlySet<string>;
   /**
-   * Route key ("week-order") of the enrollment's next incomplete workout,
-   * or null for anonymous visitors / completed programs.
+   * Authored occurrence id of the run's next/open workout, or null for
+   * anonymous visitors / completed programs.
    */
-  readonly upNextKey: string | null;
+  readonly upNextOccurrenceId: string | null;
 }
 
 /**
@@ -42,8 +49,8 @@ export function ProgramWeekSection({
   week,
   status,
   completedIds,
-  recordedKeys = new Set<string>(),
-  upNextKey,
+  notPerformedIds = new Set<string>(),
+  upNextOccurrenceId,
 }: ProgramWeekSectionProps) {
   return (
     <section
@@ -77,14 +84,18 @@ export function ProgramWeekSection({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {week.scheduledWorkouts.map((scheduled) => {
-          const key = `${week.weekNumber}-${scheduled.order}`;
-          // Settlement precedence mirrors the M15 status resolver: a recorded
-          // occurrence is settled truth, so it is never also "up next".
-          const recorded = recordedKeys.has(key);
+          // Membership lookups over application-provided identities - never a
+          // lifecycle decision: a recorded occurrence is settled truth, so it
+          // is never also "up next".
+          const recorded = notPerformedIds.has(scheduled.scheduledWorkoutId);
           let state: ScheduledWorkoutState = 'scheduled';
           if (completedIds.has(scheduled.scheduledWorkoutId)) {
             state = 'completed';
-          } else if (!recorded && upNextKey === key && status === 'in-progress') {
+          } else if (
+            !recorded &&
+            upNextOccurrenceId === scheduled.scheduledWorkoutId &&
+            status === 'in-progress'
+          ) {
             state = 'up-next';
           }
 

@@ -23,7 +23,7 @@ import {
 } from '@/domain/services/schedule-focus';
 import { createPlannedDate, type PlannedDate } from '@/domain/value-objects/planned-date';
 import { resolveRunNextOccurrence } from '@/features/enrollment/next-occurrence';
-import { resolveProgramWeekStatus } from '@/features/programs/week-status';
+import { resolveProgramWeekLifecycle } from '@/application/dto/program-week-lifecycle';
 import { resolveWorkoutCtaState } from '@/features/sessions/workout-cta-state';
 
 function plannedDate(value: string): PlannedDate {
@@ -72,24 +72,22 @@ describe('one recorded occurrence is consistent across M17 surfaces', () => {
   });
 
   it('Week 1 (A completed, B recorded) is settled, never Completed', () => {
-    const week1 = resolveProgramWeekStatus({
-      enrolled: true,
+    const week1 = resolveProgramWeekLifecycle({
       weekNumber: 1,
       occurrences: [
-        { scheduledWorkoutId: 'sw-a', key: '1-1' },
-        { scheduledWorkoutId: 'sw-b', key: '1-2' },
+        { scheduledWorkoutId: 'sw-a', workoutOrder: 1 },
+        { scheduledWorkoutId: 'sw-b', workoutOrder: 2 },
       ],
       completedIds: new Set(['sw-a']),
-      recordedKeys: new Set(['1-2']),
-      upNext: { weekNumber: 2, workoutOrder: 1 },
+      notPerformedIds: new Set(['sw-b']),
+      firstOpenOccurrence: { weekNumber: 2, workoutOrder: 1 },
     });
-    const week2 = resolveProgramWeekStatus({
-      enrolled: true,
+    const week2 = resolveProgramWeekLifecycle({
       weekNumber: 2,
-      occurrences: [{ scheduledWorkoutId: 'sw-c', key: '2-1' }],
+      occurrences: [{ scheduledWorkoutId: 'sw-c', workoutOrder: 1 }],
       completedIds: new Set(['sw-a']),
-      recordedKeys: new Set(['1-2']),
-      upNext: { weekNumber: 2, workoutOrder: 1 },
+      notPerformedIds: new Set(['sw-b']),
+      firstOpenOccurrence: { weekNumber: 2, workoutOrder: 1 },
     });
 
     expect(week1).toBe('settled');

@@ -19,7 +19,7 @@ vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
 
 import type { ProgramWeekDto } from '@/application/dto/program';
 import { ProgramWeekSection } from '@/features/programs/components/ProgramWeekSection';
-import type { ProgramWeekStatus } from '@/features/programs/week-status';
+import type { ProgramWeekLifecycle } from '@/application/dto/program-week-lifecycle';
 
 declare global {
   // React 19's act() environment flag; not part of the DOM lib typings.
@@ -65,10 +65,10 @@ const WEEK: ProgramWeekDto = {
 
 async function renderWeek(
   options: {
-    readonly status?: ProgramWeekStatus;
+    readonly status?: ProgramWeekLifecycle;
     readonly completedIds?: ReadonlySet<string>;
-    readonly recordedKeys?: ReadonlySet<string>;
-    readonly upNextKey?: string | null;
+    readonly notPerformedIds?: ReadonlySet<string>;
+    readonly upNextOccurrenceId?: string | null;
   } = {},
 ): Promise<HTMLElement> {
   const container = document.createElement('div');
@@ -81,8 +81,8 @@ async function renderWeek(
         week: WEEK,
         status: options.status ?? 'in-progress',
         completedIds: options.completedIds ?? new Set<string>(),
-        recordedKeys: options.recordedKeys,
-        upNextKey: options.upNextKey ?? '1-1',
+        notPerformedIds: options.notPerformedIds,
+        upNextOccurrenceId: options.upNextOccurrenceId ?? 'sw-a',
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -102,7 +102,7 @@ function cardFor(container: HTMLElement, name: string): HTMLElement {
 
 describe('ProgramWeekSection / recorded state (M17 Slice 11)', () => {
   it('states the stored fact on a recorded card and exposes Undo only', async () => {
-    const container = await renderWeek({ recordedKeys: new Set(['1-1']) });
+    const container = await renderWeek({ notPerformedIds: new Set(['sw-1']) });
 
     const card = cardFor(container, 'Upper Body A');
     expect(card.textContent).toContain('Recorded as not performed');
@@ -117,8 +117,8 @@ describe('ProgramWeekSection / recorded state (M17 Slice 11)', () => {
 
   it('never also marks a recorded card as up next, even when it is the next key', async () => {
     const container = await renderWeek({
-      recordedKeys: new Set(['1-1']),
-      upNextKey: '1-1',
+      notPerformedIds: new Set(['sw-1']),
+      upNextOccurrenceId: 'sw-1',
     });
 
     const card = cardFor(container, 'Upper Body A');
@@ -135,7 +135,7 @@ describe('ProgramWeekSection / recorded state (M17 Slice 11)', () => {
   it('keeps the existing up-next and completed cards free of settlement controls', async () => {
     const container = await renderWeek({
       completedIds: new Set(['sw-2']),
-      upNextKey: '1-1',
+      upNextOccurrenceId: 'sw-1',
     });
 
     const upNext = cardFor(container, 'Upper Body A');
@@ -158,8 +158,8 @@ describe('ProgramWeekSection / settled-but-incomplete week (M17 final review)', 
     const container = await renderWeek({
       status: 'settled',
       completedIds: new Set(['sw-1']),
-      recordedKeys: new Set(['1-2']),
-      upNextKey: null,
+      notPerformedIds: new Set(['sw-2']),
+      upNextOccurrenceId: null,
     });
     // The week HEADER badge is the settlement verdict; individual cards still
     // state their own completed / recorded facts.
@@ -177,14 +177,14 @@ describe('ProgramWeekSection / settled-but-incomplete week (M17 final review)', 
     const container = await renderWeek({
       status: 'completed',
       completedIds: new Set(['sw-1', 'sw-2']),
-      upNextKey: null,
+      upNextOccurrenceId: null,
     });
 
     expect(container.querySelector('header')?.textContent).toContain('Completed');
   });
 
   it('still marks the current week In progress', async () => {
-    const container = await renderWeek({ status: 'in-progress', upNextKey: '1-1' });
+    const container = await renderWeek({ status: 'in-progress', upNextOccurrenceId: 'sw-1' });
 
     expect(container.querySelector('header')?.textContent).toContain('In progress');
   });

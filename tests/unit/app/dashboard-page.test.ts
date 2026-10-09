@@ -419,4 +419,14 @@ describe('/dashboard page — CurrentProgramCard uses the authoritative week', (
 
     expect(markup).toContain('Week 4 of 4');
   });
+
+  it('M18: links to the Progress surface without adding a dashboard read', async () => {
+    const markup = await renderPage(null);
+
+    expect(markup).toContain('href="/progress"');
+    expect(markup).toContain('View progress');
+    // One dashboard view assembly as before: the link is presentation only, so
+    // the dashboard adds no second read, card or calculation for M18.
+    expect(buildViewMock).toHaveBeenCalledTimes(1);
+  });
 });

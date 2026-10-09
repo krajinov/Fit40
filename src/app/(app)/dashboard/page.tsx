@@ -60,6 +60,12 @@ export default async function DashboardPage() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          {/* M18: a LINK only. The Progress surface owns the long-horizon
+              analytics; the dashboard adds no read, card or calculation for
+              it, so its "This week" snapshot stays authoritative here. */}
+          <Link href="/progress" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+            View progress
+          </Link>
           <Link href="/profile" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
             Edit profile
           </Link>

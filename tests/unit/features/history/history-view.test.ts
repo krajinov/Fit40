@@ -120,8 +120,17 @@ function exerciseSummary(id: string): ExerciseSummaryDto {
 describe('toHistoryView', () => {
   it('maps one page with truthful labels and preserves DTO order', () => {
     const sessions = [
-      sessionDto({ sessionId: 'session-new', workoutName: 'Full Body B', completedAt: '2026-03-01T11:00:00Z' }),
-      sessionDto({ sessionId: 'session-old', workoutName: 'Full Body A', completedAt: '2026-02-15T11:00:00Z' }),
+      sessionDto({
+        sessionId: 'session-new',
+        workoutName: 'Full Body B',
+        completedAt: '2026-03-01T11:00:00Z',
+        exerciseLogs: [exerciseLog('ex-001')],
+      }),
+      sessionDto({
+        sessionId: 'session-old',
+        workoutName: 'Full Body A',
+        completedAt: '2026-02-15T11:00:00Z',
+      }),
     ];
     const view = toHistoryView(pageDto(sessions, 'tok-123'), TOTALS, []);
 
@@ -129,8 +138,10 @@ describe('toHistoryView', () => {
     expect(view.sessions[0]?.completedAtLabel).toBe('Mar 1, 2026');
     expect(view.sessions[0]?.setsLabel).toBe('18 sets');
     expect(view.sessions[0]?.repsLabel).toBe('126 reps');
-    expect(view.sessions[0]?.volumeLabel).toBe('1,240 kg');
+    expect(view.sessions[0]?.volumeLabel).toBe('1,240 kg × reps');
     expect(view.sessions[1]?.completedAtLabel).toBe('Feb 15, 2026');
+    // No logged occurrence at all → no eligible loaded set → no volume badge.
+    expect(view.sessions[1]?.volumeLabel).toBeNull();
   });
 
   it('builds the older-page URL from the opaque next cursor', () => {
@@ -153,6 +164,20 @@ describe('toHistoryView', () => {
     const view = toHistoryView(
       pageDto([
         sessionDto({
+          exerciseLogs: [
+            exerciseLog('ex-015', {
+              prescription: { type: 'duration', sets: 3, seconds: 30 },
+              sets: [
+                {
+                  setNumber: 1,
+                  type: 'duration',
+                  durationSeconds: 30,
+                  weightKg: null,
+                  rpe: null,
+                },
+              ],
+            }),
+          ],
           metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 30, volume: 0 },
         }),
       ]),
@@ -163,9 +188,75 @@ describe('toHistoryView', () => {
     const session = view.sessions[0];
     expect(session?.setsLabel).toBe('1 set');
     expect(session?.repsLabel).toBeNull();
+    // Duration-only training: no eligible loaded rep set, so no volume badge.
     expect(session?.volumeLabel).toBeNull();
     // Timed work is never presented as a workout duration.
     expect(Object.keys(session ?? {})).not.toContain('durationLabel');
+  });
+
+  it('badges a genuine zero when eligible 0 kg rep sets sum to zero (C)', () => {
+    const view = toHistoryView(
+      pageDto([
+        sessionDto({
+          exerciseLogs: [
+            exerciseLog('ex-001', {
+              sets: [
+                { setNumber: 1, type: 'reps', reps: 10, weightKg: 0, rpe: null },
+                { setNumber: 2, type: 'reps', reps: 10, weightKg: 0, rpe: null },
+              ],
+            }),
+          ],
+          metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0 },
+        }),
+      ]),
+      { completedSessions: 0, loggedSets: 0 },
+      [],
+    );
+
+    expect(view.sessions[0]?.volumeLabel).toBe('0 kg × reps');
+  });
+
+  it('omits the volume badge for bodyweight-only sessions (B)', () => {
+    const view = toHistoryView(
+      pageDto([
+        sessionDto({
+          exerciseLogs: [
+            exerciseLog('ex-007', {
+              sets: [{ setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null }],
+            }),
+          ],
+          metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0 },
+        }),
+      ]),
+      { completedSessions: 0, loggedSets: 0 },
+      [],
+    );
+
+    expect(view.sessions[0]?.repsLabel).toBe('12 reps');
+    expect(view.sessions[0]?.volumeLabel).toBeNull();
+  });
+
+  it('badges a mixed session from its eligible loaded sets alone', () => {
+    const view = toHistoryView(
+      pageDto([
+        sessionDto({
+          exerciseLogs: [
+            exerciseLog('ex-007', {
+              sets: [{ setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null }],
+            }),
+            exerciseLog('ex-001', {
+              occurrenceKey: 2,
+              sets: [{ setNumber: 1, type: 'reps', reps: 10, weightKg: 30, rpe: null }],
+            }),
+          ],
+          metrics: { totalSets: 2, totalReps: 22, totalDurationSeconds: 0, volume: 300 },
+        }),
+      ]),
+      { completedSessions: 0, loggedSets: 0 },
+      [],
+    );
+
+    expect(view.sessions[0]?.volumeLabel).toBe('300 kg × reps');
   });
 
   it('carries long workout and program names untruncated', () => {

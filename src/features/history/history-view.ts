@@ -31,6 +31,7 @@ import {
   formatHistoryCount,
   formatHistoryDate,
   formatHistoryVolume,
+  hasEligibleExternalLoad,
 } from '@/features/history/history-labels';
 import {
   getExercisesByIdsUseCase,
@@ -54,7 +55,12 @@ export interface HistorySessionView {
   readonly setsLabel: string;
   /** Null when the session logged no reps (e.g. duration-only training). */
   readonly repsLabel: string | null;
-  /** Null when the session produced no external-load volume. */
+  /**
+   * "1,240 kg × reps" when the session logged at least one eligible
+   * externally loaded rep set; null when it logged none (bodyweight-only or
+   * duration-only training). A genuine `0 kg × reps` session still renders a
+   * label — eligibility, never the summed value, decides presence.
+   */
   readonly volumeLabel: string | null;
 }
 
@@ -177,8 +183,12 @@ export function toHistoryView(
       session.metrics.totalReps > 0
         ? `${formatHistoryCount(session.metrics.totalReps)} reps`
         : null,
-    volumeLabel:
-      session.metrics.volume > 0 ? formatHistoryVolume(session.metrics.volume) : null,
+    // Presence, not the summed value, decides the badge (docs/training-progress.md
+    // §6.3): a genuine `0 kg × reps` session still renders one, while a
+    // bodyweight-only or duration-only session renders none.
+    volumeLabel: hasEligibleExternalLoad(session.exerciseLogs)
+      ? formatHistoryVolume(session.metrics.volume)
+      : null,
   }));
 
   return {

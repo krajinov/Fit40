@@ -42,6 +42,39 @@ export interface PriorBestRow {
 }
 
 /**
+ * Serializes one `findBestValuesBefore` call's candidates as the single `jsonb`
+ * parameter the statement binds: the ordinal plus every rung of the position
+ * ladder, with instants as ISO strings (`timestamptz` parses that text through
+ * its own input function — the same conversion a bound `Date` goes through — at
+ * the millisecond precision the Domain compares with). Field names are the
+ * record type's own, so the transport is declared once, next to the result
+ * shape it mirrors.
+ *
+ * The WHOLE collection travels in one parameter on purpose: a `VALUES` relation
+ * binds eight parameters per candidate while the wire protocol caps a statement
+ * at 65534 parameters, so the uncapped M18 candidate collection used to die at
+ * 8192 candidates with `MAX_PARAMETERS_EXCEEDED` instead of answering. Nothing
+ * here truncates, pages or chunks — the payload is the exact candidate
+ * collection, in input order.
+ */
+export function serializePriorBestCandidates(
+  candidates: ReadonlyArray<RecordCandidate>,
+): string {
+  return JSON.stringify(
+    candidates.map((candidate, ord) => ({
+      ord,
+      exercise_id: candidate.exerciseId,
+      metric: candidate.metric,
+      completed_at: candidate.position.completedAt.toISOString(),
+      started_at: candidate.position.startedAt.toISOString(),
+      session_id: candidate.position.sessionId,
+      exercise_order: candidate.position.exerciseOrder,
+      set_number: candidate.position.setNumber,
+    })),
+  );
+}
+
+/**
  * Validates a persisted metric against the closed M12 vocabulary. An unknown
  * value is corrupt data (unreachable through normal writes — the value is
  * projected from `set_logs.type` and `set_logs.weight_kg`).

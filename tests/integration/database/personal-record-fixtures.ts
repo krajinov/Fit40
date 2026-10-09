@@ -262,6 +262,13 @@ export interface QueryCountingRepository {
   readonly repository: PersonalRecordRepository;
   /** Statements the driver ran since creation, in order. */
   readonly queries: ReadonlyArray<string>;
+  /**
+   * Bound SQL parameters per statement, positionally aligned with `queries`.
+   * This is what proves a collection read transports its WHOLE input in a
+   * constant number of parameters instead of one per item: the wire protocol
+   * caps a statement at 65534, so a per-item parameter would cap the read.
+   */
+  readonly parameterCounts: ReadonlyArray<number>;
   close: () => Promise<void>;
 }
 
@@ -273,13 +280,15 @@ export interface QueryCountingRepository {
  */
 export function createQueryCountingRepository(): QueryCountingRepository {
   const queries: string[] = [];
+  const parameterCounts: number[] = [];
   const client = postgres(getTestDatabaseUrl(), {
     max: 1,
     // Server-side prepared statements would surface as extra driver callbacks;
     // the simple protocol reports one callback per executed statement.
     prepare: false,
-    debug: (_connection, query) => {
+    debug: (_connection, query, parameters) => {
       queries.push(query);
+      parameterCounts.push(parameters.length);
     },
   });
   const repository = new DrizzlePersonalRecordRepository(drizzle(client, { schema }));
@@ -287,6 +296,7 @@ export function createQueryCountingRepository(): QueryCountingRepository {
   return {
     repository,
     queries,
+    parameterCounts,
     close: async () => {
       await client.end();
     },

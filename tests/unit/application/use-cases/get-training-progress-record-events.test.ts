@@ -472,6 +472,92 @@ describe('GetTrainingProgressRecordEventsUseCase — empty, invalid and ownershi
     expect(result.data.events[0]?.stillStanding).toBe(false);
   });
 
+  it('resolves same-session events by position, and the earliest equal set owns the best', async () => {
+    const deps = makeDeps();
+    deps.listSessions.mockResolvedValue([
+      session('o-same', '2026-08-12T09:00:00.000Z', [
+        { exerciseId: GOBLET, reps: 8, weightKg: 20 },
+        { exerciseId: GOBLET, reps: 8, weightKg: 25 },
+        // A repeat of the maximum inside the same session: equal is not
+        // strictly greater, so it establishes no event of its own.
+        { exerciseId: GOBLET, reps: 8, weightKg: 25 },
+      ]),
+    ]);
+    // Two events in ONE session, separated only by their positions: the second
+    // set strictly exceeds the first, so it is an event while the third is not.
+    deps.findBestValuesBefore.mockImplementation(
+      priorBestsAt(
+        new Map([
+          ['o-same#1#1', null],
+          ['o-same#2#1', 20],
+          ['o-same#3#1', 25],
+        ]),
+      ),
+    );
+    // Earliest-equal ownership: the best is owned by the SECOND set, not by the
+    // later equal third set.
+    deps.findCurrentPersonalBests.mockResolvedValue([
+      best({ exerciseId: GOBLET, value: 25, sessionId: 'o-same', exerciseOrder: 2 }),
+    ]);
+    deps.findByIds.mockResolvedValue([
+      catalogExercise(GOBLET, 'Goblet Squat', 'goblet-squat'),
+    ]);
+
+    const result = await deps.useCase.execute({ userId: 'user-a', now: NOW });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.recordEventCount).toBe(2);
+    // Same session, different positions: the earlier event is since surpassed
+    // and only the owning final PR position still stands. A session-identity
+    // comparison would wrongly keep both standing.
+    expect(result.data.events.map((event) => event.sessionId)).toEqual(['o-same', 'o-same']);
+    expect(result.data.events.map((event) => [event.value, event.stillStanding])).toEqual([
+      [20, false],
+      [25, true],
+    ]);
+  });
+
+  it('never claims an event still stands when a later equal position owns the best', async () => {
+    const deps = makeDeps();
+    deps.listSessions.mockResolvedValue([
+      session('o-tie', '2026-08-12T09:00:00.000Z', [
+        { exerciseId: GOBLET, reps: 8, weightKg: 20 },
+        { exerciseId: GOBLET, reps: 8, weightKg: 25 },
+        { exerciseId: GOBLET, reps: 8, weightKg: 25 },
+      ]),
+    ]);
+    deps.findBestValuesBefore.mockImplementation(
+      priorBestsAt(
+        new Map([
+          ['o-tie#1#1', null],
+          ['o-tie#2#1', 20],
+          ['o-tie#3#1', 25],
+        ]),
+      ),
+    );
+    // A synthetic state the strict-greater rule cannot itself produce: the
+    // LATER equal position claims the best. Ownership follows the position, so
+    // neither in-session event stands — a value comparison would keep the
+    // 25 kg event standing, and a session-only comparison would keep both.
+    deps.findCurrentPersonalBests.mockResolvedValue([
+      best({ exerciseId: GOBLET, value: 25, sessionId: 'o-tie', exerciseOrder: 3 }),
+    ]);
+    deps.findByIds.mockResolvedValue([
+      catalogExercise(GOBLET, 'Goblet Squat', 'goblet-squat'),
+    ]);
+
+    const result = await deps.useCase.execute({ userId: 'user-a', now: NOW });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.recordEventCount).toBe(2);
+    expect(result.data.events.map((event) => [event.value, event.stillStanding])).toEqual([
+      [20, false],
+      [25, false],
+    ]);
+  });
+
   it('credits the performed exercise of a substituted occurrence', async () => {
     const deps = makeDeps();
     deps.listSessions.mockResolvedValue([

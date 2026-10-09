@@ -10,6 +10,7 @@ import type { Database } from '../client';
 import {
   mapBestValuesBefore,
   mapCurrentPersonalBests,
+  serializePriorBestCandidates,
   type PriorBestRow,
   type RecordBestRow,
 } from '../mappers/personal-record-mapper';
@@ -28,17 +29,20 @@ import { exerciseLogs, setLogs, workoutSessions } from '../schema';
  *   keeping rank 1. Rank 1 IS the answer: the maximum eligible value, and on
  *   tied maxima the earliest performance of the chronological ladder. Every
  *   requested exercise is answered by this single statement.
- * - Q2 (best-before): the caller's candidates become a parameterized `VALUES`
- *   relation (ordinal + full position), and each candidate row carries its
- *   own correlated scalar `MAX(...)` subquery over eligible history, pinned
- *   to that candidate by the strictly-before ladder — no join, no GROUP BY,
- *   one aggregate evaluation per candidate, all in a single batched
- *   statement. The correlated shape is deliberate: the plan walks the
- *   candidates through the exercise/session/set indexes instead of scanning
- *   every set log (measured ~8x faster than the joined-and-grouped
+ * - Q2 (best-before): the caller's candidates become ONE parameterized `jsonb`
+ *   payload expanded by `jsonb_to_recordset` (ordinal + full position), and
+ *   each candidate row carries its own correlated scalar `MAX(...)` subquery
+ *   over eligible history, pinned to that candidate by the strictly-before
+ *   ladder — no join, no GROUP BY, one aggregate evaluation per candidate, all
+ *   in a single batched statement. The correlated shape is deliberate: the plan
+ *   walks the candidates through the exercise/session/set indexes instead of
+ *   scanning every set log (measured ~8x faster than the joined-and-grouped
  *   equivalent we rejected). A candidate with no prior eligible performance
  *   keeps a NULL aggregate: the honest "first exposure" answer. The whole
- *   candidate collection is answered by this single statement.
+ *   candidate collection is answered by this single statement, and the JSON
+ *   transport is what keeps that true for an UNBOUNDED collection: one
+ *   parameter holds every candidate, so no candidate count can exhaust the
+ *   protocol's parameter budget (see `findBestValuesBefore`).
  *
  * The only structural interpretation Infrastructure makes is the metric
  * projection (`max-load` = reps set with `weight_kg IS NOT NULL`,
@@ -201,33 +205,35 @@ export class DrizzlePersonalRecordRepository implements PersonalRecordRepository
       return [];
     }
 
-    // Candidate identity travels as an ordinal plus the full position ladder.
-    // The ordinal is a transport detail of this query only (it never reaches
-    // Domain semantics); it is what keeps candidates that share exercise,
-    // metric, value and timestamps distinguishable on the way back.
+    // Candidate identity travels as an ordinal plus the full position ladder,
+    // transported as ONE jsonb parameter for the whole collection. The ordinal
+    // is a transport detail of this query only (it never reaches Domain
+    // semantics); it is what keeps candidates that share exercise, metric,
+    // value and timestamps distinguishable on the way back.
     //
-    // Instants are bound as ISO strings: the raw `sql` placeholder bypasses the
-    // timestamp column's driver mapping (which is where Drizzle normally
-    // serializes `Date`s), and an ISO string carries the exact instant at the
+    // ONE parameter, deliberately: a `VALUES` relation binds eight parameters
+    // per candidate and the wire protocol caps a statement at 65534 parameters,
+    // so the uncapped M18 candidate collection died at 8192 candidates with
+    // `MAX_PARAMETERS_EXCEEDED` instead of answering. `jsonb_to_recordset`
+    // types the same eight fields from a single parameter, so the collection is
+    // bounded by payload size alone: every candidate still reaches the ONE
+    // batched statement, in order, uncapped. Nothing is truncated, paged or
+    // chunked here, and the statement's parameter count stays constant
+    // (payload + user id) as the collection grows.
+    //
+    // Instants travel as ISO strings inside the payload: `timestamptz` parses
+    // that text through its own input function — the very conversion a bound
+    // `Date` goes through — and an ISO string carries the exact instant at the
     // millisecond precision the Domain compares with.
-    const candidateTuples = sql.join(
-      candidates.map(
-        (candidate, ord) => sql`(
-          ${ord}::int,
-          ${candidate.exerciseId}::text,
-          ${candidate.metric}::text,
-          ${candidate.position.completedAt.toISOString()}::timestamptz,
-          ${candidate.position.startedAt.toISOString()}::timestamptz,
-          ${candidate.position.sessionId}::text,
-          ${candidate.position.exerciseOrder}::int,
-          ${candidate.position.setNumber}::int
-        )`,
-      ),
-      sql`, `,
-    );
-
-    const candidateRelation = sql`(values ${candidateTuples}) as candidate (
-      ord, exercise_id, metric, completed_at, started_at, session_id, exercise_order, set_number
+    const candidateRelation = sql`jsonb_to_recordset(${serializePriorBestCandidates(candidates)}::jsonb) as candidate (
+      ord int,
+      exercise_id text,
+      metric text,
+      completed_at timestamptz,
+      started_at timestamptz,
+      session_id text,
+      exercise_order int,
+      set_number int
     )`;
 
     // One correlated aggregate per candidate. The subquery's FROM contains only

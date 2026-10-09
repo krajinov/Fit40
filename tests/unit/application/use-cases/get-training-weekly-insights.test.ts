@@ -126,6 +126,7 @@ function makeDeps() {
     listCompletedExerciseOccurrences: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: listActivity,
+    listProgressSessionActivity: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn(),
   } satisfies TrainingHistoryRepository;

@@ -7,6 +7,7 @@ import type {
   CompletedSessionContext,
   CompletedWorkoutSession,
   ProgressionHistoryPerformance,
+  ProgressSessionActivityEntry,
   TrainingHistoryCursor,
   TrainingHistoryEntry,
   TrainingHistoryPage,
@@ -131,7 +132,15 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
     };
   }
 
-  private completedAtOf(session: SessionRow): Date {
+  /**
+   * The completion instant of a row that survived the completed-only filter.
+   *
+   * Structurally typed (just the two fields it reads) so every window read in
+   * this repository can reuse the guard without selecting columns it does not
+   * need; a null value that survived the filter is corrupt data, thrown
+   * rather than tolerated.
+   */
+  private completedAtOf(session: { readonly id: string; readonly completedAt: Date | null }): Date {
     if (session.completedAt === null) {
       throw new Error(
         `Corrupt data in workout_sessions (id=${session.id}): completed_at is null despite the completed-only filter`,
@@ -587,5 +596,107 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       loggedSets: setsBySession.get(row.session.id) ?? 0,
     }));
   }
+
+  /**
+   * M18 progress activity: the window's completed sessions with their logged
+   * set count and their external-load volume (`docs/training-progress.md`
+   * §4.1–§4.3, §6.3).
+   *
+   * Query strategy — two statements for the whole window, never one per
+   * session:
+   * - Q1 selects the window's sessions (ownership, completed-only and the
+   *   inclusive `since` bound are structural filters; no cap, because the
+   *   caller aggregates the whole window) ordered by the history recency
+   *   ladder. Only the id and completion instant are projected.
+   * - Q2 batch-aggregates exactly those sessions' set rows in one grouped
+   *   query, projecting three facts per session: the plain set count, the
+   *   count of ELIGIBLE sets (rep sets with a non-null weight) and the
+   *   external-load sum (`reps × weightKg` over those same sets).
+   *
+   * The eligible-set count is what keeps §6.3 honest: a session with no
+   * eligible set reports `null` (no external-load data — bodyweight and
+   * duration training are not "zero"), while a session whose eligible sets
+   * sum to zero reports a genuine `0`. The aggregation mirrors
+   * `calculateSessionMetrics`' volume rule — `type = 'reps'` AND
+   * `weight_kg IS NOT NULL`, duration and bodyweight sets excluded, `0 kg`
+   * contributing zero — and the integration suite verifies it against that
+   * Domain oracle rather than trusting the SQL.
+   */
+  async listProgressSessionActivity(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<ProgressSessionActivityEntry>> {
+    const rows: ReadonlyArray<ProgressSessionRow> = await this.db
+      .select({
+        id: workoutSessions.id,
+        completedAt: workoutSessions.completedAt,
+      })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          gte(workoutSessions.completedAt, since),
+        ),
+      )
+      .orderBy(
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+      );
+
+    if (rows.length === 0) {
+      // No sessions, no aggregation query: an empty window is answered by Q1.
+      return [];
+    }
+
+    // One grouped aggregation for the whole window (no N+1). Set rows carry
+    // their session id directly and always belong to a valid exercise log of
+    // that session (composite FK), so the group is exactly the session's
+    // logged sets. FILTER keeps the eligible-set predicate in one place;
+    // `coalesce(..., 0)` never fabricates a row: a session with no eligible
+    // set has `eligibleSetCount` 0 and is reported as `null` below.
+    const aggregateRows = await this.db
+      .select({
+        sessionId: setLogs.sessionId,
+        setCount: count(setLogs.setNumber),
+        eligibleSetCount: sql<number>`count(*) filter (where ${setLogs.type} = 'reps' and ${setLogs.weightKg} is not null)::int`,
+        volumeKgReps: sql<number>`coalesce(sum(${setLogs.reps} * ${setLogs.weightKg}) filter (where ${setLogs.type} = 'reps' and ${setLogs.weightKg} is not null), 0)::double precision`,
+      })
+      .from(setLogs)
+      .where(inArray(setLogs.sessionId, rows.map((row) => row.id)))
+      .groupBy(setLogs.sessionId);
+
+    const aggregatesBySession = new Map<
+      string,
+      { readonly setCount: number; readonly eligibleSetCount: number; readonly volumeKgReps: number }
+    >();
+    for (const row of aggregateRows) {
+      aggregatesBySession.set(row.sessionId, {
+        setCount: row.setCount,
+        eligibleSetCount: row.eligibleSetCount,
+        volumeKgReps: row.volumeKgReps,
+      });
+    }
+
+    return rows.map((row) => {
+      const aggregate = aggregatesBySession.get(row.id);
+      return {
+        sessionId: parseWorkoutSessionId(row.id, 'progress session activity'),
+        completedAt: this.completedAtOf(row),
+        loggedSets: aggregate?.setCount ?? 0,
+        externalLoadVolume:
+          aggregate === undefined || aggregate.eligibleSetCount === 0
+            ? null
+            : aggregate.volumeKgReps,
+      };
+    });
+  }
+}
+
+/** The minimal session projection the M18 progress read needs. */
+interface ProgressSessionRow {
+  readonly id: string;
+  readonly completedAt: Date | null;
 }
 

@@ -101,6 +101,7 @@ function createMockHistoryRepository(): TrainingHistoryRepository {
     listCompletedExerciseOccurrences: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
+    listProgressSessionActivity: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn(),
   };

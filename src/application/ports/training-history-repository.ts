@@ -276,6 +276,43 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     since: Date,
   ): Promise<ReadonlyArray<CompletedSessionActivityEntry>>;
+
+  /**
+   * Returns the user's completed sessions with `completedAt >= since` as the
+   * M18 Progress surface's lightweight activity projection — the
+   * `listCompletedSessionActivity` contract family plus the session's
+   * external-load fact.
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached (left-program) history is the user's training past
+   *   and counts; every program contributes to one user-global series.
+   * - Completed sessions only; an in-progress session never appears.
+   * - `since` is INCLUSIVE: a session completed exactly at `since` is
+   *   returned. It is the ONLY bound (no pagination, no cap), because the
+   *   caller buckets and totals the whole window and a truncated read would
+   *   silently under-count it.
+   * - Ordering is the deterministic history recency ladder: `completedAt`
+   *   desc, `startedAt` desc, session id desc. Bucketing is by `completedAt`
+   *   alone, so ordering never affects the caller's facts.
+   * - `externalLoadVolume` follows the Domain's volume rule
+   *   (`calculateSessionMetrics`): the sum of `reps × weightKg` over rep sets
+   *   with `weightKg !== null`; duration sets and bodyweight rep sets
+   *   contribute nothing and `0 kg` contributes `0`. It is `null` when the
+   *   session logged NO eligible loaded set, and a number (including a
+   *   genuine `0`) otherwise — the two cases must never collapse.
+   * - `loggedSets` is a plain COUNT of the session's persisted set rows, so a
+   *   completed session with no set rows reports `0` instead of being
+   *   dropped — the same defensive guarantee as
+   *   `listCompletedSessionActivity`.
+   * - Implementations must answer in a bounded number of statements (one
+   *   session query plus one batched per-session aggregation), never one
+   *   query per session.
+   */
+  listProgressSessionActivity(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<ProgressSessionActivityEntry>>;
 }
 
 /**
@@ -310,4 +347,28 @@ export interface CompletedSessionActivityEntry {
   /** Non-null: the read is completed-only by construction. */
   readonly completedAt: Date;
   readonly loggedSets: number;
+}
+
+/**
+ * One M18 progress-activity row: a completed session reduced to the facts the
+ * Progress surface aggregates — its completion instant, its logged-set count,
+ * and its external-load volume (memo §4.1–§4.3, §6.3).
+ *
+ * `externalLoadVolume` preserves the memo's presence distinction exactly:
+ * a number (including `0`) means the session logged at least one rep set with
+ * `weightKg !== null` and the value is that session's `reps × weightKg` sum;
+ * `null` means it logged none, so the session contributes no external-load
+ * data — bodyweight-only and duration-only training is never reported as a
+ * zero. `0` and `null` are different facts and must never be conflated.
+ *
+ * `loggedSets` is the plain count of persisted set rows, so a zero-set
+ * completed session reports `0` rather than disappearing.
+ */
+export interface ProgressSessionActivityEntry {
+  readonly sessionId: WorkoutSessionId;
+  /** Non-null: the read is completed-only by construction. */
+  readonly completedAt: Date;
+  readonly loggedSets: number;
+  /** A session with no eligible loaded set reports `null`, never `0`. */
+  readonly externalLoadVolume: number | null;
 }

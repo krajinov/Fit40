@@ -190,6 +190,40 @@ export interface TrainingHistoryRepository {
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
 
   /**
+   * Returns the user's PERIOD-SCOPED occurrences of one exercise: every
+   * completed occurrence of the resolved (performed) exercise whose
+   * `completedAt` is at or after `since`, UNCAPPED (M18 Slice 8's
+   * first-vs-latest working-load comparison).
+   *
+   * This is deliberately separate from `listCompletedExerciseOccurrences`,
+   * whose `limit` is a DISPLAY bound (the exercise-history screen shows at most
+   * the newest 50). A comparison scoped to a period must never be truncated by
+   * how many rows a screen happens to render, so this read has no page size,
+   * no top-K and no artificial ceiling: `since` is the only bound, and it is
+   * the caller's own period.
+   *
+   * Contract (everything else matches `listCompletedExerciseOccurrences`):
+   * - Scopes to sessions OWNED by the user, regardless of enrollment: detached
+   *   sessions are the user's training past and count.
+   * - Completed sessions only, and every returned occurrence holds at least one
+   *   logged set (a skipped exercise is not an occurrence).
+   * - `exercise_id` persists the PERFORMED exercise, so a substituted
+   *   occurrence belongs to the exercise actually trained (M12's attribution
+   *   rule) and the authored exercise receives nothing.
+   * - `since` is INCLUSIVE: an occurrence completed exactly at `since` belongs
+   *   to the period (`[since, …)`, the M18 week-window convention).
+   * - Ordered ascending by the M18 §7.2 comparison ladder — `completed_at`,
+   *   `started_at`, session id, `exercise_order` — so `[0]` is the period's
+   *   first and the last element its latest occurrence.
+   * - Implementation must batch set hydration (no per-occurrence queries).
+   */
+  listCompletedExerciseOccurrencesSince(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
+
+  /**
    * Returns the user's recent completed performances of MANY exercises —
    * the progression engine's batched, bounded, newest-first history windows
    * (progressive-overload milestone, Slice 2).

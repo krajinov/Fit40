@@ -260,7 +260,72 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
     exerciseId: ExerciseId,
     limit: number,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
-    const occurrenceRows: ExerciseOccurrenceRow[] = await this.db
+    const occurrenceRows = await this.selectOccurrenceRows({
+      userId,
+      exerciseId,
+      orderBy: [
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+        desc(exerciseLogs.exerciseOrder),
+      ],
+      limit,
+    });
+
+    return this.hydrateOccurrenceSets(occurrenceRows);
+  }
+
+  /**
+   * The user's period-scoped occurrences of one exercise, UNCAPPED, ordered
+   * ascending by the M18 §7.2 comparison ladder (M18 Slice 8).
+   *
+   * Deliberately shares the display window's row projection and set hydration —
+   * same ownership/completed/performed-exercise filters, same ≥1-logged-set
+   * rule, same batched hydration — and differs only in its `since` predicate
+   * and its ordering. `since` is the only bound: the comparison is scoped to a
+   * period, so a display limit must never truncate it.
+   */
+  async listCompletedExerciseOccurrencesSince(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
+    const occurrenceRows = await this.selectOccurrenceRows({
+      userId,
+      exerciseId,
+      // `since` is INCLUSIVE: an occurrence completed exactly at the period's
+      // start belongs to the period (`[since, …)`).
+      extraFilter: gte(workoutSessions.completedAt, since),
+      orderBy: [
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+        asc(exerciseLogs.exerciseOrder),
+      ],
+      limit: undefined,
+    });
+
+    return this.hydrateOccurrenceSets(occurrenceRows);
+  }
+
+  /**
+   * The occurrence-row projection both occurrence reads share: the same
+   * columns, joins and filters (user ownership, performed exercise id,
+   * completed-only, and the ≥1-logged-set EXISTS that keeps a skipped exercise
+   * out). Only the period predicate and the ordering differ, so they are the
+   * caller's inputs — the display window passes its limit, the period read
+   * passes none.
+   */
+  private async selectOccurrenceRows(input: {
+    readonly userId: UserId;
+    readonly exerciseId: ExerciseId;
+    /** ANDed onto the shared filters; undefined = no extra predicate. */
+    readonly extraFilter?: SQL;
+    readonly orderBy: ReadonlyArray<SQL>;
+    /** undefined = UNCAPPED (the period read's contract). */
+    readonly limit: number | undefined;
+  }): Promise<ExerciseOccurrenceRow[]> {
+    const rows = this.db
       .select({
         sessionId: workoutSessions.id,
         exerciseOrder: exerciseLogs.exerciseOrder,
@@ -280,9 +345,10 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
       .where(
         and(
-          eq(workoutSessions.userId, userId),
-          eq(exerciseLogs.exerciseId, exerciseId),
+          eq(workoutSessions.userId, input.userId),
+          eq(exerciseLogs.exerciseId, input.exerciseId),
           isNotNull(workoutSessions.completedAt),
+          input.extraFilter,
           // A skipped exercise (zero set logs) is not an occurrence.
           exists(
             this.db
@@ -297,14 +363,21 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
           ),
         ),
       )
-      .orderBy(
-        desc(workoutSessions.completedAt),
-        desc(workoutSessions.startedAt),
-        desc(workoutSessions.id),
-        desc(exerciseLogs.exerciseOrder),
-      )
-      .limit(limit);
+      .orderBy(...input.orderBy);
 
+    return input.limit === undefined ? await rows : await rows.limit(input.limit);
+  }
+
+  /**
+   * Batch-hydrates the logged sets of exactly the returned occurrences in one
+   * query and maps the rows to the port's projections. Drizzle 0.45 has no
+   * row-value (tuple) `inArray`, so the (session_id, exercise_order) pair filter
+   * is a typed OR-of-ANDs — the same fully-typed expansion style as the keyset
+   * predicate. An empty occurrence list answers without querying at all.
+   */
+  private async hydrateOccurrenceSets(
+    occurrenceRows: ReadonlyArray<ExerciseOccurrenceRow>,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
     if (occurrenceRows.length === 0) {
       return [];
     }

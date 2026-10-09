@@ -146,6 +146,7 @@ function makeHistoryRepo(context: CompletedSessionContext | null) {
   return {
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn(),
+    listCompletedExerciseOccurrencesSince: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
     listProgressSessionActivity: vi.fn(),

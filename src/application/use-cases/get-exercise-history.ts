@@ -4,9 +4,12 @@
  *
  * Read-only. The userId must come from the trusted authenticated session at
  * the presentation layer, never from client input; the slug is URL input
- * and validated here before any repository is touched.
+ * and validated here before any repository is touched; the request clock is an
+ * explicit input (the `issue-session` convention), so a request is
+ * deterministic for a given instant.
  *
- * Three independent reads of the same resolved exercise (all user-scoped):
+ * Four reads of the same resolved exercise (all user-scoped), none of which
+ * feeds another:
  * - the bounded occurrence window (newest first) with its working-load trend;
  * - the exercise's exact current all-time personal bests (M12), which span
  *   ALL completed history rather than the bounded window and never influence
@@ -16,6 +19,10 @@
  *   `findBestValuesBefore` evaluates them against COMPLETE user-global prior
  *   history — the 50-occurrence bound limits presentation only and never
  *   detection. The resolved `max-load` events mark their occurrences.
+ * - the 13-week PERIOD's occurrences, read UNCAPPED from the horizon's start
+ *   (M18 Slice 8, memo §7): the comparison is scoped to the period, so the
+ *   display bound can never truncate it. The Domain resolves first/latest over
+ *   exactly those rows; this layer adds no comparison rule.
  *
  * Error contract:
  * - INVALID_INPUT: a malformed userId.
@@ -30,21 +37,28 @@
 
 import {
   toExerciseHistoryDto,
+  type ExerciseHistoryComparisonDto,
   type ExerciseHistoryDto,
   type ExerciseHistoryRecordMarker,
   EXERCISE_HISTORY_OCCURRENCE_LIMIT,
 } from '@/application/dto/exercise-history';
 import { toPersonalBestDto } from '@/application/dto/personal-records';
+import { PROGRESS_HORIZON_WEEK_COUNT } from '@/application/dto/training-progress';
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type { PersonalRecordRepository } from '@/application/ports/personal-record-repository';
 import type {
   CompletedExerciseOccurrence,
   TrainingHistoryRepository,
 } from '@/application/ports/training-history-repository';
+import {
+  resolveOccurrenceWorkingLoad,
+  resolveWorkingLoadComparison,
+} from '@/domain/services/occurrence-working-load';
 import { RecordMetric, toRecordCandidate } from '@/domain/services/personal-record-metrics';
 import type { RecordCandidate } from '@/domain/services/personal-record-metrics';
 import { resolveRecordEvents } from '@/domain/services/personal-records';
 import type { RecordEvent } from '@/domain/services/personal-records';
+import { listRecentTrainingWeekWindows } from '@/domain/services/training-week';
 import type { ExerciseId } from '@/domain/types/ids';
 import { createUserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
@@ -71,6 +85,13 @@ export { EXERCISE_HISTORY_OCCURRENCE_LIMIT };
 export interface GetExerciseHistoryInput {
   readonly userId: string;
   readonly slug: string;
+  /**
+   * The request clock (M18 Slice 8). The comparison's 13-week horizon starts at
+   * the oldest of `PROGRESS_HORIZON_WEEK_COUNT` UTC Monday weeks containing this
+   * instant — the same horizon `docs/training-progress.md` §5 locks for every
+   * M18 surface.
+   */
+  readonly now: Date;
 }
 
 export class GetExerciseHistoryUseCase {
@@ -97,18 +118,27 @@ export class GetExerciseHistoryUseCase {
       });
     }
 
-    // The two reads are independent (the bounded occurrence window and the
-    // exact all-time records) and both address the resolved ExerciseId — never
-    // the authored one, so substituted and user-added performances count for
-    // the exercise actually trained. No record value is computed here: the
-    // repository owns every eligibility and ordering rule.
-    const [occurrences, personalBests] = await Promise.all([
+    // The period's own bound: the oldest UTC Monday of the fixed M18 horizon
+    // (§5). `since` is inclusive, so an occurrence completed exactly at that
+    // Monday 00:00 belongs to the period.
+    const horizonStart = requireFirstWeekStart(input.now);
+
+    // The four reads are independent and all address the resolved ExerciseId —
+    // never the authored one, so substituted and user-added performances count
+    // for the exercise actually trained. No record, marker or comparison value
+    // is computed here: the Domain owns every eligibility and ordering rule.
+    const [occurrences, personalBests, periodOccurrences] = await Promise.all([
       this.historyRepository.listCompletedExerciseOccurrences(
         userIdResult.data,
         exercise.id,
         EXERCISE_HISTORY_OCCURRENCE_LIMIT,
       ),
       this.personalRecordRepository.findCurrentPersonalBests(userIdResult.data, [exercise.id]),
+      this.historyRepository.listCompletedExerciseOccurrencesSince(
+        userIdResult.data,
+        exercise.id,
+        horizonStart,
+      ),
     ]);
 
     // The window's logged sets are the marker candidates (Domain eligibility:
@@ -126,9 +156,68 @@ export class GetExerciseHistoryUseCase {
         occurrences,
         personalBests.map(toPersonalBestDto),
         toMaxLoadRecordMarkers(resolveRecordEvents(priorBests)),
+        toComparisonDto(periodOccurrences),
       ),
     );
   }
+}
+
+/**
+ * The oldest UTC Monday of the fixed M18 horizon for one request instant.
+ *
+ * `listRecentTrainingWeekWindows` returns exactly the requested count of
+ * windows, so a missing head is a contract violation rather than a business
+ * outcome: defaulting it would silently widen (or drop) the comparison's
+ * period.
+ */
+function requireFirstWeekStart(now: Date): Date {
+  const windows = listRecentTrainingWeekWindows(now, PROGRESS_HORIZON_WEEK_COUNT);
+  const oldest = windows[0];
+  if (oldest === undefined) {
+    throw new Error('Exercise history contract violated: no horizon week window');
+  }
+  return oldest.weekStart;
+}
+
+/**
+ * Builds the period comparison DTO from the Domain's answer.
+ *
+ * The Domain decides first/latest, direction and the <2-points null; this
+ * function only adds the §7.6 distinction between "the period logged no
+ * external load at all" and "fewer than two loaded workouts", using the same
+ * Domain load rule so eligibility never has a second definition.
+ */
+function toComparisonDto(
+  occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
+): ExerciseHistoryComparisonDto {
+  const comparison = resolveWorkingLoadComparison(occurrences);
+  if (comparison !== null) {
+    return {
+      status: 'compared',
+      first: {
+        loadKg: comparison.first.loadKg,
+        completedAt: comparison.first.completedAt.toISOString(),
+      },
+      latest: {
+        loadKg: comparison.latest.loadKg,
+        completedAt: comparison.latest.completedAt.toISOString(),
+      },
+      direction: comparison.direction,
+    };
+  }
+
+  const hasLoadedOccurrence = occurrences.some(
+    (occurrence) =>
+      resolveOccurrenceWorkingLoad(occurrence.prescription, occurrence.sets).kind === 'external',
+  );
+
+  return {
+    status: 'insufficient',
+    reason:
+      occurrences.length > 0 && !hasLoadedOccurrence
+        ? 'no_external_load'
+        : 'fewer_than_two_points',
+  };
 }
 
 /**

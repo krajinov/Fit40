@@ -2,11 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import type { SetLog } from '@/domain/entities/workout-session';
 import { createDurationScheme, createRepScheme } from '@/domain/value-objects/rep-prescription';
-import { resolveOccurrenceWorkingLoad } from '@/domain/services/occurrence-working-load';
+import {
+  resolveOccurrenceWorkingLoad,
+  resolveWorkingLoadComparison,
+} from '@/domain/services/occurrence-working-load';
 import { calculateNextExerciseTarget } from '@/domain/services/exercise-progression';
 import type { Exercise } from '@/domain/entities/exercise';
 import { Difficulty, EquipmentType, MovementPattern, MuscleGroup } from '@/domain/types/exercise';
-import { createExerciseId } from '@/domain/types/ids';
+import { createExerciseId, createWorkoutSessionId } from '@/domain/types/ids';
+
+function sid(value: string) {
+  const result = createWorkoutSessionId(value);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
 
 function reps() {
   const result = createRepScheme(3, 8, 10);
@@ -142,3 +151,192 @@ describe('progression engine regression (mirror must not touch it)', () => {
     ).toBe('duration-hold');
   });
 });
+
+// ─── Period comparison: first vs latest (M18 Slice 8, memo §7) ───────────────
+
+interface ComparisonSpec {
+  readonly sessionId: string;
+  readonly exerciseOrder?: number;
+  readonly startedAt?: string;
+  readonly completedAt: string;
+  /** `null` weight = a bodyweight set; `'duration'` = a timed occurrence. */
+  readonly weights: ReadonlyArray<number | null | 'duration'>;
+}
+
+function comparisonOccurrence(spec: ComparisonSpec) {
+  return {
+    sessionId: sid(spec.sessionId),
+    exerciseOrder: spec.exerciseOrder ?? 1,
+    startedAt: new Date(spec.startedAt ?? spec.completedAt),
+    completedAt: new Date(spec.completedAt),
+    prescription: spec.weights.includes('duration') ? duration() : reps(),
+    sets: spec.weights.map((weight, index) =>
+      weight === 'duration' ? durationSet(index + 1) : repSet(index + 1, weight),
+    ),
+  };
+}
+
+describe('resolveWorkingLoadComparison (M18 Slice 8)', () => {
+  it('dataset F: 20 kg then 22.5 kg reads increased, with both dates', () => {
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-06-02T10:00:00Z', weights: [20] }),
+      comparisonOccurrence({
+        sessionId: 'w12',
+        completedAt: '2026-09-08T10:00:00Z',
+        weights: [22.5],
+      }),
+    ]);
+
+    expect(comparison).toEqual({
+      first: { loadKg: 20, completedAt: new Date('2026-06-02T10:00:00Z') },
+      latest: { loadKg: 22.5, completedAt: new Date('2026-09-08T10:00:00Z') },
+      direction: 'increased',
+    });
+  });
+
+  it('dataset G: two equal loads read unchanged', () => {
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-06-02T10:00:00Z', weights: [20] }),
+      comparisonOccurrence({
+        sessionId: 'w12',
+        completedAt: '2026-09-08T10:00:00Z',
+        weights: [20],
+      }),
+    ]);
+
+    expect(comparison?.direction).toBe('unchanged');
+    expect(comparison?.first.loadKg).toBe(20);
+    expect(comparison?.latest.loadKg).toBe(20);
+  });
+
+  it('dataset H: a lighter recent load reads decreased — no error, no verdict', () => {
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-06-02T10:00:00Z', weights: [20] }),
+      comparisonOccurrence({
+        sessionId: 'w12',
+        completedAt: '2026-09-08T10:00:00Z',
+        weights: [17.5],
+      }),
+    ]);
+
+    expect(comparison?.direction).toBe('decreased');
+  });
+
+describe('resolveWorkingLoadComparison — eligibility and the ordering ladder', () => {
+  it('ignores bodyweight and duration occurrences, which have no single load', () => {
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'bw', completedAt: '2026-06-01T10:00:00Z', weights: [null] }),
+      comparisonOccurrence({
+        sessionId: 'timed',
+        completedAt: '2026-06-15T10:00:00Z',
+        weights: ['duration'],
+      }),
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-06-02T10:00:00Z', weights: [20] }),
+      // Mixed occurrence: one bodyweight set makes the whole occurrence unloaded.
+      comparisonOccurrence({
+        sessionId: 'mixed',
+        completedAt: '2026-07-01T10:00:00Z',
+        weights: [30, null],
+      }),
+      comparisonOccurrence({
+        sessionId: 'w12',
+        completedAt: '2026-09-08T10:00:00Z',
+        weights: [22.5],
+      }),
+    ]);
+
+    expect(comparison?.first.loadKg).toBe(20);
+    expect(comparison?.latest.loadKg).toBe(22.5);
+    expect(comparison?.direction).toBe('increased');
+  });
+
+  it('counts a genuine 0 kg occurrence as an eligible point', () => {
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'zero', completedAt: '2026-06-02T10:00:00Z', weights: [0] }),
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-07-02T10:00:00Z', weights: [10] }),
+    ]);
+
+    expect(comparison?.first).toEqual({
+      loadKg: 0,
+      completedAt: new Date('2026-06-02T10:00:00Z'),
+    });
+    expect(comparison?.direction).toBe('increased');
+  });
+
+  it('compares the FIRST and LATEST occurrences, never the lowest and highest loads', () => {
+    // The heavy workout sits in the middle: min/max would read 30 → 30 unchanged.
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'w1', completedAt: '2026-06-02T10:00:00Z', weights: [20] }),
+      comparisonOccurrence({ sessionId: 'w6', completedAt: '2026-07-14T10:00:00Z', weights: [30] }),
+      comparisonOccurrence({
+        sessionId: 'w12',
+        completedAt: '2026-09-08T10:00:00Z',
+        weights: [22.5],
+      }),
+    ]);
+
+    expect(comparison?.first.loadKg).toBe(20);
+    expect(comparison?.latest.loadKg).toBe(22.5);
+    expect(comparison?.direction).toBe('increased');
+    expect(comparison?.latest.completedAt).toEqual(new Date('2026-09-08T10:00:00Z'));
+  });
+
+  it('breaks an exact timestamp tie by the ladder: startedAt, then exerciseOrder', () => {
+    const sameInstant = '2026-08-01T10:00:00Z';
+    const comparison = resolveWorkingLoadComparison([
+      // The later exerciseOrder inside the SAME session is the later occurrence.
+      comparisonOccurrence({
+        sessionId: 'session-dup',
+        exerciseOrder: 2,
+        completedAt: sameInstant,
+        startedAt: '2026-08-01T09:00:00Z',
+        weights: [40],
+      }),
+      comparisonOccurrence({
+        sessionId: 'session-dup',
+        exerciseOrder: 1,
+        completedAt: sameInstant,
+        startedAt: '2026-08-01T09:00:00Z',
+        weights: [30],
+      }),
+      // An earlier start wins the head at the same completion instant.
+      comparisonOccurrence({
+        sessionId: 'session-early-start',
+        completedAt: sameInstant,
+        startedAt: '2026-08-01T08:00:00Z',
+        weights: [25],
+      }),
+    ]);
+
+    expect(comparison?.first.loadKg).toBe(25);
+    expect(comparison?.latest.loadKg).toBe(40);
+    expect(comparison?.direction).toBe('increased');
+  });
+
+  it('orders by session id when completion and start instants tie exactly', () => {
+    const sameInstant = '2026-08-01T10:00:00Z';
+    const comparison = resolveWorkingLoadComparison([
+      comparisonOccurrence({ sessionId: 'session-b', completedAt: sameInstant, weights: [50] }),
+      comparisonOccurrence({ sessionId: 'session-a', completedAt: sameInstant, weights: [40] }),
+    ]);
+
+    expect(comparison?.first.loadKg).toBe(40);
+    expect(comparison?.latest.loadKg).toBe(50);
+  });
+});
+
+
+  it('dataset I: a single eligible point never draws a comparison', () => {
+    expect(
+      resolveWorkingLoadComparison([
+        comparisonOccurrence({
+          sessionId: 'w1',
+          completedAt: '2026-06-02T10:00:00Z',
+          weights: [20],
+        }),
+      ]),
+    ).toBeNull();
+    expect(resolveWorkingLoadComparison([])).toBeNull();
+  });
+});
+

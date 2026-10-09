@@ -88,6 +88,7 @@ function makeHistoryRepo(
   return {
     listCompletedSessions: vi.fn().mockResolvedValue(page),
     listCompletedExerciseOccurrences: vi.fn().mockResolvedValue([]),
+    listCompletedExerciseOccurrencesSince: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
     listProgressSessionActivity: vi.fn(),

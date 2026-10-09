@@ -28,6 +28,16 @@ vi.mock('@/features/history/services', () => ({
   getExerciseHistoryUseCase: { execute: vi.fn() },
 }));
 
+/**
+ * The "no comparison" DTO state (M18 Slice 8): these fixtures are about the
+ * trend and its markers, so they pass the insufficient state and the tests
+ * below assert the comparison area separately.
+ */
+const INSUFFICIENT_COMPARISON = {
+  status: 'insufficient',
+  reason: 'fewer_than_two_points',
+} as const;
+
 declare global {
   // React 19's act() environment flag; not part of the DOM lib typings.
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -94,6 +104,7 @@ function dtoWithTrend(
     entries,
     trend: trendPoints,
     personalBests: [],
+    comparison: INSUFFICIENT_COMPARISON,
     isLimited: false,
   };
 }
@@ -217,6 +228,7 @@ describe('ExerciseHistoryTrend — occurrence-unique keys', () => {
           },
         ],
         personalBests: [],
+        comparison: INSUFFICIENT_COMPARISON,
         isLimited: false,
       };
       const view = toExerciseHistoryView(dto);
@@ -301,6 +313,7 @@ describe('ExerciseHistoryTrend — personal-record markers (M18 Slice 7)', () =>
         },
       ],
       personalBests: [],
+      comparison: INSUFFICIENT_COMPARISON,
       isLimited: false,
     };
 

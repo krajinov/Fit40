@@ -21,8 +21,23 @@ vi.mock('@/features/history/services', () => ({
 
 import {
   buildExerciseHistoryView,
+  NO_EXTERNAL_LOAD_IN_PERIOD_NOTE,
+  NOT_ENOUGH_LOADED_WORKOUTS_NOTE,
+  toComparisonView,
   toExerciseHistoryView,
 } from '@/features/history/exercise-history-view';
+
+/**
+ * The request clock for `buildExerciseHistoryView` (M18 Slice 8): a Thursday,
+ * so the fixed 13-week horizon starts Monday 2026-06-29.
+ */
+const HISTORY_NOW = new Date('2026-09-24T10:00:00.000Z');
+
+/** The "no comparison" DTO state the non-comparison fixtures carry. */
+const INSUFFICIENT_COMPARISON = {
+  status: 'insufficient',
+  reason: 'fewer_than_two_points',
+} as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,6 +86,7 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
         completedAt: '2026-02-15T11:00:00Z',
       },
     ],
+    comparison: INSUFFICIENT_COMPARISON,
     isLimited: false,
     ...overrides,
   };
@@ -360,12 +376,17 @@ describe('buildExerciseHistoryView', () => {
   it('orchestrates the use case and returns the assembled view', async () => {
     historyExecute.mockResolvedValue({ ok: true, data: historyDto() });
 
-    const result = await buildExerciseHistoryView('user-a', 'goblet-squat');
+    const result = await buildExerciseHistoryView('user-a', 'goblet-squat', HISTORY_NOW);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.heading).toBe('Goblet Squat');
-    expect(historyExecute).toHaveBeenCalledWith({ userId: 'user-a', slug: 'goblet-squat' });
+    // The single request clock is threaded through unchanged (M18 Slice 8).
+    expect(historyExecute).toHaveBeenCalledWith({
+      userId: 'user-a',
+      slug: 'goblet-squat',
+      now: HISTORY_NOW,
+    });
   });
 
   it('propagates EXERCISE_NOT_FOUND for an unknown slug', async () => {
@@ -374,7 +395,7 @@ describe('buildExerciseHistoryView', () => {
       error: { code: 'EXERCISE_NOT_FOUND', slug: 'nope', message: 'Exercise "nope" not found' },
     });
 
-    const result = await buildExerciseHistoryView('user-a', 'nope');
+    const result = await buildExerciseHistoryView('user-a', 'nope', HISTORY_NOW);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -387,7 +408,7 @@ describe('buildExerciseHistoryView', () => {
       error: { code: 'INVALID_INPUT', message: 'UserId cannot be empty', field: 'userId' },
     });
 
-    const result = await buildExerciseHistoryView('', 'goblet-squat');
+    const result = await buildExerciseHistoryView('', 'goblet-squat', HISTORY_NOW);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -452,4 +473,109 @@ describe('toExerciseHistoryView — max-load record markers (M18 Slice 7)', () =
     expect(view.trend?.textPoints.map((point) => point.loadLabel)).toEqual(['30 kg', '60 kg']);
   });
 });
+
+// ─── Period comparison (M18 Slice 8, memo §7.4–§7.6) ─────────────────────────
+
+describe('toComparisonView — period first-vs-latest', () => {
+  it('renders the period line with both dates and the DTO direction verbatim', () => {
+    const view = toComparisonView({
+      status: 'compared',
+      first: { loadKg: 20, completedAt: '2026-06-02T10:00:00.000Z' },
+      latest: { loadKg: 22.5, completedAt: '2026-09-08T10:00:00.000Z' },
+      direction: 'increased',
+    });
+
+    expect(view.text).toBe(
+      'Working load in the last 13 weeks: 20 kg (Jun 2) → 22.5 kg (Sep 8), increased',
+    );
+    expect(view.isNote).toBe(false);
+  });
+
+  it('renders each direction word exactly as the DTO states it', () => {
+    for (const direction of ['increased', 'unchanged', 'decreased'] as const) {
+      const view = toComparisonView({
+        status: 'compared',
+        first: { loadKg: 30, completedAt: '2026-06-02T10:00:00.000Z' },
+        latest: { loadKg: 30, completedAt: '2026-09-08T10:00:00.000Z' },
+        direction,
+      });
+      expect(view.text.endsWith(`, ${direction}`)).toBe(true);
+    }
+  });
+
+  it('keeps a genuine 0 kg as a compared value', () => {
+    const view = toComparisonView({
+      status: 'compared',
+      first: { loadKg: 0, completedAt: '2026-06-02T10:00:00.000Z' },
+      latest: { loadKg: 0, completedAt: '2026-07-02T10:00:00.000Z' },
+      direction: 'unchanged',
+    });
+
+    expect(view.text).toContain('0 kg (Jun 2) → 0 kg (Jul 2), unchanged');
+  });
+
+  it('renders the locked ≥2-points note when fewer than two points exist', () => {
+    const view = toComparisonView({ status: 'insufficient', reason: 'fewer_than_two_points' });
+
+    expect(view).toEqual({ text: NOT_ENOUGH_LOADED_WORKOUTS_NOTE, isNote: true });
+    expect(view.text).toBe(
+      'Not enough loaded workouts of this exercise in the last 13 weeks to compare.',
+    );
+  });
+
+  it('renders the no-external-load note for a period of unloaded occurrences', () => {
+    const view = toComparisonView({ status: 'insufficient', reason: 'no_external_load' });
+
+    expect(view).toEqual({ text: NO_EXTERNAL_LOAD_IN_PERIOD_NOTE, isNote: true });
+    expect(view.text).toBe('No external load was logged for this exercise in the last 13 weeks.');
+  });
+
+  it('never states a percentage, an estimate or a quality judgement', () => {
+    const rendered = [
+      toComparisonView({
+        status: 'compared',
+        first: { loadKg: 20, completedAt: '2026-06-02T10:00:00.000Z' },
+        latest: { loadKg: 25, completedAt: '2026-09-08T10:00:00.000Z' },
+        direction: 'increased',
+      }),
+      toComparisonView({ status: 'insufficient', reason: 'fewer_than_two_points' }),
+      toComparisonView({ status: 'insufficient', reason: 'no_external_load' }),
+    ]
+      .map((view) => view.text)
+      .join(' ')
+      .toLowerCase();
+
+    for (const banned of [
+      '%',
+      'percent',
+      'e1rm',
+      'estimated',
+      'stronger',
+      'fitter',
+      'improvement',
+      'on track',
+      'score',
+      'gain',
+    ]) {
+      expect(rendered).not.toContain(banned);
+    }
+  });
+
+  it('exposes the comparison sentence on the assembled view', () => {
+    const view = toExerciseHistoryView(
+      historyDto({
+        comparison: {
+          status: 'compared',
+          first: { loadKg: 20, completedAt: '2026-06-02T10:00:00.000Z' },
+          latest: { loadKg: 22.5, completedAt: '2026-09-08T10:00:00.000Z' },
+          direction: 'increased',
+        },
+      }),
+    );
+
+    expect(view.comparison.text).toContain('Working load in the last 13 weeks');
+    expect(view.comparison.isNote).toBe(false);
+  });
+});
+
 

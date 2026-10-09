@@ -34,6 +34,9 @@ import {
 const OWNER = 'user-pr-owner';
 const OTHER = 'user-pr-other';
 
+/** The request clock for the exercise-history comparison (M18 Slice 8). */
+const HISTORY_NOW = new Date('2026-09-24T10:00:00.000Z');
+
 const EX_BENCH = 'ex-001';
 const EX_GOBLET = 'ex-002';
 const EX_CARRY = 'ex-009';
@@ -1210,7 +1213,7 @@ describe('exercise history use case — personal bests wiring', () => {
       }),
     );
 
-    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'bodyweight-squat' });
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'bodyweight-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -1249,7 +1252,7 @@ describe('exercise history use case — personal bests wiring', () => {
   });
 
   it('keeps an exercise without completed history as a successful empty result', async () => {
-    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'push-up' });
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'push-up', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -1259,7 +1262,7 @@ describe('exercise history use case — personal bests wiring', () => {
   });
 
   it('keeps the unknown-slug failure unchanged', async () => {
-    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'not-an-exercise' });
+    const result = await exerciseHistory.execute({ userId: OWNER, slug: 'not-an-exercise', now: HISTORY_NOW });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;

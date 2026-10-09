@@ -55,6 +55,7 @@ function makeDeps(entries: ReadonlyArray<ProgressSessionActivityEntry> = []) {
   const history = {
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn(),
+    listCompletedExerciseOccurrencesSince: vi.fn(),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
     listProgressSessionActivity: listProgress,

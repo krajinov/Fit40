@@ -24,6 +24,15 @@ export function formatHistoryDate(isoTimestamp: string): string {
   }).format(new Date(isoTimestamp));
 }
 
+/** "Jun 2" — a concise UTC month and day for in-period comparisons. */
+export function formatHistoryMonthDay(isoTimestamp: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(isoTimestamp));
+}
+
 /** Formats a count with locale grouping, e.g. 1240 -> "1,240". */
 export function formatHistoryCount(value: number): string {
   return value.toLocaleString('en-US');

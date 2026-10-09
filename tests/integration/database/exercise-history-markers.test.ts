@@ -47,6 +47,9 @@ import { getTestDatabaseUrl } from './test-env';
 const OWNER = 'user-markers';
 const ENROLLMENT = 'enrollment-markers';
 
+/** The request clock for the comparison's 13-week horizon (M18 Slice 8). */
+const HISTORY_NOW = new Date('2026-09-24T10:00:00.000Z');
+
 const EX_GOBLET = 'ex-002';
 const EX_ROMANIAN_DEADLIFT = 'ex-004';
 const EX_PUSH_UP = 'ex-007';
@@ -225,7 +228,7 @@ afterAll(async () => {
 
 describe('exercise history markers — the displayed window over real history', () => {
   it('agrees with the M12 fold oracle and marks only the resolved events', async () => {
-    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -247,7 +250,7 @@ describe('exercise history markers — the displayed window over real history', 
   });
 
   it('never marks an equal value: the 44 kg prior and a repeated best stay unmarked', async () => {
-    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -266,7 +269,7 @@ describe('exercise history markers — the displayed window over real history', 
   });
 
   it('keeps the 50-occurrence display bound while detecting over complete history', async () => {
-    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -289,7 +292,7 @@ describe('exercise history markers — the displayed window over real history', 
 
 describe('exercise history markers — first exposure, unloaded history, bounded reads', () => {
   it('lets DETACHED history gate a displayed point instead of marking it', async () => {
-    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+    const result = await useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -316,6 +319,7 @@ describe('exercise history markers — first exposure, unloaded history, bounded
     const result = await useCase.execute({
       userId: OWNER,
       slug: 'dumbbell-romanian-deadlift',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -341,7 +345,7 @@ describe('exercise history markers — first exposure, unloaded history, bounded
       }),
     );
 
-    const result = await useCase.execute({ userId: OWNER, slug: 'push-up' });
+    const result = await useCase.execute({ userId: OWNER, slug: 'push-up', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -359,22 +363,24 @@ describe('exercise history markers — bounded statements', () => {
     const counting = createCountingUseCase();
     try {
       // Warm up: the driver's first statement is its own type discovery.
-      await counting.useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+      await counting.useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
 
       const beforeLoaded = counting.queries.length;
-      await counting.useCase.execute({ userId: OWNER, slug: 'goblet-squat' });
+      await counting.useCase.execute({ userId: OWNER, slug: 'goblet-squat', now: HISTORY_NOW });
       const loaded = counting.queries.length - beforeLoaded;
 
       const beforeEmpty = counting.queries.length;
-      await counting.useCase.execute({ userId: OWNER, slug: 'glute-bridge' });
+      await counting.useCase.execute({ userId: OWNER, slug: 'glute-bridge', now: HISTORY_NOW });
       const empty = counting.queries.length - beforeEmpty;
 
-      // Loaded: the slug lookup + occurrences + their sets + current records +
-      // the ONE batched prior-best read — never one statement per occurrence.
-      expect(loaded).toBe(5);
-      // No occurrences: the slug lookup, the occurrence read and the records
-      // read only (the prior-best read is skipped rather than issued empty).
-      expect(empty).toBe(3);
+      // Loaded: slug + occurrences + their sets + current records + the period
+      // read + the ONE batched prior-best read (M18 Slice 8 adds the period
+      // read; the window's fixtures predate the horizon, so it returns rows
+      // without hydrating any sets). Never one statement per occurrence.
+      expect(loaded).toBe(6);
+      // No occurrences: slug + the occurrence read + the records read + the
+      // period read (the prior-best read is skipped rather than issued empty).
+      expect(empty).toBe(4);
     } finally {
       await counting.close();
     }

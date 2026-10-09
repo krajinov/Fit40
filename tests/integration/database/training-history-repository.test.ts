@@ -990,19 +990,22 @@ describe('training history — per-exercise occurrences', () => {
     expect(result.data.entries[0]?.workingLoadKg).toBe(22.5);
     expect(result.data.entries[1]?.workingLoadKg).toBe(20);
     // Trend is chronological (oldest first) over the loaded occurrences,
-    // each point carrying its (sessionId, exerciseOrder) identity.
+    // each point carrying its (sessionId, exerciseOrder) identity and — since
+    // both are first exposures in this fixture — its max-load record marker.
     expect(result.data.trend).toEqual([
       {
         sessionId: 'session-occ-old',
         exerciseOrder: 1,
         completedAt: '2025-01-06T11:00:00.000Z',
         workingLoadKg: 20,
+        recordKg: 20,
       },
       {
         sessionId: 'session-occ-new',
         exerciseOrder: 1,
         completedAt: '2025-02-03T11:00:00.000Z',
         workingLoadKg: 22.5,
+        recordKg: 22.5,
       },
     ]);
   });
@@ -1140,6 +1143,9 @@ describe('training history — per-exercise occurrences', () => {
         exerciseOrder: 1,
         completedAt: '2025-01-06T11:00:00.000Z',
         workingLoadKg: 0,
+        // A logged 0 kg is a real external load: an eligible first exposure,
+        // so it is both the working load and the record value.
+        recordKg: 0,
       },
     ]);
   });

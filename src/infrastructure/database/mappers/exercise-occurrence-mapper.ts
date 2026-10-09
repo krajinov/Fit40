@@ -61,6 +61,9 @@ export function mapCompletedExerciseOccurrences(
     return {
       sessionId: parseWorkoutSessionId(row.sessionId, context),
       exerciseOrder: row.exerciseOrder,
+      // NOT NULL in the schema; carried so callers can assemble a complete
+      // Domain `PerformancePosition` (the ladder's second rung).
+      startedAt: row.startedAt,
       completedAt: row.completedAt,
       programName: row.programName,
       workoutName: row.workoutName,

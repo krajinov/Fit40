@@ -69,6 +69,7 @@ function dtoWithTrend(
     exerciseOrder: 1,
     completedAt: point.completedAt,
     workingLoadKg: point.workingLoadKg,
+    recordKg: null,
   }));
   const entries: ExerciseHistoryDto['entries'] = [...trendPoints]
     .reverse()
@@ -205,12 +206,14 @@ describe('ExerciseHistoryTrend — occurrence-unique keys', () => {
             exerciseOrder: 1,
             completedAt: '2026-02-15T11:00:00Z',
             workingLoadKg: 40,
+            recordKg: null,
           },
           {
             sessionId: 'session-dup',
             exerciseOrder: 2,
             completedAt: '2026-02-15T11:00:00Z',
             workingLoadKg: 44,
+            recordKg: null,
           },
         ],
         personalBests: [],
@@ -240,3 +243,113 @@ describe('ExerciseHistoryTrend — occurrence-unique keys', () => {
     }
   });
 });
+
+describe('ExerciseHistoryTrend — personal-record markers (M18 Slice 7)', () => {
+  /**
+   * A two-point trend in which only the FIRST (older) workout set a record —
+   * and its plotted working load (30 kg) is deliberately LOWER than both the
+   * unmarked point (50 kg) and the record set itself (45 kg), so any value- or
+   * geometry-based inference would mark the wrong point.
+   */
+  function markedTrendView() {
+    const dto: ExerciseHistoryDto = {
+      exercise: {
+        id: 'ex-001',
+        name: 'Goblet Squat',
+        slug: 'goblet-squat',
+        equipment: 'kettlebell',
+      },
+      entries: [
+        {
+          sessionId: 'session-plain',
+          exerciseOrder: 1,
+          completedAt: '2026-02-01T11:00:00Z',
+          programName: 'Fit40 Beginner Strength',
+          workoutName: 'Full Body A',
+          prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 } as const,
+          sets: [{ type: 'reps', setNumber: 1, reps: 10, weightKg: 50, rpe: null }],
+          workingLoadKg: 50,
+        },
+        {
+          sessionId: 'session-record',
+          exerciseOrder: 1,
+          completedAt: '2026-01-01T11:00:00Z',
+          programName: 'Fit40 Beginner Strength',
+          workoutName: 'Full Body A',
+          prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 10 } as const,
+          sets: [
+            { type: 'reps', setNumber: 1, reps: 10, weightKg: 30, rpe: null },
+            { type: 'reps', setNumber: 2, reps: 5, weightKg: 45, rpe: null },
+          ],
+          workingLoadKg: 30,
+        },
+      ],
+      trend: [
+        {
+          sessionId: 'session-record',
+          exerciseOrder: 1,
+          completedAt: '2026-01-01T11:00:00Z',
+          workingLoadKg: 30,
+          recordKg: 45,
+        },
+        {
+          sessionId: 'session-plain',
+          exerciseOrder: 1,
+          completedAt: '2026-02-01T11:00:00Z',
+          workingLoadKg: 50,
+          recordKg: null,
+        },
+      ],
+      personalBests: [],
+      isLimited: false,
+    };
+
+    const view = toExerciseHistoryView(dto);
+    if (view.trend === null) throw new Error('expected a trend view');
+    return view.trend;
+  }
+
+  it('states the record in the text list and keeps the plotted load unchanged', async () => {
+    const container = await renderTrend(markedTrendView());
+
+    expect(container.textContent).toContain('Personal best: 45 kg');
+    // The point still reports its own working load — the record set's heavier
+    // 45 kg is never substituted for the plotted value.
+    expect(container.textContent).toContain('30 kg');
+    expect(container.textContent).toContain('50 kg');
+    expect(container.textContent).not.toContain('Personal best: 30 kg');
+  });
+
+  it('emphasizes only the marked dot, as aria-hidden decoration', async () => {
+    const container = await renderTrend(markedTrendView());
+    const svg = container.querySelector('svg');
+    const dots = [...container.querySelectorAll<SVGCircleElement>('svg circle')];
+
+    // The chart stays decoration: the statement lives in the text list.
+    expect(svg?.getAttribute('aria-hidden')).toBe('true');
+    // Marked dot: larger and accent-filled. Unmarked dot: the base chart dot.
+    expect(dots[0]?.getAttribute('r')).toBe('4.5');
+    expect(dots[0]?.getAttribute('fill')).toBe('var(--accent-strong)');
+    expect(dots[1]?.getAttribute('r')).toBe('3');
+    expect(dots[1]?.getAttribute('fill')).toBe('var(--chart-1)');
+  });
+
+  it('explains the mark once, and only while a mark is on screen', async () => {
+    const marked = await renderTrend(markedTrendView());
+    expect(marked.textContent).toContain('A personal best mark means that workout contains a set');
+
+    // No marker, no legend: the screen never explains a mark it does not show.
+    const unmarkedTrend = toExerciseHistoryView(
+      dtoWithTrend([
+        { completedAt: '2026-01-01T11:00:00Z', workingLoadKg: 40 },
+        { completedAt: '2026-02-01T11:00:00Z', workingLoadKg: 50 },
+      ]),
+    );
+    if (unmarkedTrend.trend === null) throw new Error('expected a trend view');
+    const unmarked = await renderTrend(unmarkedTrend.trend);
+
+    expect(unmarked.textContent).not.toContain('Personal best');
+    expect(unmarked.textContent).not.toContain('A personal best mark means');
+  });
+});
+

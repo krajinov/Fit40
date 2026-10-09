@@ -20,6 +20,12 @@
  * - Trend points key on occurrence identity (sessionId, exerciseOrder) —
  *   never completedAt — because one exercise can occur multiple times in
  *   one completed session.
+ * - A trend point carries a marker iff the occurrence established a `max-load`
+ *   record AT THE TIME (M18 Slice 7, memo §8.6). The fact arrives precomputed
+ *   from the Application layer; nothing here infers a record from the plotted
+ *   values, and the marker text names the record set's own load — which may
+ *   exceed the occurrence's plotted working load. Markers are historical
+ *   events, never current-best statements.
  * - Personal Bests (M12) render the repository's exact records for the
  *   metrics that exist, each linking to the session that OWNS the record.
  *   Records are all-time and independent of the bounded occurrence window:
@@ -63,6 +69,14 @@ export interface ExerciseHistoryTrendPointView {
   readonly key: string;
   readonly completedAtLabel: string;
   readonly loadLabel: string;
+  /**
+   * The accessible marker text — "Personal best: 32.5 kg" — when this
+   * occurrence established a `max-load` record at the time, else null
+   * (M18 Slice 7, memo §8.6). It names the RECORD SET's load, which may exceed
+   * the occurrence's plotted working load: the mark never claims the plotted
+   * value is the record. It is an event, never a current-best statement.
+   */
+  readonly markerLabel: string | null;
 }
 
 export interface ExerciseHistoryTrendView {
@@ -85,6 +99,12 @@ export interface ExerciseHistoryChartPointView {
   /** SVG y in viewBox units — smaller is higher load (y axis grows down). */
   readonly y: number;
   readonly loadLabel: string;
+  /**
+   * True when this occurrence established a `max-load` record (M18 Slice 7).
+   * Purely decorative emphasis: the accessible statement lives in the text
+   * list's `markerLabel`, and the SVG itself is `aria-hidden`.
+   */
+  readonly isRecord: boolean;
 }
 
 export interface ExerciseHistoryView {
@@ -131,6 +151,7 @@ function toChartPoints(
     // values are viewBox units — the component renders them unchanged.
     y: loadSpan === 0 ? pad + plotSize / 2 : pad + (1 - (point.workingLoadKg - minLoad) / loadSpan) * plotSize,
     loadLabel: formatKg(point.workingLoadKg),
+    isRecord: point.recordKg !== null,
   }));
 }
 
@@ -166,6 +187,8 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
         key: `${point.sessionId}#${point.exerciseOrder}`,
         completedAtLabel: formatHistoryDate(point.completedAt),
         loadLabel: formatKg(point.workingLoadKg),
+        markerLabel:
+          point.recordKg === null ? null : `Personal best: ${formatKg(point.recordKg)}`,
       })),
       noExternalLoad: dto.trend.length === 0,
     };

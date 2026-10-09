@@ -72,6 +72,7 @@ function occurrence(input: {
   return {
     sessionId,
     exerciseOrder: input.exerciseOrder,
+    startedAt: new Date('2026-02-15T10:00:00Z'),
     completedAt: new Date('2026-02-15T11:00:00Z'),
     programName: 'Fit40 Beginner Strength',
     workoutName: 'Full Body A',
@@ -91,6 +92,7 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
         occurrence({ sessionId: 'session-dup', exerciseOrder: 1, weightKg: 40 }),
         occurrence({ sessionId: 'session-dup', exerciseOrder: 2, weightKg: 44 }),
       ],
+      [],
       [],
     );
 
@@ -114,6 +116,7 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
         occurrence({ sessionId: 'session-a', exerciseOrder: 1, weightKg: 50 }),
         occurrence({ sessionId: 'session-b', exerciseOrder: 1, weightKg: 52.5 }),
       ],
+      [],
       [],
     );
 
@@ -140,6 +143,7 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
       exercise,
       [occurrence({ sessionId: 'session-new', exerciseOrder: 1, weightKg: 30 })],
       personalBests,
+      [],
     );
 
     expect(dto.personalBests).toEqual(personalBests);
@@ -149,7 +153,7 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
   });
 
   it('keeps an empty record list empty', () => {
-    const dto = toExerciseHistoryDto(exercise, [], []);
+    const dto = toExerciseHistoryDto(exercise, [], [], []);
 
     expect(dto.personalBests).toEqual([]);
   });
@@ -169,6 +173,7 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
           completedAt: '2026-03-01T11:00:00Z',
         },
       ],
+      [],
     );
 
     expect(dto.trend.map((point) => point.sessionId)).toEqual(['session-new']);

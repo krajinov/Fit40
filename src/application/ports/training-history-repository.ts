@@ -103,6 +103,14 @@ export interface CompletedExerciseOccurrence {
   readonly sessionId: WorkoutSessionId;
   /** Position of the exercise log within the session — its identity part. */
   readonly exerciseOrder: number;
+  /**
+   * The owning session's START instant (additive, M18 Slice 7; the column is
+   * NOT NULL, so this is never absent). It is the second rung of the Domain's
+   * `PerformancePosition` ladder, so a caller can assemble a complete position
+   * without a second read. It is not a display field and changes no ordering:
+   * the recency ladder still leads with `completedAt`.
+   */
+  readonly startedAt: Date;
   /** ISO instant of the owning session's completion — history recency. */
   readonly completedAt: Date;
   readonly programName: string;

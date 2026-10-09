@@ -57,6 +57,7 @@ function historyDto(overrides?: Partial<ExerciseHistoryDto>): ExerciseHistoryDto
         exerciseOrder: 1,
         completedAt: '2026-01-15T11:00:00Z',
         workingLoadKg: 50,
+        recordKg: null,
       },
     ],
     personalBests: [
@@ -197,7 +198,7 @@ describe('toExerciseHistoryView — duplicates and empty states', () => {
     const view = toExerciseHistoryView(historyDto());
     expect(view.trend?.chartPoints).toBeNull();
     expect(view.trend?.textPoints).toEqual([
-      { key: 'session-trend#1', completedAtLabel: 'Jan 15, 2026', loadLabel: '50 kg' },
+      { key: 'session-trend#1', completedAtLabel: 'Jan 15, 2026', loadLabel: '50 kg', markerLabel: null },
     ]);
   });
 });
@@ -211,18 +212,21 @@ describe('toExerciseHistoryView — chart geometry', () => {
           exerciseOrder: 1,
           completedAt: '2026-01-01T11:00:00Z',
           workingLoadKg: 40,
+          recordKg: null,
         },
         {
           sessionId: 'session-geo-2',
           exerciseOrder: 1,
           completedAt: '2026-02-01T11:00:00Z',
           workingLoadKg: 50,
+          recordKg: null,
         },
         {
           sessionId: 'session-geo-3',
           exerciseOrder: 1,
           completedAt: '2026-03-01T11:00:00Z',
           workingLoadKg: 45,
+          recordKg: null,
         },
       ],
     });
@@ -252,12 +256,14 @@ describe('toExerciseHistoryView — chart geometry', () => {
           exerciseOrder: 1,
           completedAt: '2026-01-01T11:00:00Z',
           workingLoadKg: 50,
+          recordKg: null,
         },
         {
           sessionId: 'session-flat-2',
           exerciseOrder: 1,
           completedAt: '2026-02-01T11:00:00Z',
           workingLoadKg: 50,
+          recordKg: null,
         },
       ],
     });
@@ -389,4 +395,61 @@ describe('buildExerciseHistoryView', () => {
   });
 });
 
+
+
+// ─── Personal-record markers (M18 Slice 7) ───────────────────────────────────
+
+describe('toExerciseHistoryView — max-load record markers (M18 Slice 7)', () => {
+  const markedTrend: ExerciseHistoryDto['trend'] = [
+    {
+      sessionId: 'session-record',
+      exerciseOrder: 1,
+      completedAt: '2026-03-01T11:00:00Z',
+      // The occurrence's own plotted load is its MINIMUM set…
+      workingLoadKg: 30,
+      // …while the record set inside that same workout was heavier.
+      recordKg: 45,
+    },
+    {
+      sessionId: 'session-heaviest-but-unmarked',
+      exerciseOrder: 1,
+      completedAt: '2026-02-01T11:00:00Z',
+      // The heaviest point on the whole chart, and still no record.
+      workingLoadKg: 60,
+      recordKg: null,
+    },
+  ];
+
+  it('labels a marked point with its record value, never with the plotted load', () => {
+    const view = toExerciseHistoryView(historyDto({ trend: markedTrend, isLimited: false }));
+
+    expect(view.trend?.textPoints[0]).toEqual({
+      key: 'session-record#1',
+      completedAtLabel: 'Mar 1, 2026',
+      loadLabel: '30 kg',
+      markerLabel: 'Personal best: 45 kg',
+    });
+  });
+
+  it('never infers a marker from the plotted values', () => {
+    // The unmarked point is the heaviest load of the trend and the marked one
+    // is lighter, so any value-based inference would mark the wrong point.
+    const view = toExerciseHistoryView(historyDto({ trend: markedTrend, isLimited: false }));
+
+    expect(view.trend?.textPoints[1]?.loadLabel).toBe('60 kg');
+    expect(view.trend?.textPoints[1]?.markerLabel).toBeNull();
+    expect(view.trend?.chartPoints?.[0]?.isRecord).toBe(true);
+    expect(view.trend?.chartPoints?.[1]?.isRecord).toBe(false);
+  });
+
+  it('keeps the chart geometry and the text loads untouched by the markers', () => {
+    const view = toExerciseHistoryView(historyDto({ trend: markedTrend, isLimited: false }));
+
+    expect(view.trend?.chartPoints?.map((point) => [point.x, point.y])).toEqual([
+      [12, 88],
+      [88, 12],
+    ]);
+    expect(view.trend?.textPoints.map((point) => point.loadLabel)).toEqual(['30 kg', '60 kg']);
+  });
+});
 

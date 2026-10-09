@@ -6,11 +6,16 @@
  * the presentation layer, never from client input; the slug is URL input
  * and validated here before any repository is touched.
  *
- * Two independent reads of the same resolved exercise (both user-scoped):
+ * Three independent reads of the same resolved exercise (all user-scoped):
  * - the bounded occurrence window (newest first) with its working-load trend;
  * - the exercise's exact current all-time personal bests (M12), which span
  *   ALL completed history rather than the bounded window and never influence
- *   the trend, the ordering, or any progression input.
+ *   the trend, the ordering, or any progression input;
+ * - the bounded window's historical PR events (M18 Slice 7, memo §8.6): the
+ *   window's logged sets become M12 candidates and ONE batched
+ *   `findBestValuesBefore` evaluates them against COMPLETE user-global prior
+ *   history — the 50-occurrence bound limits presentation only and never
+ *   detection. The resolved `max-load` events mark their occurrences.
  *
  * Error contract:
  * - INVALID_INPUT: a malformed userId.
@@ -26,12 +31,21 @@
 import {
   toExerciseHistoryDto,
   type ExerciseHistoryDto,
+  type ExerciseHistoryRecordMarker,
   EXERCISE_HISTORY_OCCURRENCE_LIMIT,
 } from '@/application/dto/exercise-history';
 import { toPersonalBestDto } from '@/application/dto/personal-records';
 import type { ExerciseRepository } from '@/application/ports/exercise-repository';
 import type { PersonalRecordRepository } from '@/application/ports/personal-record-repository';
-import type { TrainingHistoryRepository } from '@/application/ports/training-history-repository';
+import type {
+  CompletedExerciseOccurrence,
+  TrainingHistoryRepository,
+} from '@/application/ports/training-history-repository';
+import { RecordMetric, toRecordCandidate } from '@/domain/services/personal-record-metrics';
+import type { RecordCandidate } from '@/domain/services/personal-record-metrics';
+import { resolveRecordEvents } from '@/domain/services/personal-records';
+import type { RecordEvent } from '@/domain/services/personal-records';
+import type { ExerciseId } from '@/domain/types/ids';
 import { createUserId } from '@/domain/types/ids';
 import { err, ok, type Result } from '@/domain/types/result';
 
@@ -97,8 +111,78 @@ export class GetExerciseHistoryUseCase {
       this.personalRecordRepository.findCurrentPersonalBests(userIdResult.data, [exercise.id]),
     ]);
 
+    // The window's logged sets are the marker candidates (Domain eligibility:
+    // every set maps to exactly one metric). Nothing logged in the window means
+    // no prior-best read is issued at all (the M14/M18 early-return pattern).
+    const candidates = toWindowCandidates(exercise.id, occurrences);
+    const priorBests =
+      candidates.length === 0
+        ? []
+        : await this.personalRecordRepository.findBestValuesBefore(userIdResult.data, candidates);
+
     return ok(
-      toExerciseHistoryDto(exercise, occurrences, personalBests.map(toPersonalBestDto)),
+      toExerciseHistoryDto(
+        exercise,
+        occurrences,
+        personalBests.map(toPersonalBestDto),
+        toMaxLoadRecordMarkers(resolveRecordEvents(priorBests)),
+      ),
     );
   }
+}
+
+/**
+ * Builds the M12 candidates of the DISPLAYED occurrences: one candidate per
+ * logged set, positioned by the Domain's full ladder. The exercise id is the
+ * resolved one the screen is about — the occurrence read already addresses
+ * PERFORMED ids, so a substituted occurrence's sets count for the replacement
+ * and the authored exercise receives nothing (memo §9). A skipped occurrence
+ * holds no sets, so it contributes no candidate.
+ */
+function toWindowCandidates(
+  exerciseId: ExerciseId,
+  occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
+): ReadonlyArray<RecordCandidate> {
+  const candidates: RecordCandidate[] = [];
+  for (const occurrence of occurrences) {
+    for (const set of occurrence.sets) {
+      candidates.push(
+        toRecordCandidate(exerciseId, set, {
+          completedAt: occurrence.completedAt,
+          startedAt: occurrence.startedAt,
+          sessionId: occurrence.sessionId,
+          exerciseOrder: occurrence.exerciseOrder,
+          setNumber: set.setNumber,
+        }),
+      );
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Projects the resolved events onto occurrence identities for the trend
+ * markers (memo §8.6): `max-load` events only — an unloaded event has no trend
+ * point to mark — and one entry per `(sessionId, exerciseOrder)`, carrying the
+ * HEAVIEST event value of that occurrence. Events inside one occurrence are
+ * strictly increasing by set number (each strictly exceeds everything before
+ * it), so the heaviest is also the last. Insertion order follows the candidate
+ * order, which the port preserves, so the result is deterministic.
+ */
+function toMaxLoadRecordMarkers(
+  events: ReadonlyArray<RecordEvent>,
+): ReadonlyArray<ExerciseHistoryRecordMarker> {
+  const heaviestByOccurrence = new Map<string, ExerciseHistoryRecordMarker>();
+  for (const event of events) {
+    if (event.metric !== RecordMetric.MaxLoad) continue;
+    const key = `${event.position.sessionId}#${event.position.exerciseOrder}`;
+    const current = heaviestByOccurrence.get(key);
+    if (current !== undefined && current.recordKg >= event.value) continue;
+    heaviestByOccurrence.set(key, {
+      sessionId: event.position.sessionId,
+      exerciseOrder: event.position.exerciseOrder,
+      recordKg: event.value,
+    });
+  }
+  return [...heaviestByOccurrence.values()];
 }

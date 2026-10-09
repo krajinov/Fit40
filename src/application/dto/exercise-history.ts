@@ -88,6 +88,26 @@ export interface ExerciseHistoryTrendPointDto {
   readonly exerciseOrder: number;
   readonly completedAt: string;
   readonly workingLoadKg: number;
+  /**
+   * The heaviest `max-load` value (kg) whose event this occurrence established,
+   * or null when it established none (M18 Slice 7, memo §8.6). It is the
+   * RECORD SET's load, which may exceed the plotted working load (the minimum
+   * across the occurrence's sets) — never a statement that the plotted point is
+   * the record. An event, never a current-best claim.
+   */
+  readonly recordKg: number | null;
+}
+
+/**
+ * One occurrence's resolved `max-load` marker, projected by the use case from
+ * the M12 event set. `recordKg` is the heaviest event value of that occurrence
+ * (events inside one occurrence are strictly increasing by set number, so the
+ * latest event is also the heaviest).
+ */
+export interface ExerciseHistoryRecordMarker {
+  readonly sessionId: string;
+  readonly exerciseOrder: number;
+  readonly recordKg: number;
 }
 
 /** Catalog summary of the exercise the history page is about. */
@@ -179,12 +199,25 @@ function hasExternalLoad(
  * embedded in the order the repository delivered them: this module renders
  * them next to the occurrence window without touching, sorting or deriving
  * anything about them.
+ *
+ * `recordMarkers` arrive already resolved (M18 Slice 7): the use case ran the
+ * M12 pipeline and projected the `max-load` events onto occurrence identities.
+ * This module only attaches the fact to the matching trend point — it detects
+ * nothing, compares nothing and never infers a record from the plotted values.
  */
 export function toExerciseHistoryDto(
   exercise: Exercise,
   occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
   personalBests: ReadonlyArray<PersonalBestDto>,
+  recordMarkers: ReadonlyArray<ExerciseHistoryRecordMarker>,
 ): ExerciseHistoryDto {
+  const recordKgByOccurrence = new Map<string, number>(
+    recordMarkers.map((marker) => [
+      `${marker.sessionId}#${marker.exerciseOrder}`,
+      marker.recordKg,
+    ]),
+  );
+
   const entries: ExerciseHistoryEntryDto[] = occurrences.map((occurrence) => {
     const load = resolveOccurrenceWorkingLoad(occurrence.prescription, occurrence.sets);
     return {
@@ -206,6 +239,7 @@ export function toExerciseHistoryDto(
       exerciseOrder: entry.exerciseOrder,
       completedAt: entry.completedAt,
       workingLoadKg: entry.workingLoadKg,
+      recordKg: recordKgByOccurrence.get(`${entry.sessionId}#${entry.exerciseOrder}`) ?? null,
     }))
     .reverse();
 

@@ -39,6 +39,46 @@ export const THIS_WEEK_LABEL = 'This week';
 export const UNAVAILABLE_ACTIVITY_MESSAGE = "Couldn't load your training activity.";
 export const UNAVAILABLE_LOAD_MESSAGE = "Couldn't load your external load.";
 export const UNAVAILABLE_SUMMARY_MESSAGE = "Couldn't load your period summary.";
+export const UNAVAILABLE_PERSONAL_BESTS_MESSAGE = "Couldn't load your personal bests.";
+
+// ─── Historical personal-best events (M18 Slice 6, memo §8.5, §11) ───────────
+//
+// Wording is historical on purpose, exactly like M14's run-scoped records: these
+// rows are the PR events the period produced, NOT the user's current personal
+// bests (the dashboard's M13 "Personal bests" card owns that claim). The
+// separation is stated in the caption so no row can be read as a current best.
+
+export const PERSONAL_BESTS_TIMELINE_TITLE = 'Personal bests in the last 13 weeks';
+export const PERSONAL_BESTS_TIMELINE_CAPTION =
+  'Historical events: each row is a personal best you set, not necessarily your current best.';
+export const PERSONAL_BESTS_NONE_LABEL = 'No personal bests in the last 13 weeks.';
+export const PERSONAL_BESTS_EMPTY_TITLE = 'No personal bests in the last 13 weeks';
+export const PERSONAL_BESTS_EMPTY_BODY =
+  'Personal bests you set in the last 13 weeks will appear here.';
+/** Stated only when the exact count has no renderable row (memo §8.5). */
+export const PERSONAL_BESTS_UNRESOLVED_NOTE =
+  'Exercise details are not available for these personal bests.';
+
+/** "First time" for a first exposure; otherwise the previous value (memo §8.5). */
+export const FIRST_TIME_LABEL = 'First time';
+export const STILL_YOUR_BEST_LABEL = 'Still your best';
+export const SINCE_SURPASSED_LABEL = 'Since surpassed';
+
+/**
+ * The EXACT period count in words, e.g. "12 personal bests set in the last 13
+ * weeks." A genuine zero renders as such — the count is never a fabricated
+ * number, and it is never the display list's length.
+ */
+export function personalBestsCountCaption(count: number): string {
+  if (count === 0) {
+    return PERSONAL_BESTS_NONE_LABEL;
+  }
+  if (count === 1) {
+    return '1 personal best set in the last 13 weeks.';
+  }
+  return `${formatHistoryCount(count)} personal bests set in the last 13 weeks.`;
+}
+
 
 /** The §4.5 missing-data copy: no average is rendered, never a fabricated 0. */
 export const NO_AVERAGE_LABEL =
@@ -84,6 +124,26 @@ export function formatExternalLoadValue(value: number): string {
 export function formatAverageWorkoutsPerWeek(workoutsPerWeek: number): string {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(workoutsPerWeek);
 }
+
+/**
+ * "Showing the 10 newest." — stated only when the exact count exceeds the rows
+ * actually rendered (the display cap, memo §8.5). The number is the count of
+ * RENDERED rows: a catalog-unresolved event has no row at all and never inflates
+ * the sentence, and the exact count above it is never rewritten.
+ */
+export function personalBestsCapNote(shown: number): string {
+  return `Showing the ${formatHistoryCount(shown)} newest.`;
+}
+
+/**
+ * "12 personal bests" — the period summary's fragment, from the EXACT count
+ * (never the display list's length). A genuine zero stays "0 personal bests":
+ * an unavailable read has no fragment at all, so the two states never blur.
+ */
+export function personalBestsSummaryFragment(count: number): string {
+  return `${formatHistoryCount(count)} ${count === 1 ? 'personal best' : 'personal bests'}`;
+}
+
 
 /**
  * The §4.5 locked basis wording: the average's denominator counts completed

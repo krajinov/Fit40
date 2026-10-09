@@ -15,14 +15,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ProgressScreen } from '@/features/progress/components/ProgressScreen';
 import {
   EXTERNAL_LOAD_CHART_TITLE,
+  PERSONAL_BESTS_TIMELINE_TITLE,
   SETS_CHART_TITLE,
   SUMMARY_NOTE_EMPTY,
   SUMMARY_TITLE,
   UNAVAILABLE_ACTIVITY_MESSAGE,
   UNAVAILABLE_LOAD_MESSAGE,
+  UNAVAILABLE_PERSONAL_BESTS_MESSAGE,
   UNAVAILABLE_SUMMARY_MESSAGE,
   WORKOUTS_CHART_TITLE,
 } from '@/features/progress/progress-labels';
+import type {
+  ProgressRecordTimelineState,
+  ProgressRecordTimelineView,
+} from '@/features/progress/personal-best-timeline-view';
 import type {
   ProgressActivityView,
   ProgressChartPointView,
@@ -124,10 +130,47 @@ function loadedView(overrides: Partial<ProgressActivityView> = {}): ProgressActi
   };
 }
 
+/** The timeline the screen renders beside the activity cards (M18 Slice 6). */
+function loadedTimeline(overrides: Partial<ProgressRecordTimelineView> = {}): ProgressRecordTimelineState {
+  return {
+    status: 'loaded',
+    data: {
+      title: PERSONAL_BESTS_TIMELINE_TITLE,
+      caption:
+        'Historical events: each row is a personal best you set, not necessarily your current best.',
+      recordEventCount: 12,
+      countCaption: '12 personal bests set in the last 13 weeks.',
+      events: [
+        {
+          key: 'row-1',
+          exerciseName: 'Goblet Squat',
+          metricLabel: 'Heaviest load',
+          valueLabel: '25 kg',
+          completedAtLabel: 'Sep 21, 2026',
+          previousBestLabel: 'Previous best 20 kg',
+          standingLabel: 'Still your best',
+          stillStanding: true,
+          sessionHref: '/history/sessions/session-a',
+        },
+      ],
+      capNote: 'Showing the 10 newest.',
+      emptyState: null,
+      unresolvedNote: null,
+      summaryFragment: '12 personal bests',
+      ...overrides,
+    },
+  };
+}
+
+const PERSONAL_BESTS_UNAVAILABLE: ProgressRecordTimelineState = { status: 'unavailable' };
+
 describe('ProgressScreen — loaded state', () => {
-  it('renders the three charts and the period summary', async () => {
+  it('renders the three charts, the period summary and the personal-best timeline', async () => {
     const container = await render(
-      createElement(ProgressScreen, { state: { status: 'loaded', data: loadedView() } }),
+      createElement(ProgressScreen, {
+        state: { status: 'loaded', data: loadedView() },
+        personalBests: loadedTimeline(),
+      }),
     );
 
     expect(container.textContent).toContain(WORKOUTS_CHART_TITLE);
@@ -136,13 +179,54 @@ describe('ProgressScreen — loaded state', () => {
     expect(container.textContent).toContain(SUMMARY_TITLE);
     expect(container.textContent).toContain('61,200 kg × reps');
     expect(container.textContent).toContain('Across 12 completed weeks.');
+    // The exact PR count reaches the summary as a fragment and the timeline
+    // renders its rows.
+    expect(container.textContent).toContain('· 12 personal bests');
+    expect(container.textContent).toContain(PERSONAL_BESTS_TIMELINE_TITLE);
+    expect(container.textContent).toContain('Goblet Squat');
     expect(container.textContent).not.toContain(UNAVAILABLE_ACTIVITY_MESSAGE);
+    expect(container.textContent).not.toContain(UNAVAILABLE_PERSONAL_BESTS_MESSAGE);
+  });
+
+  it('keeps the activity visible when the personal-best read failed', async () => {
+    const container = await render(
+      createElement(ProgressScreen, {
+        state: { status: 'loaded', data: loadedView() },
+        personalBests: PERSONAL_BESTS_UNAVAILABLE,
+      }),
+    );
+
+    // The completed training the user did keeps rendering …
+    expect(container.textContent).toContain('61,200 kg × reps');
+    expect(container.textContent).toContain('Completed workouts per week.');
+    // … the timeline states its own failure …
+    expect(container.textContent).toContain(UNAVAILABLE_PERSONAL_BESTS_MESSAGE);
+    // … and no personal-best count is invented anywhere on the page.
+    expect(container.textContent).not.toContain('· ');
+    expect(container.textContent).not.toContain('0 personal bests');
+    expect(container.textContent).not.toContain('personal bests set in the last 13 weeks');
+  });
+
+  it('keeps the timeline visible when the activity read failed', async () => {
+    const container = await render(
+      createElement(ProgressScreen, {
+        state: { status: 'unavailable' },
+        personalBests: loadedTimeline(),
+      }),
+    );
+
+    expect(container.textContent).toContain(UNAVAILABLE_ACTIVITY_MESSAGE);
+    expect(container.textContent).toContain(PERSONAL_BESTS_TIMELINE_TITLE);
+    expect(container.textContent).toContain('12 personal bests set in the last 13 weeks.');
+    expect(container.textContent).toContain('Goblet Squat');
+    expect(container.textContent).not.toContain(UNAVAILABLE_PERSONAL_BESTS_MESSAGE);
   });
 
   it('adds one factual empty note for an empty horizon and never hides the weeks', async () => {
     const container = await render(
       createElement(ProgressScreen, {
         state: { status: 'loaded', data: loadedView({ emptyNote: SUMMARY_NOTE_EMPTY }) },
+        personalBests: loadedTimeline(),
       }),
     );
 
@@ -153,7 +237,10 @@ describe('ProgressScreen — loaded state', () => {
 
   it('renders no empty note while the horizon holds training', async () => {
     const container = await render(
-      createElement(ProgressScreen, { state: { status: 'loaded', data: loadedView() } }),
+      createElement(ProgressScreen, {
+        state: { status: 'loaded', data: loadedView() },
+        personalBests: loadedTimeline(),
+      }),
     );
 
     expect(container.textContent).not.toContain(SUMMARY_NOTE_EMPTY);
@@ -163,26 +250,37 @@ describe('ProgressScreen — loaded state', () => {
 describe('ProgressScreen — degraded state', () => {
   it('degrades every card to its own truthful message', async () => {
     const container = await render(
-      createElement(ProgressScreen, { state: { status: 'unavailable' } }),
+      createElement(ProgressScreen, {
+        state: { status: 'unavailable' },
+        personalBests: PERSONAL_BESTS_UNAVAILABLE,
+      }),
     );
 
     expect(container.textContent).toContain(UNAVAILABLE_ACTIVITY_MESSAGE);
     expect(container.textContent).toContain(UNAVAILABLE_LOAD_MESSAGE);
     expect(container.textContent).toContain(UNAVAILABLE_SUMMARY_MESSAGE);
+    expect(container.textContent).toContain(UNAVAILABLE_PERSONAL_BESTS_MESSAGE);
     // The card titles are preserved so the page keeps its shape.
     expect(container.textContent).toContain(WORKOUTS_CHART_TITLE);
     expect(container.textContent).toContain(SETS_CHART_TITLE);
     expect(container.textContent).toContain(EXTERNAL_LOAD_CHART_TITLE);
     expect(container.textContent).toContain(SUMMARY_TITLE);
+    expect(container.textContent).toContain(PERSONAL_BESTS_TIMELINE_TITLE);
   });
 
-  it('never fabricates zero weeks, an average or a volume figure when degraded', async () => {
+  it('never fabricates zero weeks, an average, a volume figure or a PR count', async () => {
     const container = await render(
-      createElement(ProgressScreen, { state: { status: 'unavailable' } }),
+      createElement(ProgressScreen, {
+        state: { status: 'unavailable' },
+        personalBests: PERSONAL_BESTS_UNAVAILABLE,
+      }),
     );
 
     expect(container.textContent).not.toContain('0 workouts');
     expect(container.textContent).not.toContain('Average');
     expect(container.textContent).not.toContain('kg × reps');
+    // The section heading may name personal bests; no COUNT may be invented.
+    expect(container.textContent).not.toContain('personal bests set in the last 13 weeks');
+    expect(container.textContent).not.toContain('0 personal bests');
   });
 });

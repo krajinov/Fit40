@@ -1,5 +1,5 @@
 /**
- * Server-side view assembly for the Progress surface (M18 Slice 4).
+ * Server-side view assembly for the Progress activity surface (M18 Slice 4).
  *
  * `toProgressActivityView` is the pure DTO → view-model mapping; labels and bar
  * geometry are computed here so the components stay presentational (they map
@@ -9,7 +9,9 @@
  * `buildProgressView` reads the single progress use case and degrades to
  * `unavailable` — never to zero weeks — when the read fails, mirroring the M13
  * dashboard convention (typed rejection and unexpected infrastructure failure
- * both degrade; the unexpected one is logged per docs/error-handling.md).
+ * both degrade; the unexpected one is logged per docs/error-handling.md). The
+ * personal-best timeline is a SEPARATE read and a separate view module
+ * (`personal-best-timeline-view.ts`), so neither half can degrade the other.
  *
  * Honesty rules from `docs/training-progress.md`:
  * - all 13 weeks always render (zero-activity weeks are authoritative zeros);
@@ -227,3 +229,4 @@ export async function buildProgressView(
     return { status: 'unavailable' };
   }
 }
+

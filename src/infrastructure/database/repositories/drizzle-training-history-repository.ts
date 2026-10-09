@@ -692,6 +692,61 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       };
     });
   }
+  /**
+   * M18 progress PR-event candidates: the user's completed sessions with
+   * `completedAt >= since`, fully hydrated (docs/training-progress.md §8.1–§8.2).
+   *
+   * Query strategy — three statements when the window holds sessions, one when
+   * it is empty, never one per session:
+   * - Q1 selects the window's session rows (ownership, completed-only and the
+   *   inclusive `since` bound are structural filters; no cap anywhere) in the
+   *   ascending total ladder, together with the workout/program names.
+   * - Q2/Q3 batch-fetch the exercise logs and set logs of exactly those
+   *   sessions and reuse the shared aggregate hydration path, so the
+   *   `WorkoutSession` invariants are enforced exactly as in every other read.
+   *   The two joins exist solely so that shared path can be reused verbatim:
+   *   both are INNER joins on NOT NULL foreign keys, so they can never drop a
+   *   session row.
+   *
+   * The returned aggregates carry a non-null `completedAt` by construction (the
+   * shared completed-only narrowing), and the read never truncates the
+   * candidate set: prior-best evaluation is user-global and exact, so a page
+   * size, offset or top-K here would silently under-count the period's events.
+   */
+  async listCompletedSessionsSince(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
+    const rows: HistoryRow[] = await this.db
+      .select({
+        session: workoutSessions,
+        workoutName: workouts.name,
+        programName: trainingPrograms.name,
+      })
+      .from(workoutSessions)
+      .innerJoin(workouts, eq(workoutSessions.workoutId, workouts.id))
+      .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          gte(workoutSessions.completedAt, since),
+        ),
+      )
+      .orderBy(
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+      );
+
+    if (rows.length === 0) {
+      // No sessions, no hydration queries: an empty window is answered by Q1.
+      return [];
+    }
+
+    const entries = await this.hydratePage(rows);
+    return entries.map((entry) => entry.session);
+  }
 }
 
 /** The minimal session projection the M18 progress read needs. */

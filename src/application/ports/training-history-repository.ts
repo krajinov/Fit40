@@ -313,6 +313,38 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     since: Date,
   ): Promise<ReadonlyArray<ProgressSessionActivityEntry>>;
+
+  /**
+   * Returns the user's COMPLETED sessions with `completedAt >= since` as fully
+   * hydrated aggregates — the M18 Progress horizon's PR-event candidate read
+   * (docs/training-progress.md §8.1–§8.2).
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached (left-program) history contributes candidates, and
+   *   every program feeds one user-global series.
+   * - Completed sessions only; an in-progress session never appears. The
+   *   returned aggregates carry a non-null `completedAt` by construction
+   *   (the established `CompletedWorkoutSession` type).
+   * - `since` is INCLUSIVE and is the ONLY bound: candidate origin is the
+   *   caller's horizon, while the prior-best evaluation stays user-global and
+   *   exact — this read deliberately never truncates the candidate set with a
+   *   page size, offset or top-K, because a truncated read would silently
+   *   under-count the period's events.
+   * - Ordered ascending by `completedAt`, then `startedAt`, then session id —
+   *   a total order even when instants tie, so the combined candidate array is
+   *   already in `PerformancePosition` order (the M14 convention). The order is
+   *   deterministic output, never an identity or a deduplication mechanism.
+   * - Fully hydrated: exercise logs with their set logs ride the aggregate, so
+   *   the Domain can extract record candidates without a second read.
+   * - Bounded statements: a constant number regardless of how many sessions
+   *   the window holds (never one query per session).
+   * - Pure read: nothing is created, resumed, mutated or re-versioned.
+   */
+  listCompletedSessionsSince(
+    userId: UserId,
+    since: Date,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>>;
 }
 
 /**

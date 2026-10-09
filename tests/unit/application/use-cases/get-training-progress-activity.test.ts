@@ -58,6 +58,7 @@ function makeDeps(entries: ReadonlyArray<ProgressSessionActivityEntry> = []) {
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
     listProgressSessionActivity: listProgress,
+    listCompletedSessionsSince: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn(),
   } satisfies TrainingHistoryRepository;

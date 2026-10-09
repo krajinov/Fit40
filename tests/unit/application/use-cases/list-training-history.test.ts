@@ -91,6 +91,7 @@ function makeHistoryRepo(
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
     listProgressSessionActivity: vi.fn(),
+    listCompletedSessionsSince: vi.fn(),
     getTotals: vi.fn().mockResolvedValue(totals),
     findCompletedSessionById: vi.fn().mockResolvedValue(null),
   } satisfies TrainingHistoryRepository;

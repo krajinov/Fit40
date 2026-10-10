@@ -355,10 +355,23 @@ export default function ErrorPage({ error, reset }: { error: Error; reset: () =>
 
 ### Rules
 
-1. **Every route group should have an `error.tsx`.**
+1. **Every route group should have an `error.tsx`.** Implemented in M19 S1: `(app)/error.tsx`, `(auth)/error.tsx`, and a root `global-error.tsx` (see below).
 2. **Log errors in `useEffect`.** Do not log during render.
-3. **Do not expose error details to users.** No stack traces, no internal messages.
-4. **Provide a recovery path.** "Try again" or link to home.
+3. **Do not expose error details to users.** No stack traces, no internal messages. Boundaries log the raw `error` and render only fixed, user-facing copy via `ErrorState`; Next.js itself sends a digest, not the message, to the client.
+4. **Provide a recovery path.** "Try again" (`reset()`) is provided on every boundary.
+5. **A boundary does not cover its own layout.** Verified against `next@16.3.1`: a segment's `error.tsx` catches failures in its **child pages**, but a failure in that segment's own `layout.tsx` propagates to the parent — ultimately to the root `global-error.tsx`. Therefore a root-level `global-error.tsx` is required in addition to the route-group boundaries.
+
+### Root `global-error.tsx`
+
+- Must be a Client Component and must render its own `<html>`/`<body>`.
+- It is the **only** boundary that catches failures in the root layout (`src/app/layout.tsx`). When it renders, the application layout, fonts and Tailwind stylesheet have already failed, so it uses plain inline-styled HTML and no design tokens.
+
+### Contracts the boundaries must preserve
+
+- `redirect()` (including `requireUser`) is navigation, not a rendering failure — boundaries never intercept it.
+- `notFound()` renders the 404 route, not an error boundary.
+- Expected domain/application errors are returned as typed `Result`/view states and render their own truthful "unavailable"/empty copy. Unexpected failures are converted to recoverable errors only at this boundary layer — never into empty or successful results.
+
 
 ---
 

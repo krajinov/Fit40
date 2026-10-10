@@ -88,7 +88,7 @@ async function renderList(entries: CompletedSessionDto['entries']): Promise<void
     startedAt: '2026-01-01T10:00:00.000Z',
     completedAt: '2026-01-01T10:45:00.000Z',
     entries,
-    metrics: { totalSets: 1, totalReps: 10, totalDurationSeconds: 0, volume: 50 },
+    metrics: { totalSets: 1, totalReps: 10, totalDurationSeconds: 0, volume: 50, hasExternalLoad: true },
   }, []);
   await act(async () => {
     root?.render(createElement(CompletedSessionEntryList, { entries: view.entries }));

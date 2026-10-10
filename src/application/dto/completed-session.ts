@@ -110,12 +110,14 @@ export interface CompletedSessionEntryDto {
   readonly sets: ReadonlyArray<CompletedSessionSetDto>;
 }
 
-/** Plain numeric metrics, as already computed by the domain service. */
+/** Session metrics and load presence, already computed by the domain service. */
 export interface CompletedSessionMetricsDto {
   readonly totalSets: number;
   readonly totalReps: number;
   readonly totalDurationSeconds: number;
   readonly volume: number;
+  /** Domain-derived presence; true includes eligible 0 kg rep sets. */
+  readonly hasExternalLoad: boolean;
 }
 
 /** One completed session, fully serializable for the detail screen. */

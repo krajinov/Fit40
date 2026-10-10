@@ -15,6 +15,9 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
+import { toCompletedSessionDto } from '@/application/dto/completed-session';
+import { toTrainingHistorySessionDto } from '@/application/dto/training-history';
+import { toWorkoutSessionDto } from '@/application/dto/workout-session';
 import { PROGRESS_HORIZON_WEEK_COUNT } from '@/application/dto/training-progress';
 import type { TrainingHistoryRepository } from '@/application/ports/training-history-repository';
 import { GetTrainingProgressActivityUseCase } from '@/application/use-cases/get-training-progress-activity';
@@ -363,7 +366,18 @@ describe('progress activity — external load matches the Domain oracle', () => 
 
     // Set counts match the oracle for every session.
     for (const session of [loaded, zero, bodyweight, durationLoaded, mixed]) {
-      expect(byId.get(session.id)?.loggedSets).toBe(calculateSessionMetrics(session).totalSets);
+      const expected = calculateSessionMetrics(session);
+      expect(byId.get(session.id)?.loggedSets).toBe(expected.totalSets);
+      const context = await trainingHistoryRepository.findCompletedSessionById(userId(OWNER_A), session.id);
+      if (context === null) throw new Error('Missing persisted session');
+      for (const metrics of [
+        toTrainingHistorySessionDto(context).metrics,
+        toCompletedSessionDto(context, new Map()).metrics,
+        toWorkoutSessionDto(context.session).metrics,
+      ]) {
+        expect(metrics).toEqual(expected);
+        expect(byId.get(session.id)?.externalLoadVolume).toBe(metrics.hasExternalLoad ? metrics.volume : null);
+      }
     }
   });
 });

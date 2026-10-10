@@ -67,7 +67,7 @@ function sessionDto(status: 'in-progress' | 'completed'): WorkoutSessionDto {
     completedAt: status === 'completed' ? '2026-10-01T10:00:00.000Z' : null,
     version: 1,
     exerciseLogs: [],
-    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
     prescribedSets: 0,
     skippedExerciseCount: 0,
   };

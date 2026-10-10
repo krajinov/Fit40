@@ -610,6 +610,7 @@ describe('training history — hydration and metrics mapping', () => {
       totalReps: 18,
       totalDurationSeconds: 30,
       volume: 10 * 40 + 8 * 45,
+      hasExternalLoad: true,
     });
     expect(dto?.exerciseLogs.map((log) => log.order)).toEqual([1, 2]);
     const first = dto?.exerciseLogs[0];

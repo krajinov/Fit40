@@ -31,7 +31,6 @@ import {
   formatHistoryCount,
   formatHistoryDate,
   formatHistoryVolume,
-  hasEligibleExternalLoad,
 } from '@/features/history/history-labels';
 import {
   getExercisesByIdsUseCase,
@@ -186,7 +185,7 @@ export function toHistoryView(
     // Presence, not the summed value, decides the badge (docs/training-progress.md
     // §6.3): a genuine `0 kg × reps` session still renders one, while a
     // bodyweight-only or duration-only session renders none.
-    volumeLabel: hasEligibleExternalLoad(session.exerciseLogs)
+    volumeLabel: session.metrics.hasExternalLoad
       ? formatHistoryVolume(session.metrics.volume)
       : null,
   }));

@@ -205,6 +205,7 @@ describe('GetCompletedSessionUseCase', () => {
       totalReps: 10,
       totalDurationSeconds: 0,
       volume: 500,
+      hasExternalLoad: true,
     });
   });
 

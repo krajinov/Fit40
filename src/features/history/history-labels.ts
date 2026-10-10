@@ -4,11 +4,6 @@
  * All formatting is deterministic — fixed UTC timezone and en-US locale — so
  * a given instant or count always renders the same label regardless of the
  * server's timezone. No date library is introduced for these screens.
- *
- * This module also owns the display-only presence rule behind volume badges
- * (`hasEligibleExternalLoad`, docs/training-progress.md §6.3): the History and
- * completed-session views share it so a genuine `0 kg × reps` session badges
- * while bodyweight-only and duration-only sessions do not.
  */
 
 import type { CompletedSessionSetDto } from '@/application/dto/completed-session';
@@ -47,31 +42,6 @@ export function formatHistoryCount(value: number): string {
  */
 export function formatHistoryVolume(volumeKgReps: number): string {
   return `${Math.round(volumeKgReps).toLocaleString('en-US')} kg × reps`;
-}
-
-/**
- * Whether a session's logged occurrences include at least one eligible
- * externally loaded rep set — the presence fact behind a volume badge
- * (docs/training-progress.md §6.3).
- *
- * Eligibility mirrors the Domain volume rule for display only: a rep set with
- * `weightKg !== null` (`0 kg` is a real load). A session whose eligible sets
- * sum to exactly zero therefore still renders "0 kg × reps", while
- * bodyweight-only sessions — and duration-only sessions, even when a weight
- * was logged on timed work — render no badge at all. `calculateSessionMetrics`
- * remains the volume authority and is untouched.
- */
-export function hasEligibleExternalLoad(
-  exerciseLogs: ReadonlyArray<{
-    readonly sets: ReadonlyArray<{
-      readonly type: 'reps' | 'duration';
-      readonly weightKg: number | null;
-    }>;
-  }>,
-): boolean {
-  return exerciseLogs.some((log) =>
-    log.sets.some((set) => set.type === 'reps' && set.weightKg !== null),
-  );
 }
 
 function withRpeSuffix(label: string, rpe: number | null): string {

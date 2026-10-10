@@ -52,7 +52,7 @@ function sessionDto(overrides?: {
         },
       ],
     metrics:
-      overrides?.metrics ?? { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500 },
+      overrides?.metrics ?? { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500, hasExternalLoad: true },
   };
 }
 
@@ -147,7 +147,7 @@ describe('toCompletedSessionView', () => {
       },
     ];
     const view = toCompletedSessionView(
-      sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0 } }),
+      sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0, hasExternalLoad: false } }),
       [],
     );
     expect(view.metricsLineLabel).toBe('1 set');
@@ -177,7 +177,7 @@ describe('toCompletedSessionView', () => {
     const view = toCompletedSessionView(
       sessionDto({
         entries,
-        metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0 },
+        metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
       }),
       [],
     );
@@ -206,7 +206,7 @@ describe('toCompletedSessionView', () => {
     const view = toCompletedSessionView(
       sessionDto({
         entries,
-        metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0 },
+        metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0, hasExternalLoad: false },
       }),
       [],
     );
@@ -236,12 +236,23 @@ describe('toCompletedSessionView', () => {
     const view = toCompletedSessionView(
       sessionDto({
         entries,
-        metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0 },
+        metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
       }),
       [],
     );
 
     expect(view.metricsLineLabel).toBe('1 set · 12 reps');
+  });
+
+  it('trusts DTO presence rather than rescanning loaded sets', () => {
+    const hidden = toCompletedSessionView(sessionDto({
+      metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500, hasExternalLoad: false },
+    }), []);
+    expect(hidden.metricsLineLabel).not.toContain('kg × reps');
+    const shown = toCompletedSessionView(sessionDto({ entries: [],
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
+    }), []);
+    expect(shown.metricsLineLabel).toContain('0 kg × reps');
   });
 
   it('links a resolved catalog slug to the exercise history page', () => {

@@ -49,7 +49,6 @@ import {
   formatHistoryElapsed,
   formatHistoryVolume,
   formatSessionSetLine,
-  hasEligibleExternalLoad,
 } from '@/features/history/history-labels';
 import {
   getCompletedSessionRecordEventsUseCase,
@@ -220,7 +219,7 @@ export function toCompletedSessionView(
     // Presence, not the summed value, decides the segment (docs/training-progress.md
     // §6.3): a genuine `0 kg × reps` session still shows it, while a
     // bodyweight-only or duration-only session shows none.
-    hasEligibleExternalLoad(session.entries) ? formatHistoryVolume(metrics.volume) : null,
+    metrics.hasExternalLoad ? formatHistoryVolume(metrics.volume) : null,
   ].filter((segment): segment is string => segment !== null);
   const entries = session.entries.map((entry) => toEntryView(entry, recordKeys));
 

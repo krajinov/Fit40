@@ -56,7 +56,7 @@ function sessionDto(overrides: Partial<TrainingHistorySessionDto> = {}): Trainin
     startedAt: '2026-02-15T10:00:00Z',
     completedAt: '2026-02-15T11:00:00Z',
     exerciseLogs: [],
-    metrics: { totalSets: 18, totalReps: 126, totalDurationSeconds: 0, volume: 1240 },
+    metrics: { totalSets: 18, totalReps: 126, totalDurationSeconds: 0, volume: 1240, hasExternalLoad: true },
     ...overrides,
   };
 }
@@ -128,6 +128,7 @@ describe('toHistoryView', () => {
       }),
       sessionDto({
         sessionId: 'session-old',
+        metrics: { totalSets: 18, totalReps: 126, totalDurationSeconds: 0, volume: 1240, hasExternalLoad: false },
         workoutName: 'Full Body A',
         completedAt: '2026-02-15T11:00:00Z',
       }),
@@ -142,6 +143,19 @@ describe('toHistoryView', () => {
     expect(view.sessions[1]?.completedAtLabel).toBe('Feb 15, 2026');
     // No logged occurrence at all → no eligible loaded set → no volume badge.
     expect(view.sessions[1]?.volumeLabel).toBeNull();
+  });
+
+  it('trusts DTO presence even when set facts and numeric volume disagree', () => {
+    const hidden = sessionDto({
+      exerciseLogs: [exerciseLog('ex-001')],
+      metrics: { totalSets: 1, totalReps: 8, totalDurationSeconds: 0, volume: 100, hasExternalLoad: false },
+    });
+    const shown = sessionDto({
+      exerciseLogs: [],
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
+    });
+    const view = toHistoryView(pageDto([hidden, shown], null), TOTALS, []);
+    expect(view.sessions.map((session) => session.volumeLabel)).toEqual([null, '0 kg × reps']);
   });
 
   it('builds the older-page URL from the opaque next cursor', () => {
@@ -178,7 +192,7 @@ describe('toHistoryView', () => {
               ],
             }),
           ],
-          metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 30, volume: 0 },
+          metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 30, volume: 0, hasExternalLoad: false },
         }),
       ]),
       { completedSessions: 0, loggedSets: 0 },
@@ -206,7 +220,7 @@ describe('toHistoryView', () => {
               ],
             }),
           ],
-          metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0 },
+          metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
         }),
       ]),
       { completedSessions: 0, loggedSets: 0 },
@@ -225,7 +239,7 @@ describe('toHistoryView', () => {
               sets: [{ setNumber: 1, type: 'reps', reps: 12, weightKg: null, rpe: null }],
             }),
           ],
-          metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0 },
+          metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
         }),
       ]),
       { completedSessions: 0, loggedSets: 0 },
@@ -249,7 +263,7 @@ describe('toHistoryView', () => {
               sets: [{ setNumber: 1, type: 'reps', reps: 10, weightKg: 30, rpe: null }],
             }),
           ],
-          metrics: { totalSets: 2, totalReps: 22, totalDurationSeconds: 0, volume: 300 },
+          metrics: { totalSets: 2, totalReps: 22, totalDurationSeconds: 0, volume: 300, hasExternalLoad: true },
         }),
       ]),
       { completedSessions: 0, loggedSets: 0 },

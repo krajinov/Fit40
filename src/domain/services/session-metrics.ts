@@ -15,20 +15,20 @@ export interface SessionMetrics {
   readonly totalReps: number;
   readonly totalDurationSeconds: number;
   readonly volume: number;
+  /** True for eligible loaded rep data, including genuine zero. */
+  readonly hasExternalLoad: boolean;
 }
 
 export function calculateSessionMetrics(session: WorkoutSession): SessionMetrics {
-  const { hasExternalLoad, ...metrics } = calculateLoggedSetMetrics(
+  return calculateLoggedSetMetrics(
     session.exerciseLogs.flatMap((log) => log.sets),
   );
-  void hasExternalLoad;
-  return metrics;
 }
 
 /** Shared authority for session metrics and M18's zero-versus-absence rule. */
 export function calculateLoggedSetMetrics(
   sets: ReadonlyArray<SetLog>,
-): SessionMetrics & { readonly hasExternalLoad: boolean } {
+): SessionMetrics {
   let totalReps = 0;
   let totalDurationSeconds = 0;
   let volume = 0;

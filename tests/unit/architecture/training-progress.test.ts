@@ -96,6 +96,16 @@ describe('M18 architecture guards', () => {
     expect(source('src/domain/services/session-metrics.ts')).toContain('calculateLoggedSetMetrics(');
   });
 
+  it('consumes Domain external-load presence without a presentation eligibility predicate', () => {
+    for (const file of filesIn('src/features/history')) {
+      expect(source(file), file).not.toContain('hasEligibleExternalLoad');
+      expect(source(file), file).not.toMatch(/\.some\(\s*\(?set\)?\s*=>[\s\S]*?set\.type\s*===\s*['"]reps['"][\s\S]*?set\.weightKg\s*!==\s*null/);
+    }
+    for (const file of ['history-view.ts', 'completed-session-view.ts']) {
+      expect(source(`src/features/history/${file}`)).toContain('metrics.hasExternalLoad');
+    }
+  });
+
   it('formats volume with load-times-repetitions units, including genuine zero', () => {
     expect(formatHistoryVolume(6000)).toBe('6,000 kg × reps');
     expect(formatHistoryVolume(0)).toBe('0 kg × reps');

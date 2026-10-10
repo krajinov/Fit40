@@ -6,7 +6,6 @@ import {
   formatHistoryElapsed,
   formatHistoryVolume,
   formatSessionSetLine,
-  hasEligibleExternalLoad,
 } from '@/features/history/history-labels';
 import type { CompletedSessionSetDto } from '@/application/dto/completed-session';
 
@@ -50,58 +49,6 @@ describe('formatHistoryVolume', () => {
 
   it('rounds fractional volumes to whole kg × reps', () => {
     expect(formatHistoryVolume(1234.6)).toBe('1,235 kg × reps');
-  });
-});
-
-describe('hasEligibleExternalLoad', () => {
-  /** One logged occurrence carrying the given sets. */
-  function log(
-    sets: ReadonlyArray<{ readonly type: 'reps' | 'duration'; readonly weightKg: number | null }>,
-  ) {
-    return { sets };
-  }
-
-  it('is true for a rep set with an external load', () => {
-    expect(hasEligibleExternalLoad([log([{ type: 'reps', weightKg: 20 }])])).toBe(true);
-  });
-
-  it('is true for eligible 0 kg rep sets — a genuine zero is still data', () => {
-    expect(
-      hasEligibleExternalLoad([
-        log([
-          { type: 'reps', weightKg: 0 },
-          { type: 'reps', weightKg: 0 },
-        ]),
-      ]),
-    ).toBe(true);
-  });
-
-  it('is false for bodyweight rep sets (null weight)', () => {
-    expect(hasEligibleExternalLoad([log([{ type: 'reps', weightKg: null }])])).toBe(false);
-  });
-
-  it('is false for duration sets even when a weight was logged on timed work', () => {
-    expect(
-      hasEligibleExternalLoad([log([{ type: 'duration', weightKg: 10 }])]),
-    ).toBe(false);
-  });
-
-  it('is false for duration-only work without a weight', () => {
-    expect(hasEligibleExternalLoad([log([{ type: 'duration', weightKg: null }])])).toBe(false);
-  });
-
-  it('is true when a mixed session has one loaded set among unloaded ones', () => {
-    expect(
-      hasEligibleExternalLoad([
-        log([{ type: 'reps', weightKg: null }]),
-        log([{ type: 'reps', weightKg: 30 }]),
-      ]),
-    ).toBe(true);
-  });
-
-  it('is false for sessions without sets or without occurrences', () => {
-    expect(hasEligibleExternalLoad([])).toBe(false);
-    expect(hasEligibleExternalLoad([log([])])).toBe(false);
   });
 });
 

@@ -15,6 +15,8 @@ import type {
   TrainingHistoryRepository,
   TrainingHistoryTotals,
 } from '@/application/ports/training-history-repository';
+import type { SetLog } from '@/domain/entities/workout-session';
+import { calculateLoggedSetMetrics } from '@/domain/services/session-metrics';
 import type { ExerciseId, UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
@@ -22,7 +24,7 @@ import type { RecentPerformanceRow } from '../mappers/exercise-performance-mappe
 import { mapRecentCompletedExercisePerformances } from '../mappers/exercise-performance-mapper';
 import type { ExerciseOccurrenceRow } from '../mappers/exercise-occurrence-mapper';
 import { mapCompletedExerciseOccurrences } from '../mappers/exercise-occurrence-mapper';
-import { mapSessionRows, parseWorkoutSessionId } from '../mappers/session-mapper';
+import { mapSet, mapSessionRows, parseWorkoutSessionId } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, trainingPrograms, workoutSessions, workouts } from '../schema';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
@@ -251,9 +253,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
    *   exercise_order DESC so two occurrences in one session order
    *   truthfully by position.
    * - Q2 batch-hydrates the sets of exactly the returned occurrences in
-   *   one query. Drizzle 0.45 has no row-value (tuple) `inArray`, so the
-   *   (session_id, exercise_order) pair filter is a typed OR-of-ANDs —
-   *   the same fully-typed expansion style as the keyset predicate.
+   *   one query with a single JSONB recordset of exact occurrence keys.
    */
   async listCompletedExerciseOccurrences(
     userId: UserId,
@@ -370,10 +370,10 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
 
   /**
    * Batch-hydrates the logged sets of exactly the returned occurrences in one
-   * query and maps the rows to the port's projections. Drizzle 0.45 has no
-   * row-value (tuple) `inArray`, so the (session_id, exercise_order) pair filter
-   * is a typed OR-of-ANDs — the same fully-typed expansion style as the keyset
-   * predicate. An empty occurrence list answers without querying at all.
+   * query and maps the rows to the port's projections. A single JSONB
+   * recordset preserves exact (session_id, exercise_order) keys without a
+   * growing parameter count or expression tree. An empty occurrence list
+   * answers without querying at all.
    */
   private async hydrateOccurrenceSets(
     occurrenceRows: ReadonlyArray<ExerciseOccurrenceRow>,
@@ -386,14 +386,13 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .select()
       .from(setLogs)
       .where(
-        or(
-          ...occurrenceRows.map((row) =>
-            and(
-              eq(setLogs.sessionId, row.sessionId),
-              eq(setLogs.exerciseOrder, row.exerciseOrder),
-            ),
-          ),
-        ),
+        sql`(${setLogs.sessionId}, ${setLogs.exerciseOrder}) in (
+          select session_id, exercise_order
+          from jsonb_to_recordset(${JSON.stringify(occurrenceRows.map((row) => ({
+            session_id: row.sessionId,
+            exercise_order: row.exerciseOrder,
+          })))}::jsonb) as occurrence(session_id text, exercise_order int)
+        )`,
       )
       .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
 
@@ -681,19 +680,10 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
    *   inclusive `since` bound are structural filters; no cap, because the
    *   caller aggregates the whole window) ordered by the history recency
    *   ladder. Only the id and completion instant are projected.
-   * - Q2 batch-aggregates exactly those sessions' set rows in one grouped
-   *   query, projecting three facts per session: the plain set count, the
-   *   count of ELIGIBLE sets (rep sets with a non-null weight) and the
-   *   external-load sum (`reps × weightKg` over those same sets).
-   *
-   * The eligible-set count is what keeps §6.3 honest: a session with no
-   * eligible set reports `null` (no external-load data — bodyweight and
-   * duration training are not "zero"), while a session whose eligible sets
-   * sum to zero reports a genuine `0`. The aggregation mirrors
-   * `calculateSessionMetrics`' volume rule — `type = 'reps'` AND
-   * `weight_kg IS NOT NULL`, duration and bodyweight sets excluded, `0 kg`
-   * contributing zero — and the integration suite verifies it against that
-   * Domain oracle rather than trusting the SQL.
+   * - Q2 reads exactly those sessions' raw set facts in one batch, with one
+   *   JSONB parameter. Mapped Domain sets feed calculateLoggedSetMetrics,
+   *   shared by calculateSessionMetrics; SQL contains no volume arithmetic
+   *   or eligibility rule. No aggregate hydration or extra statements.
    */
   async listProgressSessionActivity(
     userId: UserId,
@@ -723,45 +713,27 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       return [];
     }
 
-    // One grouped aggregation for the whole window (no N+1). Set rows carry
-    // their session id directly and always belong to a valid exercise log of
-    // that session (composite FK), so the group is exactly the session's
-    // logged sets. FILTER keeps the eligible-set predicate in one place;
-    // `coalesce(..., 0)` never fabricates a row: a session with no eligible
-    // set has `eligibleSetCount` 0 and is reported as `null` below.
-    const aggregateRows = await this.db
-      .select({
-        sessionId: setLogs.sessionId,
-        setCount: count(setLogs.setNumber),
-        eligibleSetCount: sql<number>`count(*) filter (where ${setLogs.type} = 'reps' and ${setLogs.weightKg} is not null)::int`,
-        volumeKgReps: sql<number>`coalesce(sum(${setLogs.reps} * ${setLogs.weightKg}) filter (where ${setLogs.type} = 'reps' and ${setLogs.weightKg} is not null), 0)::double precision`,
-      })
-      .from(setLogs)
-      .where(inArray(setLogs.sessionId, rows.map((row) => row.id)))
-      .groupBy(setLogs.sessionId);
-
-    const aggregatesBySession = new Map<
-      string,
-      { readonly setCount: number; readonly eligibleSetCount: number; readonly volumeKgReps: number }
-    >();
-    for (const row of aggregateRows) {
-      aggregatesBySession.set(row.sessionId, {
-        setCount: row.setCount,
-        eligibleSetCount: row.eligibleSetCount,
-        volumeKgReps: row.volumeKgReps,
-      });
+    // Raw set facts in one statement; Domain owns eligibility and arithmetic.
+    // One JSON parameter also keeps the uncapped session window parameter-safe.
+    const setRows = await this.db.select().from(setLogs).where(
+      sql`${setLogs.sessionId} in (
+        select jsonb_array_elements_text(${JSON.stringify(rows.map((row) => row.id))}::jsonb)
+      )`,
+    ).orderBy(asc(setLogs.sessionId), asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+    const setsBySession = new Map<string, SetLog[]>();
+    for (const row of setRows) {
+      const sets = setsBySession.get(row.sessionId) ?? [];
+      sets.push(mapSet(row, 'progress session activity'));
+      setsBySession.set(row.sessionId, sets);
     }
 
     return rows.map((row) => {
-      const aggregate = aggregatesBySession.get(row.id);
+      const metrics = calculateLoggedSetMetrics(setsBySession.get(row.id) ?? []);
       return {
         sessionId: parseWorkoutSessionId(row.id, 'progress session activity'),
         completedAt: this.completedAtOf(row),
-        loggedSets: aggregate?.setCount ?? 0,
-        externalLoadVolume:
-          aggregate === undefined || aggregate.eligibleSetCount === 0
-            ? null
-            : aggregate.volumeKgReps,
+        loggedSets: metrics.totalSets,
+        externalLoadVolume: metrics.hasExternalLoad ? metrics.volume : null,
       };
     });
   }

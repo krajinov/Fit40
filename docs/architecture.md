@@ -358,10 +358,13 @@ resolves the fixed 13-week horizon; the 50-occurrence history display cap never
 limits prior detection or the period comparison.
 
 Infrastructure implements the history ports with constant batched statement
-counts and no new schema or derived writes. Volume projections are checked
-against `calculateSessionMetrics`; record projections against
+counts and no new schema or derived writes. Progress reads raw mapped set
+facts and delegates to `calculateLoggedSetMetrics`,
+the shared authority behind `calculateSessionMetrics`, while retaining two
+statements. Record projections are checked against
 `foldPersonalRecords`. The prior-best transport handles uncapped candidates
-with a parameter count independent of collection size.
+with a parameter count independent of collection size. Occurrence hydration
+also transports exact session/order pairs in one JSONB recordset parameter.
 
 Presentation consumes DTOs and formats factual labels. The feature composition
 root `src/features/progress/services.ts` wires shared repository singletons;

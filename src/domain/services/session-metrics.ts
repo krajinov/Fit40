@@ -8,7 +8,7 @@
  * - Zero weight contributes zero.
  */
 
-import type { WorkoutSession } from '@/domain/entities/workout-session';
+import type { SetLog, WorkoutSession } from '@/domain/entities/workout-session';
 
 export interface SessionMetrics {
   readonly totalSets: number;
@@ -18,30 +18,31 @@ export interface SessionMetrics {
 }
 
 export function calculateSessionMetrics(session: WorkoutSession): SessionMetrics {
-  let totalSets = 0;
+  const { hasExternalLoad, ...metrics } = calculateLoggedSetMetrics(
+    session.exerciseLogs.flatMap((log) => log.sets),
+  );
+  void hasExternalLoad;
+  return metrics;
+}
+
+/** Shared authority for session metrics and M18's zero-versus-absence rule. */
+export function calculateLoggedSetMetrics(
+  sets: ReadonlyArray<SetLog>,
+): SessionMetrics & { readonly hasExternalLoad: boolean } {
   let totalReps = 0;
   let totalDurationSeconds = 0;
   let volume = 0;
-
-  for (const log of session.exerciseLogs) {
-    for (const set of log.sets) {
-      totalSets += 1;
-
-      if (set.type === 'reps') {
-        totalReps += set.reps;
-        if (set.weightKg !== null) {
-          volume += set.reps * set.weightKg;
-        }
-      } else if (set.type === 'duration') {
-        totalDurationSeconds += set.durationSeconds;
+  let hasExternalLoad = false;
+  for (const set of sets) {
+    if (set.type === 'reps') {
+      totalReps += set.reps;
+      if (set.weightKg !== null) {
+        hasExternalLoad = true;
+        volume += set.reps * set.weightKg;
       }
+    } else {
+      totalDurationSeconds += set.durationSeconds;
     }
   }
-
-  return {
-    totalSets,
-    totalReps,
-    totalDurationSeconds,
-    volume,
-  };
+  return { totalSets: sets.length, totalReps, totalDurationSeconds, volume, hasExternalLoad };
 }

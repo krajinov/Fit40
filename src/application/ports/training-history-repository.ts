@@ -348,8 +348,8 @@ export interface TrainingHistoryRepository {
    *   dropped — the same defensive guarantee as
    *   `listCompletedSessionActivity`.
    * - Implementations must answer in a bounded number of statements (one
-   *   session query plus one batched per-session aggregation), never one
-   *   query per session.
+   *   session query plus one batched raw-set read with Domain aggregation),
+   *   never one query per session.
    */
   listProgressSessionActivity(
     userId: UserId,

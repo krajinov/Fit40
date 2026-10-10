@@ -820,3 +820,33 @@ final source tree. The separate 8,320-candidate regression passed in the
 prepared audit and remains covered by the full integration rerun. Slice 9 is
 complete under the user-authorized environment exception; normal Turbopack
 success is not claimed. One focused Slice 9 commit; no push or PR.
+
+
+## PR #23 review corrections
+
+P1 confirmed: the original SQL volume projection duplicated the Domain formula.
+Progress now reads raw set rows and maps them to Domain sets, then delegates to
+`calculateLoggedSetMetrics`, the shared authority behind `calculateSessionMetrics`.
+This is an incremental correction to the S2 read implementation: two statements
+remain, including zero-set sessions and genuine-zero versus absent volume.
+It trades grouped result rows for raw set facts, without aggregate hydration,
+new ports, migrations, or semantic changes.
+
+P2 confirmed: the uncapped occurrence hydration expanded two bind parameters
+per occurrence. One JSONB recordset now transports exact session/order pairs,
+retaining two statements for both bounded display and uncapped period reads.
+The regression uses 32,768 matching occurrences, checks complete hydration,
+first/latest direction, unrelated-exercise exclusion and one hydration parameter.
+The progress raw-set read also uses one JSONB session-id parameter.
+
+Verification of the PR correction source tree (2026-10-10):
+- `npm test`: 215 files, 2,961 tests passed.
+- `npm run test:integration`: 48 files, 487 PostgreSQL tests passed.
+- Targeted activity/occurrence/markers/candidate-capacity run: 5 files,
+  21 tests passed, including 32,768 occurrences and 8,320 PR candidates.
+- `npm run typecheck` and `npm run lint`: exit 0.
+- `npm run build -- --webpack`: exit 0, all 13 static pages generated.
+- `npm run build`: exit 1 both sandboxed and permitted; Turbopack CSS worker
+  port binding failed with `Operation not permitted (os error 1)`.
+  This environment result does not claim a Turbopack success.
+- `git diff --check`: exit 0 for the correction diff.

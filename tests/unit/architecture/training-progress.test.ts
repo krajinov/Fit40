@@ -87,6 +87,15 @@ describe('M18 architecture guards', () => {
     }
   });
 
+  it('keeps progress volume arithmetic in the shared Domain authority', () => {
+    const repository = source('src/infrastructure/database/repositories/drizzle-training-history-repository.ts');
+    const activity = repository.split('async listProgressSessionActivity(')[1]?.split('async listCompletedSessionsSince(')[0];
+    expect(activity).toContain('calculateLoggedSetMetrics(');
+    expect(activity).not.toMatch(/\b(?:sum|filter)\s*\(/i);
+    expect(activity).not.toContain('setLogs.weightKg');
+    expect(source('src/domain/services/session-metrics.ts')).toContain('calculateLoggedSetMetrics(');
+  });
+
   it('formats volume with load-times-repetitions units, including genuine zero', () => {
     expect(formatHistoryVolume(6000)).toBe('6,000 kg × reps');
     expect(formatHistoryVolume(0)).toBe('0 kg × reps');

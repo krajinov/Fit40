@@ -60,7 +60,7 @@ it('hydrates 32,768 exact occurrence keys with two statements and one hydration 
   try {
     await repository.listCompletedExerciseOccurrences(userId(OWNER), exerciseId('ex-002'), 2);
     queries.length = 0;
-    const rows = await repository.listCompletedExerciseOccurrencesSince(userId(OWNER), exerciseId('ex-002'), SINCE);
+    const rows = await repository.listCompletedExerciseOccurrencesSince(userId(OWNER), exerciseId('ex-002'), SINCE, new Date('2026-09-28T00:00:00.000Z'));
     expect(queries).toHaveLength(2);
     expect(queries[1]?.parameters).toBe(1);
     expect(rows).toHaveLength(COUNT);

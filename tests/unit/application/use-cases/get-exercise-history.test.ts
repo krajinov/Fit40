@@ -812,6 +812,15 @@ describe('GetExerciseHistoryUseCase — period working-load comparison (M18 Slic
     return { uc, historyRepo };
   }
 
+  it.each([
+    ['2026-09-27T23:59:59.999Z', '2026-06-29T00:00:00.000Z', '2026-09-28T00:00:00.000Z'],
+    ['2026-09-28T00:00:00.000Z', '2026-07-06T00:00:00.000Z', '2026-10-05T00:00:00.000Z'],
+  ])('forwards request period bounds for %s', async (instant, start, end) => {
+    const { uc, historyRepo } = useCaseFor([]);
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: new Date(instant) });
+    expect(historyRepo.listCompletedExerciseOccurrencesSince.mock.calls[0]?.slice(2)).toEqual([new Date(start), new Date(end)]);
+  });
+
   it('reads the period from the horizon start, inclusive, uncapped', async () => {
     const { uc, historyRepo } = useCaseFor([]);
 
@@ -821,9 +830,10 @@ describe('GetExerciseHistoryUseCase — period working-load comparison (M18 Slic
       uid('user-a'),
       eid('ex-001'),
       HORIZON_START,
+      new Date('2026-09-28T00:00:00.000Z'),
     );
-    // Two arguments plus the bound: the period read takes no display limit.
-    expect(historyRepo.listCompletedExerciseOccurrencesSince.mock.calls[0]).toHaveLength(3);
+    // Two arguments plus the period bounds: the period read takes no display limit.
+    expect(historyRepo.listCompletedExerciseOccurrencesSince.mock.calls[0]).toHaveLength(4);
   });
 
   it('dataset F: maps the Domain comparison and the direction into the DTO', async () => {

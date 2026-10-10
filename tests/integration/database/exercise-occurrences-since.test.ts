@@ -115,8 +115,7 @@ describe('listCompletedExerciseOccurrencesSince — the period read', () => {
     const rows = await trainingHistoryRepository.listCompletedExerciseOccurrencesSince(
       userId(OWNER),
       exerciseId('ex-002'),
-      HORIZON_START,
-    );
+      HORIZON_START, new Date('2026-09-28T00:00:00.000Z'));
 
     // `before-horizon` completed one second before the period: excluded.
     // Everything else is in, ordered ascending by completedAt, startedAt,
@@ -138,8 +137,7 @@ describe('listCompletedExerciseOccurrencesSince — the period read', () => {
     const rows = await trainingHistoryRepository.listCompletedExerciseOccurrencesSince(
       userId('user-with-no-history'),
       exerciseId('ex-002'),
-      HORIZON_START,
-    );
+      HORIZON_START, new Date('2026-09-28T00:00:00.000Z'));
 
     expect(rows).toEqual([]);
   });

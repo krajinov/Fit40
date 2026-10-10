@@ -283,7 +283,7 @@ describe('progress record events (M18 Slice 5) — horizon edges and empty windo
       }),
     );
 
-    const rows = await trainingHistoryRepository.listCompletedSessionsSince(userId(OWNER), SINCE);
+    const rows = await trainingHistoryRepository.listCompletedSessionsSince(userId(OWNER), SINCE, new Date('2026-09-28T00:00:00.000Z'));
     expect(rows.map((row) => String(row.id))).toEqual(['rec-at-since']);
 
     const result = await useCase.execute({ userId: OWNER, now: NOW });

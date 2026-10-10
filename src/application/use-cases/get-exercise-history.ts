@@ -121,7 +121,7 @@ export class GetExerciseHistoryUseCase {
     // The period's own bound: the oldest UTC Monday of the fixed M18 horizon
     // (§5). `since` is inclusive, so an occurrence completed exactly at that
     // Monday 00:00 belongs to the period.
-    const horizonStart = requireFirstWeekStart(input.now);
+    const period = requireProgressPeriod(input.now);
 
     // The four reads are independent and all address the resolved ExerciseId —
     // never the authored one, so substituted and user-added performances count
@@ -137,7 +137,8 @@ export class GetExerciseHistoryUseCase {
       this.historyRepository.listCompletedExerciseOccurrencesSince(
         userIdResult.data,
         exercise.id,
-        horizonStart,
+        period.start,
+        period.end,
       ),
     ]);
 
@@ -163,20 +164,21 @@ export class GetExerciseHistoryUseCase {
 }
 
 /**
- * The oldest UTC Monday of the fixed M18 horizon for one request instant.
+ * The inclusive start and exclusive end of the fixed request horizon.
  *
  * `listRecentTrainingWeekWindows` returns exactly the requested count of
- * windows, so a missing head is a contract violation rather than a business
+ * windows, so a missing edge is a contract violation rather than a business
  * outcome: defaulting it would silently widen (or drop) the comparison's
  * period.
  */
-function requireFirstWeekStart(now: Date): Date {
+function requireProgressPeriod(now: Date): { readonly start: Date; readonly end: Date } {
   const windows = listRecentTrainingWeekWindows(now, PROGRESS_HORIZON_WEEK_COUNT);
   const oldest = windows[0];
-  if (oldest === undefined) {
+  const current = windows[windows.length - 1];
+  if (oldest === undefined || current === undefined) {
     throw new Error('Exercise history contract violated: no horizon week window');
   }
-  return oldest.weekStart;
+  return { start: oldest.weekStart, end: current.weekEnd };
 }
 
 /**

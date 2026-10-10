@@ -226,9 +226,12 @@ Defined fully in §6 (unit, presence, genuine zero, approved alignment).
    to exactly one window (existing `training-week.ts` rule).
 3. **`since` bound:** the oldest window's `weekStart`, **inclusive** —
    matching `listCompletedSessionActivity`'s inclusive `since`. Sessions older
-   than the horizon are ignored, not an error. No upper bound is needed:
-   `completedAt` cannot exceed the request clock that wrote it, and the
-   current window's end is a future instant.
+   than the horizon are ignored, not an error. The current window's `weekEnd`
+   is the **exclusive upper bound** for all M18 period reads: `[start, end)`.
+   A request can span Monday UTC while another session completes, so the
+   captured request clock must constrain candidate origin and comparisons as
+   well as activity buckets. The end is the week boundary, not `now`; the
+   current week keeps its existing partial-window semantics.
 4. **Attribution (locked):** a session belongs to the week containing its
    **`completedAt`** — never `startedAt`. A Sunday-started, Monday-completed
    session is Monday-week training. This is M13's existing bucketing rule,

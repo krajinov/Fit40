@@ -373,7 +373,7 @@ setNumber)` against `findCurrentPersonalBests` results (memo §8.5).
 **Application responsibilities.**
 - `GetTrainingProgressRecordEventsUseCase.execute({ userId, now })`:
   - horizon range: `since = listRecentTrainingWeekWindows(now, 13)[0].weekStart`
-    (candidate origin; no upper bound needed — memo §5.3);
+    (candidate origin; exclusive current `weekEnd` — memo §5.3);
   - one bounded hydration read of completed sessions in range (ascending
     `(completedAt, startedAt, id)` like M14's enrollment read), user-scoped
     and detached-inclusive;
@@ -849,4 +849,35 @@ Verification of the PR correction source tree (2026-10-10):
 - `npm run build`: exit 1 both sandboxed and permitted; Turbopack CSS worker
   port binding failed with `Operation not permitted (os error 1)`.
   This environment result does not claim a Turbopack success.
+- `git diff --check`: exit 0 for the correction diff.
+
+
+## PR #23 exclusive period-end correction
+
+P2 reproduced against `cbac0baf`: a captured Sunday request returned four
+sessions from lower-bound-only reads, counted four historical PR events while
+activity buckets counted two, and compared to a next-period 40 kg load instead
+of the final in-period 20 kg. The PostgreSQL reproduction had three failures
+and one passing Monday-transition case before the correction.
+
+All three M18 period ports now require an exclusive `before` boundary. Each
+Application use case derives start and end from the existing 13 UTC windows
+and the caller's request clock. Repositories filter `completedAt >= since`
+and `completedAt < before` in their existing first statement. The end is the
+current window's `weekEnd`, not `now`: current partial weeks, uncapped reads,
+exact user-global prior-best detection, all-time history/current-best context
+and bounded statement counts retain their existing semantics.
+
+Verification of the exclusive-end correction source tree (2026-10-10):
+- Before correction, `progress-period-boundary.test.ts`: three failures
+  (leaked rows, PR count 4 vs 2, working load 40 vs 20) and one passing case.
+- After correction, the four-test PostgreSQL reproduction passes; the full
+  integration run also includes the strengthened partial-week average check.
+- Targeted Application unit suites: 3 files, 53 tests passed, including six
+  start/end forwarding cases on both sides of Monday UTC.
+- `npm test`: 216 files, 2,969 tests passed.
+- `npm run test:integration`: 49 files, 491 PostgreSQL tests passed, including
+  the existing bounded-statement and capacity regressions.
+- `npm run typecheck` and `npm run lint`: exit 0.
+- `npm run build -- --webpack`: exit 0, all 13 static pages generated.
 - `git diff --check`: exit 0 for the correction diff.

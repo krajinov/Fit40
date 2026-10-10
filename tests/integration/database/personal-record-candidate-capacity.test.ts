@@ -243,8 +243,7 @@ describe('personal record repository — uncapped candidate collection', () => {
 
     const sessions = await trainingHistoryRepository.listCompletedSessionsSince(
       owner(),
-      new Date(0),
-    );
+      new Date(0), new Date('9999-01-01T00:00:00.000Z'));
     const folded = foldPersonalRecords(sessions);
     if (!folded.ok) throw new Error(folded.error.message);
     expect(sessions).toHaveLength(SESSION_COUNT);

@@ -282,20 +282,21 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
    * Deliberately shares the display window's row projection and set hydration —
    * same ownership/completed/performed-exercise filters, same ≥1-logged-set
    * rule, same batched hydration — and differs only in its `since` predicate
-   * and its ordering. `since` is the only bound: the comparison is scoped to a
-   * period, so a display limit must never truncate it.
+   * and its ordering. `[since, before)` scopes the comparison to the request
+   * period; a display limit must never truncate it.
    */
   async listCompletedExerciseOccurrencesSince(
     userId: UserId,
     exerciseId: ExerciseId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
     const occurrenceRows = await this.selectOccurrenceRows({
       userId,
       exerciseId,
       // `since` is INCLUSIVE: an occurrence completed exactly at the period's
-      // start belongs to the period (`[since, …)`).
-      extraFilter: gte(workoutSessions.completedAt, since),
+      // start belongs to the period; `before` is EXCLUSIVE.
+      extraFilter: and(gte(workoutSessions.completedAt, since), lt(workoutSessions.completedAt, before)),
       orderBy: [
         asc(workoutSessions.completedAt),
         asc(workoutSessions.startedAt),
@@ -677,7 +678,8 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
    * Query strategy — two statements for the whole window, never one per
    * session:
    * - Q1 selects the window's sessions (ownership, completed-only and the
-   *   inclusive `since` bound are structural filters; no cap, because the
+   *   inclusive `since` and exclusive `before` bounds are structural filters;
+   *   no cap, because the
    *   caller aggregates the whole window) ordered by the history recency
    *   ladder. Only the id and completion instant are projected.
    * - Q2 reads exactly those sessions' raw set facts in one batch, with one
@@ -688,6 +690,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
   async listProgressSessionActivity(
     userId: UserId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<ProgressSessionActivityEntry>> {
     const rows: ReadonlyArray<ProgressSessionRow> = await this.db
       .select({
@@ -700,6 +703,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
           eq(workoutSessions.userId, userId),
           isNotNull(workoutSessions.completedAt),
           gte(workoutSessions.completedAt, since),
+          lt(workoutSessions.completedAt, before),
         ),
       )
       .orderBy(
@@ -739,7 +743,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
   }
   /**
    * M18 progress PR-event candidates: the user's completed sessions with
-   * `completedAt >= since`, fully hydrated (docs/training-progress.md §8.1–§8.2).
+   * `since <= completedAt < before`, fully hydrated (docs/training-progress.md §8.1–§8.2).
    *
    * Query strategy — three statements when the window holds sessions, one when
    * it is empty, never one per session:
@@ -761,6 +765,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
   async listCompletedSessionsSince(
     userId: UserId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
     const rows: HistoryRow[] = await this.db
       .select({
@@ -776,6 +781,7 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
           eq(workoutSessions.userId, userId),
           isNotNull(workoutSessions.completedAt),
           gte(workoutSessions.completedAt, since),
+          lt(workoutSessions.completedAt, before),
         ),
       )
       .orderBy(

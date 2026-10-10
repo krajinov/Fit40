@@ -118,6 +118,15 @@ describe('GetTrainingProgressActivityUseCase — horizon and read bounds', () =>
     }
   });
 
+  it.each([
+    ['2026-09-27T23:59:59.999Z', '2026-06-29T00:00:00.000Z', '2026-09-28T00:00:00.000Z'],
+    ['2026-09-28T00:00:00.000Z', '2026-07-06T00:00:00.000Z', '2026-10-05T00:00:00.000Z'],
+  ])('forwards request period bounds for %s', async (instant, start, end) => {
+    const deps = makeDeps([]);
+    await deps.useCase.execute({ userId: 'user-a', now: new Date(instant) });
+    expect(deps.listProgress.mock.calls[0]?.slice(1)).toEqual([new Date(start), new Date(end)]);
+  });
+
   it('issues one bounded read bound by the oldest week start, and nothing else', async () => {
     const deps = makeDeps(HORIZON_ENTRIES);
 
@@ -127,6 +136,7 @@ describe('GetTrainingProgressActivityUseCase — horizon and read bounds', () =>
     const call = deps.listProgress.mock.calls[0];
     expect(String(call?.[0])).toBe('user-a');
     expect(call?.[1]?.toISOString()).toBe(OLDEST_WEEK_START);
+    expect(call?.[2]?.toISOString()).toBe('2026-09-28T00:00:00.000Z');
 
     // No other repository method is touched: the horizon is one window read.
     expect(deps.history.listCompletedSessions).not.toHaveBeenCalled();

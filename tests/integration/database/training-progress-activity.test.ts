@@ -335,8 +335,7 @@ describe('progress activity — external load matches the Domain oracle', () => 
 
     const rows = await trainingHistoryRepository.listProgressSessionActivity(
       userId(OWNER_A),
-      SINCE,
-    );
+      SINCE, new Date('2026-09-28T00:00:00.000Z'));
     const byId = new Map(rows.map((row) => [String(row.sessionId), row]));
 
     expect(rows).toHaveLength(5);
@@ -509,8 +508,7 @@ describe('progress activity — boundaries and scope', () => {
 
     const rows = await trainingHistoryRepository.listProgressSessionActivity(
       userId(OWNER_A),
-      SINCE,
-    );
+      SINCE, new Date('2026-09-28T00:00:00.000Z'));
 
     expect(rows.map((row) => String(row.sessionId))).toEqual(['pg-at-since']);
     expect(rows[0]?.externalLoadVolume).toBe(100);
@@ -573,8 +571,7 @@ describe('progress activity — boundaries and scope', () => {
 
     const before = await trainingHistoryRepository.listProgressSessionActivity(
       userId(OWNER_A),
-      SINCE,
-    );
+      SINCE, new Date('2026-09-28T00:00:00.000Z'));
 
     // An M17 not-performed fact for an occurrence that has NO session: the
     // user attested they did not train it. It is settlement truth, not
@@ -587,8 +584,7 @@ describe('progress activity — boundaries and scope', () => {
 
     const after = await trainingHistoryRepository.listProgressSessionActivity(
       userId(OWNER_A),
-      SINCE,
-    );
+      SINCE, new Date('2026-09-28T00:00:00.000Z'));
 
     expect(after.map((row) => String(row.sessionId))).toEqual([
       'pg-l-skipped',
@@ -642,14 +638,14 @@ describe('progress activity — bounded statements', () => {
 
     await withCountingRepository(async (repository, queries) => {
       // Warm up: a driver's first statement is its own type discovery.
-      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE);
+      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE, new Date('2026-09-28T00:00:00.000Z'));
 
       const beforeEmpty = queries.length;
-      await repository.listProgressSessionActivity(userId('user-progress-empty'), SINCE);
+      await repository.listProgressSessionActivity(userId('user-progress-empty'), SINCE, new Date('2026-09-28T00:00:00.000Z'));
       const emptyWindow = queries.length - beforeEmpty;
 
       const beforeOne = queries.length;
-      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE);
+      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE, new Date('2026-09-28T00:00:00.000Z'));
       const oneSession = queries.length - beforeOne;
 
       await saveAll(
@@ -670,7 +666,7 @@ describe('progress activity — bounded statements', () => {
       );
 
       const beforeMany = queries.length;
-      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE);
+      await repository.listProgressSessionActivity(userId(OWNER_A), SINCE, new Date('2026-09-28T00:00:00.000Z'));
       const threeSessions = queries.length - beforeMany;
 
       // An empty window is answered by Q1 alone; any window size costs exactly

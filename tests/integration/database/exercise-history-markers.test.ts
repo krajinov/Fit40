@@ -155,7 +155,7 @@ async function seedMarkerHistory(): Promise<void> {
 
 /** Every completed session, hydrated through the real history read port. */
 async function hydrateCompletedHistory(): Promise<ReadonlyArray<WorkoutSession>> {
-  return trainingHistoryRepository.listCompletedSessionsSince(userId(OWNER), new Date(0));
+  return trainingHistoryRepository.listCompletedSessionsSince(userId(OWNER), new Date(0), new Date('9999-01-01T00:00:00.000Z'));
 }
 
 /**

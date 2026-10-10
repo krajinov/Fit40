@@ -60,14 +60,14 @@ export class GetTrainingProgressActivityUseCase {
 
     const windows = listRecentTrainingWeekWindows(input.now, PROGRESS_HORIZON_WEEK_COUNT);
     const oldestWindow = requireItem(windows, 0, 'oldest week window');
+    const currentWindow = requireItem(windows, windows.length - 1, 'current week window');
 
-    // ONE bounded read for the whole horizon: `since` is the oldest window's
-    // start (inclusive) and is the only bound — no upper bound is needed
-    // because `completedAt` cannot exceed the clock that wrote it and the
-    // current window's end is a future instant (memo §5.3).
+    // ONE uncapped read over the request's [oldest start, current week end).
+    // The exclusive end remains the week's end, not the request instant.
     const activity = await this.historyRepository.listProgressSessionActivity(
       userIdResult.data,
       oldestWindow.weekStart,
+      currentWindow.weekEnd,
     );
 
     const summaries = summarizeProgressWeeks(activity, windows);

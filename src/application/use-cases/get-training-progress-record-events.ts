@@ -73,13 +73,15 @@ export class GetTrainingProgressRecordEventsUseCase {
 
     const windows = listRecentTrainingWeekWindows(input.now, PROGRESS_HORIZON_WEEK_COUNT);
     const oldestWindow = requireItem(windows, 0, 'oldest week window');
+    const currentWindow = requireItem(windows, windows.length - 1, 'current week window');
 
     // ONE bounded hydration read of the horizon's completed sessions
-    // (user-global, detached-inclusive). `since` is the only bound; a truncated
-    // read would silently under-count the period, so none exists.
+    // (user-global, detached-inclusive), with inclusive start and exclusive end.
+    // No display or candidate cap truncates the period.
     const sessions = await this.historyRepository.listCompletedSessionsSince(
       userId,
       oldestWindow.weekStart,
+      currentWindow.weekEnd,
     );
 
     const candidates: RecordCandidate[] = [];

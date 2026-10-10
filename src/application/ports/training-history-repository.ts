@@ -199,8 +199,8 @@ export interface TrainingHistoryRepository {
    * whose `limit` is a DISPLAY bound (the exercise-history screen shows at most
    * the newest 50). A comparison scoped to a period must never be truncated by
    * how many rows a screen happens to render, so this read has no page size,
-   * no top-K and no artificial ceiling: `since` is the only bound, and it is
-   * the caller's own period.
+   * no top-K and no artificial ceiling: `[since, before)` is the caller's
+   * own period.
    *
    * Contract (everything else matches `listCompletedExerciseOccurrences`):
    * - Scopes to sessions OWNED by the user, regardless of enrollment: detached
@@ -211,7 +211,7 @@ export interface TrainingHistoryRepository {
    *   occurrence belongs to the exercise actually trained (M12's attribution
    *   rule) and the authored exercise receives nothing.
    * - `since` is INCLUSIVE: an occurrence completed exactly at `since` belongs
-   *   to the period (`[since, …)`, the M18 week-window convention).
+   *   to the period; `before` is EXCLUSIVE (`[since, before)`).
    * - Ordered ascending by the M18 §7.2 comparison ladder — `completed_at`,
    *   `started_at`, session id, `exercise_order` — so `[0]` is the period's
    *   first and the last element its latest occurrence.
@@ -221,6 +221,7 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     exerciseId: ExerciseId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
 
   /**
@@ -320,7 +321,7 @@ export interface TrainingHistoryRepository {
   ): Promise<ReadonlyArray<CompletedSessionActivityEntry>>;
 
   /**
-   * Returns the user's completed sessions with `completedAt >= since` as the
+   * Returns the user's completed sessions with `since <= completedAt < before` as the
    * M18 Progress surface's lightweight activity projection — the
    * `listCompletedSessionActivity` contract family plus the session's
    * external-load fact.
@@ -331,7 +332,7 @@ export interface TrainingHistoryRepository {
    *   and counts; every program contributes to one user-global series.
    * - Completed sessions only; an in-progress session never appears.
    * - `since` is INCLUSIVE: a session completed exactly at `since` is
-   *   returned. It is the ONLY bound (no pagination, no cap), because the
+   *   returned; `before` is EXCLUSIVE. No pagination or cap applies, because the
    *   caller buckets and totals the whole window and a truncated read would
    *   silently under-count it.
    * - Ordering is the deterministic history recency ladder: `completedAt`
@@ -354,10 +355,11 @@ export interface TrainingHistoryRepository {
   listProgressSessionActivity(
     userId: UserId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<ProgressSessionActivityEntry>>;
 
   /**
-   * Returns the user's COMPLETED sessions with `completedAt >= since` as fully
+   * Returns the user's COMPLETED sessions with `since <= completedAt < before` as fully
    * hydrated aggregates — the M18 Progress horizon's PR-event candidate read
    * (docs/training-progress.md §8.1–§8.2).
    *
@@ -368,7 +370,7 @@ export interface TrainingHistoryRepository {
    * - Completed sessions only; an in-progress session never appears. The
    *   returned aggregates carry a non-null `completedAt` by construction
    *   (the established `CompletedWorkoutSession` type).
-   * - `since` is INCLUSIVE and is the ONLY bound: candidate origin is the
+   * - `since` is INCLUSIVE and `before` is EXCLUSIVE: candidate origin is the
    *   caller's horizon, while the prior-best evaluation stays user-global and
    *   exact — this read deliberately never truncates the candidate set with a
    *   page size, offset or top-K, because a truncated read would silently
@@ -386,6 +388,7 @@ export interface TrainingHistoryRepository {
   listCompletedSessionsSince(
     userId: UserId,
     since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<CompletedWorkoutSession>>;
 }
 

@@ -257,6 +257,15 @@ const SPLIT = 'ex-003';
 const SINCE = new Date(OLDEST_WEEK_START);
 
 describe('GetTrainingProgressRecordEventsUseCase — datasets D and E', () => {
+  it.each([
+    ['2026-09-27T23:59:59.999Z', '2026-06-29T00:00:00.000Z', '2026-09-28T00:00:00.000Z'],
+    ['2026-09-28T00:00:00.000Z', '2026-07-06T00:00:00.000Z', '2026-10-05T00:00:00.000Z'],
+  ])('forwards request period bounds for %s', async (instant, start, end) => {
+    const deps = makeDeps();
+    await deps.useCase.execute({ userId: 'user-a', now: new Date(instant) });
+    expect(deps.listSessions.mock.calls[0]?.slice(1)).toEqual([new Date(start), new Date(end)]);
+  });
+
   it('reports only in-horizon events, gated by user-global priors (D)', async () => {
     const deps = makeDeps();
     const early = session('d-22-w6', '2026-08-05T09:00:00.000Z', [
@@ -297,6 +306,7 @@ describe('GetTrainingProgressRecordEventsUseCase — datasets D and E', () => {
     expect(deps.listSessions).toHaveBeenCalledTimes(1);
     expect(String(deps.listSessions.mock.calls[0]?.[0])).toBe('user-a');
     expect(deps.listSessions.mock.calls[0]?.[1]).toEqual(SINCE);
+    expect(deps.listSessions.mock.calls[0]?.[2]).toEqual(new Date('2026-09-28T00:00:00.000Z'));
 
     // Every candidate reached ONE batched prior-best read — no cap, no page.
     expect(deps.findBestValuesBefore).toHaveBeenCalledTimes(1);

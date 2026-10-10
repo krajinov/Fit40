@@ -13,6 +13,12 @@
  * - Chart dots and accessible text entries key on occurrence identity
  *   (sessionId, exerciseOrder) — never completedAt — because one exercise
  *   can occur multiple times in one completed session.
+ * - Personal-record marks (M18 Slice 7) are stated in the TEXT list ("Personal
+ *   best: 32.5 kg") and only emphasized in the chart by a slightly larger dot:
+ *   the fact reaches this component precomputed, the SVG stays decoration, and
+ *   the mark never claims the plotted working load equals the record (memo
+ *   §8.6). A one-line legend explains the mark only when one is actually shown
+ *   — the screen never explains a marker it does not render (the M12 rule).
  */
 
 import type { ExerciseHistoryTrendView } from '@/features/history/exercise-history-view';
@@ -23,9 +29,12 @@ interface ExerciseHistoryTrendProps {
 
 /** Dot radius, in the same viewBox units as the view model's coordinates. */
 const POINT_RADIUS = 3;
+/** Extra viewBox units for a dot that marks a personal record. */
+const RECORD_RADIUS_BONUS = 1.5;
 
 export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
   const chartPoints = trend.chartPoints;
+  const hasRecordMark = trend.textPoints.some((point) => point.markerLabel !== null);
 
   return (
     <div>
@@ -51,8 +60,8 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
               key={point.key}
               cx={point.x}
               cy={point.y}
-              r={POINT_RADIUS}
-              fill="var(--chart-1)"
+              r={point.isRecord ? POINT_RADIUS + RECORD_RADIUS_BONUS : POINT_RADIUS}
+              fill={point.isRecord ? 'var(--accent-strong)' : 'var(--chart-1)'}
               vectorEffect="non-scaling-stroke"
             />
           ))}
@@ -64,9 +73,22 @@ export function ExerciseHistoryTrend({ trend }: ExerciseHistoryTrendProps) {
           <li key={point.key} className="flex items-baseline gap-2">
             <span className="text-ink-3">{point.completedAtLabel}</span>
             <span className="font-medium text-foreground">{point.loadLabel}</span>
+            {point.markerLabel !== null && (
+              <span className="text-xs font-semibold text-accent-strong">
+                {point.markerLabel}
+              </span>
+            )}
           </li>
         ))}
       </ol>
+
+      {hasRecordMark && (
+        <p className="mt-3 text-xs text-ink-3">
+          A personal best mark means that workout contains a set that established a new
+          heaviest-load record for this exercise at the time — not necessarily the load
+          plotted for that workout.
+        </p>
+      )}
 
       {trend.noExternalLoad && (
         <p className="text-sm text-ink-2">

@@ -10,11 +10,14 @@ const NAV_LINKS = [
   { href: '/programs', label: 'Programs' },
   { href: '/exercises', label: 'Exercises' },
   { href: '/history', label: 'History' },
+  { href: '/progress', label: 'Progress' },
 ] as const;
 
 /**
- * Desktop navigation links (locked design): Inter 15, active 600/ink,
- * inactive 500/ink-2. Client-only because active state needs usePathname.
+ * Desktop navigation links (locked design, extended by M18 with Progress):
+ * Inter 15, active 600/ink, inactive 500/ink-2. Client-only because active
+ * state needs usePathname. The mobile tab bar is deliberately unchanged — the
+ * Progress surface is reached from the dashboard there.
  */
 export function AppNavLinks() {
   const pathname = usePathname();

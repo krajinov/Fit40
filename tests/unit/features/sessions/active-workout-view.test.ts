@@ -135,7 +135,7 @@ function sessionDto(logs: WorkoutSessionDto['exerciseLogs']): WorkoutSessionDto 
     completedAt: null,
     version: 0,
     exerciseLogs: logs,
-    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
     // Skip-adjusted session totals are now consumed by the view layer
     // (M10 Slice 4) — neutral fixture values keep this mock minimal; the
     // dedicated progress tests cover the totals themselves.

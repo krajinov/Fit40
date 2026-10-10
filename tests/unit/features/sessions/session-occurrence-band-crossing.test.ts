@@ -200,7 +200,7 @@ function sessionWith(exerciseLogs: WorkoutSessionExerciseDto[]): WorkoutSessionD
     completedAt: null,
     version: 0,
     exerciseLogs,
-    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
     prescribedSets: exerciseLogs.length * 3,
     skippedExerciseCount: 0,
   };

@@ -83,7 +83,7 @@ function completedSession(): WorkoutSessionDto {
     completedAt: '2026-09-01T17:05:00.000Z',
     version: 1,
     exerciseLogs: [],
-    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+    metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
     prescribedSets: 0,
     skippedExerciseCount: 0,
   };

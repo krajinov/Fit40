@@ -7,6 +7,7 @@ import type {
   CompletedSessionContext,
   CompletedWorkoutSession,
   ProgressionHistoryPerformance,
+  ProgressSessionActivityEntry,
   TrainingHistoryCursor,
   TrainingHistoryEntry,
   TrainingHistoryPage,
@@ -14,6 +15,8 @@ import type {
   TrainingHistoryRepository,
   TrainingHistoryTotals,
 } from '@/application/ports/training-history-repository';
+import type { SetLog } from '@/domain/entities/workout-session';
+import { calculateLoggedSetMetrics } from '@/domain/services/session-metrics';
 import type { ExerciseId, UserId, WorkoutSessionId } from '@/domain/types/ids';
 
 import type { Database } from '../client';
@@ -21,7 +24,7 @@ import type { RecentPerformanceRow } from '../mappers/exercise-performance-mappe
 import { mapRecentCompletedExercisePerformances } from '../mappers/exercise-performance-mapper';
 import type { ExerciseOccurrenceRow } from '../mappers/exercise-occurrence-mapper';
 import { mapCompletedExerciseOccurrences } from '../mappers/exercise-occurrence-mapper';
-import { mapSessionRows, parseWorkoutSessionId } from '../mappers/session-mapper';
+import { mapSet, mapSessionRows, parseWorkoutSessionId } from '../mappers/session-mapper';
 import { exerciseLogs, setLogs, trainingPrograms, workoutSessions, workouts } from '../schema';
 
 type SessionRow = typeof workoutSessions.$inferSelect;
@@ -131,7 +134,15 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
     };
   }
 
-  private completedAtOf(session: SessionRow): Date {
+  /**
+   * The completion instant of a row that survived the completed-only filter.
+   *
+   * Structurally typed (just the two fields it reads) so every window read in
+   * this repository can reuse the guard without selecting columns it does not
+   * need; a null value that survived the filter is corrupt data, thrown
+   * rather than tolerated.
+   */
+  private completedAtOf(session: { readonly id: string; readonly completedAt: Date | null }): Date {
     if (session.completedAt === null) {
       throw new Error(
         `Corrupt data in workout_sessions (id=${session.id}): completed_at is null despite the completed-only filter`,
@@ -242,16 +253,80 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
    *   exercise_order DESC so two occurrences in one session order
    *   truthfully by position.
    * - Q2 batch-hydrates the sets of exactly the returned occurrences in
-   *   one query. Drizzle 0.45 has no row-value (tuple) `inArray`, so the
-   *   (session_id, exercise_order) pair filter is a typed OR-of-ANDs —
-   *   the same fully-typed expansion style as the keyset predicate.
+   *   one query with a single JSONB recordset of exact occurrence keys.
    */
   async listCompletedExerciseOccurrences(
     userId: UserId,
     exerciseId: ExerciseId,
     limit: number,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
-    const occurrenceRows: ExerciseOccurrenceRow[] = await this.db
+    const occurrenceRows = await this.selectOccurrenceRows({
+      userId,
+      exerciseId,
+      orderBy: [
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+        desc(exerciseLogs.exerciseOrder),
+      ],
+      limit,
+    });
+
+    return this.hydrateOccurrenceSets(occurrenceRows);
+  }
+
+  /**
+   * The user's period-scoped occurrences of one exercise, UNCAPPED, ordered
+   * ascending by the M18 §7.2 comparison ladder (M18 Slice 8).
+   *
+   * Deliberately shares the display window's row projection and set hydration —
+   * same ownership/completed/performed-exercise filters, same ≥1-logged-set
+   * rule, same batched hydration — and differs only in its `since` predicate
+   * and its ordering. `[since, before)` scopes the comparison to the request
+   * period; a display limit must never truncate it.
+   */
+  async listCompletedExerciseOccurrencesSince(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    since: Date,
+    before: Date,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
+    const occurrenceRows = await this.selectOccurrenceRows({
+      userId,
+      exerciseId,
+      // `since` is INCLUSIVE: an occurrence completed exactly at the period's
+      // start belongs to the period; `before` is EXCLUSIVE.
+      extraFilter: and(gte(workoutSessions.completedAt, since), lt(workoutSessions.completedAt, before)),
+      orderBy: [
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+        asc(exerciseLogs.exerciseOrder),
+      ],
+      limit: undefined,
+    });
+
+    return this.hydrateOccurrenceSets(occurrenceRows);
+  }
+
+  /**
+   * The occurrence-row projection both occurrence reads share: the same
+   * columns, joins and filters (user ownership, performed exercise id,
+   * completed-only, and the ≥1-logged-set EXISTS that keeps a skipped exercise
+   * out). Only the period predicate and the ordering differ, so they are the
+   * caller's inputs — the display window passes its limit, the period read
+   * passes none.
+   */
+  private async selectOccurrenceRows(input: {
+    readonly userId: UserId;
+    readonly exerciseId: ExerciseId;
+    /** ANDed onto the shared filters; undefined = no extra predicate. */
+    readonly extraFilter?: SQL;
+    readonly orderBy: ReadonlyArray<SQL>;
+    /** undefined = UNCAPPED (the period read's contract). */
+    readonly limit: number | undefined;
+  }): Promise<ExerciseOccurrenceRow[]> {
+    const rows = this.db
       .select({
         sessionId: workoutSessions.id,
         exerciseOrder: exerciseLogs.exerciseOrder,
@@ -271,9 +346,10 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
       .where(
         and(
-          eq(workoutSessions.userId, userId),
-          eq(exerciseLogs.exerciseId, exerciseId),
+          eq(workoutSessions.userId, input.userId),
+          eq(exerciseLogs.exerciseId, input.exerciseId),
           isNotNull(workoutSessions.completedAt),
+          input.extraFilter,
           // A skipped exercise (zero set logs) is not an occurrence.
           exists(
             this.db
@@ -288,14 +364,21 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
           ),
         ),
       )
-      .orderBy(
-        desc(workoutSessions.completedAt),
-        desc(workoutSessions.startedAt),
-        desc(workoutSessions.id),
-        desc(exerciseLogs.exerciseOrder),
-      )
-      .limit(limit);
+      .orderBy(...input.orderBy);
 
+    return input.limit === undefined ? await rows : await rows.limit(input.limit);
+  }
+
+  /**
+   * Batch-hydrates the logged sets of exactly the returned occurrences in one
+   * query and maps the rows to the port's projections. A single JSONB
+   * recordset preserves exact (session_id, exercise_order) keys without a
+   * growing parameter count or expression tree. An empty occurrence list
+   * answers without querying at all.
+   */
+  private async hydrateOccurrenceSets(
+    occurrenceRows: ReadonlyArray<ExerciseOccurrenceRow>,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>> {
     if (occurrenceRows.length === 0) {
       return [];
     }
@@ -304,14 +387,13 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       .select()
       .from(setLogs)
       .where(
-        or(
-          ...occurrenceRows.map((row) =>
-            and(
-              eq(setLogs.sessionId, row.sessionId),
-              eq(setLogs.exerciseOrder, row.exerciseOrder),
-            ),
-          ),
-        ),
+        sql`(${setLogs.sessionId}, ${setLogs.exerciseOrder}) in (
+          select session_id, exercise_order
+          from jsonb_to_recordset(${JSON.stringify(occurrenceRows.map((row) => ({
+            session_id: row.sessionId,
+            exercise_order: row.exerciseOrder,
+          })))}::jsonb) as occurrence(session_id text, exercise_order int)
+        )`,
       )
       .orderBy(asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
 
@@ -587,5 +669,140 @@ export class DrizzleTrainingHistoryRepository implements TrainingHistoryReposito
       loggedSets: setsBySession.get(row.session.id) ?? 0,
     }));
   }
+
+  /**
+   * M18 progress activity: the window's completed sessions with their logged
+   * set count and their external-load volume (`docs/training-progress.md`
+   * §4.1–§4.3, §6.3).
+   *
+   * Query strategy — two statements for the whole window, never one per
+   * session:
+   * - Q1 selects the window's sessions (ownership, completed-only and the
+   *   inclusive `since` and exclusive `before` bounds are structural filters;
+   *   no cap, because the
+   *   caller aggregates the whole window) ordered by the history recency
+   *   ladder. Only the id and completion instant are projected.
+   * - Q2 reads exactly those sessions' raw set facts in one batch, with one
+   *   JSONB parameter. Mapped Domain sets feed calculateLoggedSetMetrics,
+   *   shared by calculateSessionMetrics; SQL contains no volume arithmetic
+   *   or eligibility rule. No aggregate hydration or extra statements.
+   */
+  async listProgressSessionActivity(
+    userId: UserId,
+    since: Date,
+    before: Date,
+  ): Promise<ReadonlyArray<ProgressSessionActivityEntry>> {
+    const rows: ReadonlyArray<ProgressSessionRow> = await this.db
+      .select({
+        id: workoutSessions.id,
+        completedAt: workoutSessions.completedAt,
+      })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          gte(workoutSessions.completedAt, since),
+          lt(workoutSessions.completedAt, before),
+        ),
+      )
+      .orderBy(
+        desc(workoutSessions.completedAt),
+        desc(workoutSessions.startedAt),
+        desc(workoutSessions.id),
+      );
+
+    if (rows.length === 0) {
+      // No sessions, no aggregation query: an empty window is answered by Q1.
+      return [];
+    }
+
+    // Raw set facts in one statement; Domain owns eligibility and arithmetic.
+    // One JSON parameter also keeps the uncapped session window parameter-safe.
+    const setRows = await this.db.select().from(setLogs).where(
+      sql`${setLogs.sessionId} in (
+        select jsonb_array_elements_text(${JSON.stringify(rows.map((row) => row.id))}::jsonb)
+      )`,
+    ).orderBy(asc(setLogs.sessionId), asc(setLogs.exerciseOrder), asc(setLogs.setNumber));
+    const setsBySession = new Map<string, SetLog[]>();
+    for (const row of setRows) {
+      const sets = setsBySession.get(row.sessionId) ?? [];
+      sets.push(mapSet(row, 'progress session activity'));
+      setsBySession.set(row.sessionId, sets);
+    }
+
+    return rows.map((row) => {
+      const metrics = calculateLoggedSetMetrics(setsBySession.get(row.id) ?? []);
+      return {
+        sessionId: parseWorkoutSessionId(row.id, 'progress session activity'),
+        completedAt: this.completedAtOf(row),
+        loggedSets: metrics.totalSets,
+        externalLoadVolume: metrics.hasExternalLoad ? metrics.volume : null,
+      };
+    });
+  }
+  /**
+   * M18 progress PR-event candidates: the user's completed sessions with
+   * `since <= completedAt < before`, fully hydrated (docs/training-progress.md §8.1–§8.2).
+   *
+   * Query strategy — three statements when the window holds sessions, one when
+   * it is empty, never one per session:
+   * - Q1 selects the window's session rows (ownership, completed-only and the
+   *   inclusive `since` bound are structural filters; no cap anywhere) in the
+   *   ascending total ladder, together with the workout/program names.
+   * - Q2/Q3 batch-fetch the exercise logs and set logs of exactly those
+   *   sessions and reuse the shared aggregate hydration path, so the
+   *   `WorkoutSession` invariants are enforced exactly as in every other read.
+   *   The two joins exist solely so that shared path can be reused verbatim:
+   *   both are INNER joins on NOT NULL foreign keys, so they can never drop a
+   *   session row.
+   *
+   * The returned aggregates carry a non-null `completedAt` by construction (the
+   * shared completed-only narrowing), and the read never truncates the
+   * candidate set: prior-best evaluation is user-global and exact, so a page
+   * size, offset or top-K here would silently under-count the period's events.
+   */
+  async listCompletedSessionsSince(
+    userId: UserId,
+    since: Date,
+    before: Date,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>> {
+    const rows: HistoryRow[] = await this.db
+      .select({
+        session: workoutSessions,
+        workoutName: workouts.name,
+        programName: trainingPrograms.name,
+      })
+      .from(workoutSessions)
+      .innerJoin(workouts, eq(workoutSessions.workoutId, workouts.id))
+      .innerJoin(trainingPrograms, eq(workouts.programId, trainingPrograms.id))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          isNotNull(workoutSessions.completedAt),
+          gte(workoutSessions.completedAt, since),
+          lt(workoutSessions.completedAt, before),
+        ),
+      )
+      .orderBy(
+        asc(workoutSessions.completedAt),
+        asc(workoutSessions.startedAt),
+        asc(workoutSessions.id),
+      );
+
+    if (rows.length === 0) {
+      // No sessions, no hydration queries: an empty window is answered by Q1.
+      return [];
+    }
+
+    const entries = await this.hydratePage(rows);
+    return entries.map((entry) => entry.session);
+  }
+}
+
+/** The minimal session projection the M18 progress read needs. */
+interface ProgressSessionRow {
+  readonly id: string;
+  readonly completedAt: Date | null;
 }
 

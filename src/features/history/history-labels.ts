@@ -19,14 +19,29 @@ export function formatHistoryDate(isoTimestamp: string): string {
   }).format(new Date(isoTimestamp));
 }
 
+/** "Jun 2" — a concise UTC month and day for in-period comparisons. */
+export function formatHistoryMonthDay(isoTimestamp: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(isoTimestamp));
+}
+
 /** Formats a count with locale grouping, e.g. 1240 -> "1,240". */
 export function formatHistoryCount(value: number): string {
   return value.toLocaleString('en-US');
 }
 
-/** Formats a training-volume total in kilograms, e.g. "1,240 kg". */
-export function formatHistoryVolume(volumeKg: number): string {
-  return `${Math.round(volumeKg).toLocaleString('en-US')} kg`;
+/**
+ * Formats an external-load volume total, e.g. "1,240 kg × reps".
+ *
+ * The value is load × repetitions (the Domain's `reps × weightKg` sum), so the
+ * unit must say so (docs/training-progress.md §6.2) — plain "kg" would read as
+ * a mass or a strength figure. Rounding and en-US grouping are unchanged.
+ */
+export function formatHistoryVolume(volumeKgReps: number): string {
+  return `${Math.round(volumeKgReps).toLocaleString('en-US')} kg × reps`;
 }
 
 function withRpeSuffix(label: string, rpe: number | null): string {

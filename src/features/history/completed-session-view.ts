@@ -108,7 +108,7 @@ export interface CompletedSessionView {
   readonly contextLabel: string;
   readonly completedAtLabel: string;
   readonly elapsedLabel: string | null;
-  /** Joined non-zero metric segments, e.g. "14 sets · 106 reps · 3,510 kg". */
+  /** Joined non-zero metric segments, e.g. "14 sets · 106 reps · 3,510 kg × reps". */
   readonly metricsLineLabel: string;
   readonly entries: ReadonlyArray<CompletedSessionEntryView>;
   /**
@@ -216,7 +216,10 @@ export function toCompletedSessionView(
   const metricSegments = [
     `${formatHistoryCount(metrics.totalSets)} ${metrics.totalSets === 1 ? 'set' : 'sets'}`,
     metrics.totalReps > 0 ? `${formatHistoryCount(metrics.totalReps)} reps` : null,
-    metrics.volume > 0 ? formatHistoryVolume(metrics.volume) : null,
+    // Presence, not the summed value, decides the segment (docs/training-progress.md
+    // §6.3): a genuine `0 kg × reps` session still shows it, while a
+    // bodyweight-only or duration-only session shows none.
+    metrics.hasExternalLoad ? formatHistoryVolume(metrics.volume) : null,
   ].filter((segment): segment is string => segment !== null);
   const entries = session.entries.map((entry) => toEntryView(entry, recordKeys));
 

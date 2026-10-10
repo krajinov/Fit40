@@ -348,7 +348,7 @@ function historySessionDto(
     startedAt: '2026-02-15T10:00:00.000Z',
     completedAt: '2026-02-15T11:00:00.000Z',
     exerciseLogs: [],
-    metrics: { totalSets: 12, totalReps: 96, totalDurationSeconds: 0, volume: 4800 },
+    metrics: { totalSets: 12, totalReps: 96, totalDurationSeconds: 0, volume: 4800, hasExternalLoad: true },
     ...overrides,
   };
 }

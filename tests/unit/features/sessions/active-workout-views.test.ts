@@ -1124,6 +1124,7 @@ describe('active-workout-views / buildSessionProgress', () => {
       totalReps: 10,
       totalDurationSeconds: 0,
       volume: 500,
+      hasExternalLoad: true,
     };
     // The domain already excluded nothing here: 6 prescribed sets across both
     // non-skipped occurrences.
@@ -1154,6 +1155,7 @@ describe('active-workout-views / buildSessionProgress', () => {
         totalReps: 40,
         totalDurationSeconds: 0,
         volume: 2000,
+        hasExternalLoad: true,
       }, { prescribedSets: 3, skippedExerciseCount: 0 }),
     );
 
@@ -1168,6 +1170,7 @@ describe('active-workout-views / buildSessionProgress', () => {
         totalReps: 0,
         totalDurationSeconds: 0,
         volume: 0,
+        hasExternalLoad: false,
       }),
     );
 
@@ -1189,6 +1192,7 @@ describe('active-workout-views / buildSessionProgress', () => {
         totalReps: 0,
         totalDurationSeconds: 0,
         volume: 0,
+        hasExternalLoad: false,
       }, { prescribedSets: 4, skippedExerciseCount: 1 }),
     );
 

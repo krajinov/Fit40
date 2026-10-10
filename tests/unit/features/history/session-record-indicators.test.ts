@@ -66,7 +66,7 @@ function sessionDto(
     startedAt: '2026-01-01T10:00:00.000Z',
     completedAt: '2026-01-01T10:45:00.000Z',
     entries,
-    metrics: { totalSets: 3, totalReps: 30, totalDurationSeconds: 0, volume: 1550 },
+    metrics: { totalSets: 3, totalReps: 30, totalDurationSeconds: 0, volume: 1550, hasExternalLoad: true },
   };
 }
 

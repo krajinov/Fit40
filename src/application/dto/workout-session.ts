@@ -111,6 +111,8 @@ export interface WorkoutSessionMetricsDto {
   readonly totalReps: number;
   readonly totalDurationSeconds: number;
   readonly volume: number;
+  /** Domain-derived presence; true includes eligible 0 kg rep sets. */
+  readonly hasExternalLoad: boolean;
 }
 
 /**
@@ -265,6 +267,7 @@ export function toWorkoutSessionDto(session: WorkoutSession): WorkoutSessionDto 
       totalReps: metrics.totalReps,
       totalDurationSeconds: metrics.totalDurationSeconds,
       volume: metrics.volume,
+      hasExternalLoad: metrics.hasExternalLoad,
     },
     prescribedSets: totals.prescribedSets,
     skippedExerciseCount: totals.skippedOccurrences,

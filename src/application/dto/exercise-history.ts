@@ -17,6 +17,10 @@
  *   real load and is preserved; null weight means no external load.
  * - Entries are newest first (the port's recency ladder); `trend` is the
  *   chronological (oldest first) externally loaded subsequence.
+ * - `comparison` (M18 Slice 8) is its own period fact: the first and latest
+ *   ELIGIBLE working loads completed inside the 13-week horizon, over UNCAPPED
+ *   history. It is never derived from `entries`, `trend` or `isLimited` — the
+ *   50-occurrence display bound cannot change it (memo §7.3).
  * - `personalBests` (M12) is independent of both: the exercise's exact
  *   all-time records over ALL completed history, not just the bounded
  *   occurrence window rendered below them. They never feed the trend,
@@ -88,7 +92,65 @@ export interface ExerciseHistoryTrendPointDto {
   readonly exerciseOrder: number;
   readonly completedAt: string;
   readonly workingLoadKg: number;
+  /**
+   * The heaviest `max-load` value (kg) whose event this occurrence established,
+   * or null when it established none (M18 Slice 7, memo §8.6). It is the
+   * RECORD SET's load, which may exceed the plotted working load (the minimum
+   * across the occurrence's sets) — never a statement that the plotted point is
+   * the record. An event, never a current-best claim.
+   */
+  readonly recordKg: number | null;
 }
+
+/**
+ * One occurrence's resolved `max-load` marker, projected by the use case from
+ * the M12 event set. `recordKg` is the heaviest event value of that occurrence
+ * (events inside one occurrence are strictly increasing by set number, so the
+ * latest event is also the heaviest).
+ */
+export interface ExerciseHistoryRecordMarker {
+  readonly sessionId: string;
+  readonly exerciseOrder: number;
+  readonly recordKg: number;
+}
+
+/**
+ * The factual direction between the period's two compared loads (M18 Slice 8,
+ * memo §7.4). Presentation renders the word; it never derives it.
+ */
+export type ExerciseHistoryComparisonDirection = 'increased' | 'unchanged' | 'decreased';
+
+/** One compared load: the value in kilograms and the date it was produced. */
+export interface ExerciseHistoryLoadPointDto {
+  readonly loadKg: number;
+  /** ISO 8601 — non-null: compared occurrences belong to completed sessions. */
+  readonly completedAt: string;
+}
+
+/**
+ * The period's first-vs-latest working-load comparison, or the honest reason
+ * there is none (memo §7.5/§7.6). The compared case carries the two eligible
+ * observations — the ladder's FIRST and LATEST, never the lowest and highest
+ * loads — and the Direction fact as the Domain resolved it.
+ */
+export type ExerciseHistoryComparisonDto =
+  | {
+      readonly status: 'compared';
+      readonly first: ExerciseHistoryLoadPointDto;
+      readonly latest: ExerciseHistoryLoadPointDto;
+      readonly direction: ExerciseHistoryComparisonDirection;
+    }
+  | {
+      readonly status: 'insufficient';
+      /**
+       * `no_external_load`: the period holds occurrences, but none carried an
+       * external working load — the "no external load was logged" wording
+       * applies, not the ≥2-points one (memo §7.6).
+       * `fewer_than_two_points`: zero or one eligible loaded occurrence — the
+       * ≥2-points rule, stated as such (memo §7.5).
+       */
+      readonly reason: 'no_external_load' | 'fewer_than_two_points';
+    };
 
 /** Catalog summary of the exercise the history page is about. */
 export interface ExerciseHistoryExerciseDto {
@@ -110,6 +172,13 @@ export interface ExerciseHistoryDto {
   readonly exercise: ExerciseHistoryExerciseDto;
   readonly entries: ReadonlyArray<ExerciseHistoryEntryDto>;
   readonly trend: ReadonlyArray<ExerciseHistoryTrendPointDto>;
+  /**
+   * The period's first-vs-latest eligible working load (M18 Slice 8, memo §7),
+   * or the honest insufficient-data state. It is independent of `entries` and
+   * `trend`: the comparison is scoped to the 13-week horizon over UNCAPPED
+   * history, never to the bounded display window.
+   */
+  readonly comparison: ExerciseHistoryComparisonDto;
   /**
    * The exercise's exact current all-time personal bests (M12), one entry per
    * applicable metric, in the repository's deterministic order (metric
@@ -179,12 +248,26 @@ function hasExternalLoad(
  * embedded in the order the repository delivered them: this module renders
  * them next to the occurrence window without touching, sorting or deriving
  * anything about them.
+ *
+ * `recordMarkers` arrive already resolved (M18 Slice 7): the use case ran the
+ * M12 pipeline and projected the `max-load` events onto occurrence identities.
+ * This module only attaches the fact to the matching trend point — it detects
+ * nothing, compares nothing and never infers a record from the plotted values.
  */
 export function toExerciseHistoryDto(
   exercise: Exercise,
   occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
   personalBests: ReadonlyArray<PersonalBestDto>,
+  recordMarkers: ReadonlyArray<ExerciseHistoryRecordMarker>,
+  comparison: ExerciseHistoryComparisonDto,
 ): ExerciseHistoryDto {
+  const recordKgByOccurrence = new Map<string, number>(
+    recordMarkers.map((marker) => [
+      `${marker.sessionId}#${marker.exerciseOrder}`,
+      marker.recordKg,
+    ]),
+  );
+
   const entries: ExerciseHistoryEntryDto[] = occurrences.map((occurrence) => {
     const load = resolveOccurrenceWorkingLoad(occurrence.prescription, occurrence.sets);
     return {
@@ -206,6 +289,7 @@ export function toExerciseHistoryDto(
       exerciseOrder: entry.exerciseOrder,
       completedAt: entry.completedAt,
       workingLoadKg: entry.workingLoadKg,
+      recordKg: recordKgByOccurrence.get(`${entry.sessionId}#${entry.exerciseOrder}`) ?? null,
     }))
     .reverse();
 
@@ -218,6 +302,7 @@ export function toExerciseHistoryDto(
     },
     entries,
     trend,
+    comparison,
     personalBests,
     isLimited: occurrences.length >= EXERCISE_HISTORY_OCCURRENCE_LIMIT,
   };

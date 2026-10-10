@@ -20,6 +20,12 @@
  * - Trend points key on occurrence identity (sessionId, exerciseOrder) —
  *   never completedAt — because one exercise can occur multiple times in
  *   one completed session.
+ * - A trend point carries a marker iff the occurrence established a `max-load`
+ *   record AT THE TIME (M18 Slice 7, memo §8.6). The fact arrives precomputed
+ *   from the Application layer; nothing here infers a record from the plotted
+ *   values, and the marker text names the record set's own load — which may
+ *   exceed the occurrence's plotted working load. Markers are historical
+ *   events, never current-best statements.
  * - Personal Bests (M12) render the repository's exact records for the
  *   metrics that exist, each linking to the session that OWNS the record.
  *   Records are all-time and independent of the bounded occurrence window:
@@ -29,6 +35,7 @@
  */
 
 import type {
+  ExerciseHistoryComparisonDto,
   ExerciseHistoryDto,
   ExerciseHistoryEntryDto,
   ExerciseHistoryTrendPointDto,
@@ -36,7 +43,11 @@ import type {
 import { EXERCISE_HISTORY_OCCURRENCE_LIMIT } from '@/application/dto/exercise-history';
 import { err, ok, type Result } from '@/domain/types/result';
 import { EQUIPMENT_LABELS } from '@/features/exercises/exercise-labels';
-import { formatHistoryDate, formatSessionSetLine } from '@/features/history/history-labels';
+import {
+  formatHistoryDate,
+  formatHistoryMonthDay,
+  formatSessionSetLine,
+} from '@/features/history/history-labels';
 import { toPersonalBestsView, type PersonalBestView } from '@/features/history/personal-best-view';
 import { getExerciseHistoryUseCase } from '@/features/history/services';
 import { formatPrescription } from '@/features/programs/program-labels';
@@ -63,6 +74,14 @@ export interface ExerciseHistoryTrendPointView {
   readonly key: string;
   readonly completedAtLabel: string;
   readonly loadLabel: string;
+  /**
+   * The accessible marker text — "Personal best: 32.5 kg" — when this
+   * occurrence established a `max-load` record at the time, else null
+   * (M18 Slice 7, memo §8.6). It names the RECORD SET's load, which may exceed
+   * the occurrence's plotted working load: the mark never claims the plotted
+   * value is the record. It is an event, never a current-best statement.
+   */
+  readonly markerLabel: string | null;
 }
 
 export interface ExerciseHistoryTrendView {
@@ -85,6 +104,12 @@ export interface ExerciseHistoryChartPointView {
   /** SVG y in viewBox units — smaller is higher load (y axis grows down). */
   readonly y: number;
   readonly loadLabel: string;
+  /**
+   * True when this occurrence established a `max-load` record (M18 Slice 7).
+   * Purely decorative emphasis: the accessible statement lives in the text
+   * list's `markerLabel`, and the SVG itself is `aria-hidden`.
+   */
+  readonly isRecord: boolean;
 }
 
 export interface ExerciseHistoryView {
@@ -94,12 +119,51 @@ export interface ExerciseHistoryView {
   readonly entries: ReadonlyArray<ExerciseHistoryEntryView>;
   readonly trend: ExerciseHistoryTrendView | null;
   /**
+   * The period's first-vs-latest working-load sentence (M18 Slice 8, memo §7):
+   * the factual line when the horizon holds two eligible loaded occurrences, or
+   * the honest reason it does not. A period fact — it is never derived from the
+   * displayed window.
+   */
+  readonly comparison: ExerciseHistoryComparisonView;
+  /**
    * Current all-time personal bests, one entry per applicable metric (M12).
    * Empty when the exercise has no eligible completed record history — a valid
    * state the screen renders neutrally, never as an error.
    */
   readonly personalBests: ReadonlyArray<PersonalBestView>;
 }
+
+/** The single sentence the comparison area renders, already decided. */
+export interface ExerciseHistoryComparisonView {
+  /**
+   * "Working load in the last 13 weeks: 20 kg (Jun 2) → 22.5 kg (Sep 8),
+   * increased" (memo §7.4 — the direction word comes from the DTO), or the
+   * §7.5/§7.6 insufficiency note.
+   */
+  readonly text: string;
+  /** True when `text` explains why no comparison renders, rather than being one. */
+  readonly isNote: boolean;
+}
+
+/**
+ * The §7.4 locked prefix. The comparison is period-scoped by construction (the
+ * Application read the horizon's occurrences), so the wording states its period.
+ */
+const WORKING_LOAD_COMPARISON_PREFIX = 'Working load in the last 13 weeks';
+
+/**
+ * §7.5 (locked): fewer than two eligible loaded occurrences in the horizon —
+ * one point never draws a slope.
+ */
+export const NOT_ENOUGH_LOADED_WORKOUTS_NOTE =
+  'Not enough loaded workouts of this exercise in the last 13 weeks to compare.';
+
+/**
+ * §7.6: the period holds occurrences but none carried an external load, so the
+ * "no external load was logged" wording applies instead of the ≥2-points one.
+ */
+export const NO_EXTERNAL_LOAD_IN_PERIOD_NOTE =
+  'No external load was logged for this exercise in the last 13 weeks.';
 
 export interface ExerciseHistoryViewError {
   readonly code: 'INVALID_INPUT' | 'EXERCISE_NOT_FOUND';
@@ -131,6 +195,7 @@ function toChartPoints(
     // values are viewBox units — the component renders them unchanged.
     y: loadSpan === 0 ? pad + plotSize / 2 : pad + (1 - (point.workingLoadKg - minLoad) / loadSpan) * plotSize,
     loadLabel: formatKg(point.workingLoadKg),
+    isRecord: point.recordKg !== null,
   }));
 }
 
@@ -145,6 +210,32 @@ function toEntryView(entry: ExerciseHistoryEntryDto): ExerciseHistoryEntryView {
     setLines: entry.sets.map((set) => formatSessionSetLine(set)),
     workingLoadLabel:
       entry.workingLoadKg === null ? null : `Working load ${formatKg(entry.workingLoadKg)}`,
+  };
+}
+
+/**
+ * Pure DTO → view-model mapping for the period's first-vs-latest working load.
+ * The direction word is the DTO's own ('increased' / 'unchanged' / 'decreased')
+ * — never recomputed, never reworded into a strength or quality claim.
+ */
+export function toComparisonView(
+  comparison: ExerciseHistoryComparisonDto,
+): ExerciseHistoryComparisonView {
+  if (comparison.status === 'insufficient') {
+    return {
+      text:
+        comparison.reason === 'no_external_load'
+          ? NO_EXTERNAL_LOAD_IN_PERIOD_NOTE
+          : NOT_ENOUGH_LOADED_WORKOUTS_NOTE,
+      isNote: true,
+    };
+  }
+
+  const first = `${formatKg(comparison.first.loadKg)} (${formatHistoryMonthDay(comparison.first.completedAt)})`;
+  const latest = `${formatKg(comparison.latest.loadKg)} (${formatHistoryMonthDay(comparison.latest.completedAt)})`;
+  return {
+    text: `${WORKING_LOAD_COMPARISON_PREFIX}: ${first} → ${latest}, ${comparison.direction}`,
+    isNote: false,
   };
 }
 
@@ -166,6 +257,8 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
         key: `${point.sessionId}#${point.exerciseOrder}`,
         completedAtLabel: formatHistoryDate(point.completedAt),
         loadLabel: formatKg(point.workingLoadKg),
+        markerLabel:
+          point.recordKg === null ? null : `Personal best: ${formatKg(point.recordKg)}`,
       })),
       noExternalLoad: dto.trend.length === 0,
     };
@@ -182,21 +275,23 @@ export function toExerciseHistoryView(dto: ExerciseHistoryDto): ExerciseHistoryV
       : `${dto.entries.length} ${dto.entries.length === 1 ? 'occurrence' : 'occurrences'}`,
     entries,
     trend,
+    comparison: toComparisonView(dto.comparison),
     personalBests: toPersonalBestsView(dto.personalBests),
   };
 }
 
 /**
- * Builds the per-exercise history view for one authenticated user.
- * EXERCISE_NOT_FOUND addresses an unknown slug — the route renders 404. A
- * known exercise with no history is NOT an error: the view carries empty
- * entries and the screen renders its empty state.
+ * Builds the per-exercise history view for one authenticated user at one
+ * request clock. EXERCISE_NOT_FOUND addresses an unknown slug — the route
+ * renders 404. A known exercise with no history is NOT an error: the view
+ * carries empty entries and the screen renders its empty state.
  */
 export async function buildExerciseHistoryView(
   userId: string,
   slug: string,
+  now: Date,
 ): Promise<Result<ExerciseHistoryView, ExerciseHistoryViewError>> {
-  const result = await getExerciseHistoryUseCase.execute({ userId, slug });
+  const result = await getExerciseHistoryUseCase.execute({ userId, slug, now });
   if (!result.ok) {
     return err({ code: result.error.code, message: result.error.message });
   }

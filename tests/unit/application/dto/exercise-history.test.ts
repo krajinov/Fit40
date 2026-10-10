@@ -23,6 +23,16 @@ import { Difficulty, EquipmentType, MovementPattern, MuscleGroup } from '@/domai
 import { createWorkoutSessionId } from '@/domain/types/ids';
 import { createRepScheme } from '@/domain/value-objects/rep-prescription';
 
+/**
+ * The "no comparison" DTO state: the exercise's fixtures predate any period, so
+ * the mapping tests that are not about the comparison (M18 Slice 8) pass this
+ * and assert that it is embedded unchanged.
+ */
+const INSUFFICIENT_COMPARISON = {
+  status: 'insufficient',
+  reason: 'fewer_than_two_points',
+} as const;
+
 function makeExercise() {
   const result = createExercise({
     id: 'ex-002',
@@ -72,6 +82,7 @@ function occurrence(input: {
   return {
     sessionId,
     exerciseOrder: input.exerciseOrder,
+    startedAt: new Date('2026-02-15T10:00:00Z'),
     completedAt: new Date('2026-02-15T11:00:00Z'),
     programName: 'Fit40 Beginner Strength',
     workoutName: 'Full Body A',
@@ -92,6 +103,8 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
         occurrence({ sessionId: 'session-dup', exerciseOrder: 2, weightKg: 44 }),
       ],
       [],
+      [],
+      INSUFFICIENT_COMPARISON,
     );
 
     // Both occurrences survive into the trend (chronological: newest-first
@@ -115,6 +128,8 @@ describe('toExerciseHistoryDto — trend occurrence identity', () => {
         occurrence({ sessionId: 'session-b', exerciseOrder: 1, weightKg: 52.5 }),
       ],
       [],
+      [],
+      INSUFFICIENT_COMPARISON,
     );
 
     const keys = dto.trend.map((point) => `${point.sessionId}#${point.exerciseOrder}`);
@@ -140,6 +155,8 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
       exercise,
       [occurrence({ sessionId: 'session-new', exerciseOrder: 1, weightKg: 30 })],
       personalBests,
+      [],
+      INSUFFICIENT_COMPARISON,
     );
 
     expect(dto.personalBests).toEqual(personalBests);
@@ -149,7 +166,7 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
   });
 
   it('keeps an empty record list empty', () => {
-    const dto = toExerciseHistoryDto(exercise, [], []);
+    const dto = toExerciseHistoryDto(exercise, [], [], [], INSUFFICIENT_COMPARISON);
 
     expect(dto.personalBests).toEqual([]);
   });
@@ -169,6 +186,8 @@ describe('toExerciseHistoryDto — personal bests (M12)', () => {
           completedAt: '2026-03-01T11:00:00Z',
         },
       ],
+      [],
+      INSUFFICIENT_COMPARISON,
     );
 
     expect(dto.trend.map((point) => point.sessionId)).toEqual(['session-new']);

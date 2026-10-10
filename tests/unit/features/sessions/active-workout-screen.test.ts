@@ -251,7 +251,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
         log(2, 'ex-a', [repSet(1, 10, 40)]),
         log(3, 'ex-c', []),
       ],
-      metrics: { totalSets: 3, totalReps: 30, totalDurationSeconds: 0, volume: 140 },
+      metrics: { totalSets: 3, totalReps: 30, totalDurationSeconds: 0, volume: 140, hasExternalLoad: true },
       prescribedSets: 9,
       skippedExerciseCount: 0,
     };
@@ -286,7 +286,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
         log(2, 'ex-a', [repSet(1, 10, 40)]),
         log(3, 'ex-c', []),
       ],
-      metrics: { totalSets: 4, totalReps: 40, totalDurationSeconds: 0, volume: 190 },
+      metrics: { totalSets: 4, totalReps: 40, totalDurationSeconds: 0, volume: 190, hasExternalLoad: true },
       prescribedSets: 9,
       skippedExerciseCount: 0,
     };
@@ -333,7 +333,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
           substitutionEligibility: { blockedBy: null, canRestore: true },
         }),
       ],
-      metrics: { totalSets: 1, totalReps: 10, totalDurationSeconds: 0, volume: 40 },
+      metrics: { totalSets: 1, totalReps: 10, totalDurationSeconds: 0, volume: 40, hasExternalLoad: true },
       prescribedSets: 6,
       skippedExerciseCount: 1,
     };
@@ -368,7 +368,7 @@ describe('ActiveWorkoutScreen / canonical reorder consumption (M10 Slice 6)', ()
         log(2, 'ex-a', []),
         log(3, 'ex-c', []),
       ],
-      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
       prescribedSets: 9,
       skippedExerciseCount: 0,
     };
@@ -417,7 +417,7 @@ describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #
           adjustmentEligibility: eligibility(true, true, false),
         }),
       ],
-      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
       prescribedSets: 6,
       skippedExerciseCount: 1,
     };
@@ -463,7 +463,7 @@ describe('ActiveWorkoutScreen / canonical render order with a skipped tail (PR #
           adjustmentEligibility: eligibility(false, true, false, 'logged-sets'),
         }),
       ],
-      metrics: { totalSets: 4, totalReps: 40, totalDurationSeconds: 0, volume: 190 },
+      metrics: { totalSets: 4, totalReps: 40, totalDurationSeconds: 0, volume: 190, hasExternalLoad: true },
       prescribedSets: 9,
       skippedExerciseCount: 0,
     };
@@ -488,7 +488,7 @@ describe('ActiveWorkoutScreen / M14 program-complete callout placement', () => {
       completedAt: null,
       version: 0,
       exerciseLogs: [],
-      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0 },
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
       prescribedSets: 0,
       skippedExerciseCount: 0,
     };

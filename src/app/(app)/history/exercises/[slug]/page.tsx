@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { PageContainer } from '@/components/shared/PageContainer';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { getCurrentUser, requireUser } from '@/features/auth/current-user';
+import { ExerciseHistoryLoadComparison } from '@/features/history/components/ExerciseHistoryLoadComparison';
 import { ExerciseHistoryOccurrenceList } from '@/features/history/components/ExerciseHistoryOccurrenceList';
 import { ExerciseHistoryTrend } from '@/features/history/components/ExerciseHistoryTrend';
 import { ExercisePersonalBests } from '@/features/history/components/ExercisePersonalBests';
@@ -21,11 +22,21 @@ interface ExerciseHistoryPageProps {
 /**
  * Request-scoped dedup of the exercise-history build: generateMetadata and
  * the page render both need the same view for the same (userId, slug), and
- * without cache() the repository read would run twice per request.
- * React's cache() is per-request only — nothing is cached across requests —
- * and the key is the full argument pair (authenticated userId + slug).
+ * without cache() the repository read would run twice per request. React's
+ * cache() is per-request only — nothing is cached across requests — and the key
+ * is the full argument tuple (authenticated userId + slug + clock).
  */
 const exerciseHistoryView = cache(buildExerciseHistoryView);
+
+/**
+ * The route's single request clock (M18 Slice 8, memo invariant 7).
+ *
+ * The view carries the comparison's 13-week horizon, so its cache key includes
+ * the clock — and a fresh `new Date()` per call would defeat the dedup above
+ * (two reads per request). Caching the clock itself makes one instant serve the
+ * whole request, exactly as `Date.now()` is called once per request elsewhere.
+ */
+const requestNow = cache((): Date => new Date());
 
 export async function generateMetadata({
   params,
@@ -40,7 +51,7 @@ export async function generateMetadata({
     return { title: 'Exercise history' };
   }
 
-  const viewResult = await exerciseHistoryView(user.id, parsed.data.slug);
+  const viewResult = await exerciseHistoryView(user.id, parsed.data.slug, requestNow());
   return {
     title: viewResult.ok ? `${viewResult.data.heading} history` : 'Exercise history',
   };
@@ -59,7 +70,11 @@ export default async function ExerciseHistoryPage({ params }: ExerciseHistoryPag
   // URL — so history can only ever be the viewer's own.
   const user = await requireUser(`/history/exercises/${paramsResult.data.slug}`);
 
-  const viewResult = await exerciseHistoryView(user.id, paramsResult.data.slug);
+  const viewResult = await exerciseHistoryView(
+    user.id,
+    paramsResult.data.slug,
+    requestNow(),
+  );
   // EXERCISE_NOT_FOUND addresses an unknown slug — a 404. A known exercise
   // with no user history is NOT an error: the view carries empty entries.
   if (!viewResult.ok) {
@@ -117,6 +132,7 @@ export default async function ExerciseHistoryPage({ params }: ExerciseHistoryPag
               title="Working-load trend"
             >
               <ExerciseHistoryTrend trend={view.trend} />
+              <ExerciseHistoryLoadComparison comparison={view.comparison} />
             </SectionCard>
           )}
 

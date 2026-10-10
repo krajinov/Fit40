@@ -215,6 +215,13 @@ function historySession(spec: {
 const OWNER_A = 'user-hist-a';
 const OWNER_B = 'user-hist-b';
 
+/**
+ * The request clock for the exercise-history comparison (M18 Slice 8). These
+ * fixtures live in 2025, so every period is empty unless a test says otherwise;
+ * the comparison tests below seed their own in-horizon occurrences.
+ */
+const HISTORY_NOW = new Date('2026-09-24T10:00:00.000Z');
+
 const listUseCase = new ListTrainingHistoryUseCase(trainingHistoryRepository);
 const totalsUseCase = new GetTrainingTotalsUseCase(trainingHistoryRepository);
 const detailUseCase = new GetCompletedSessionUseCase(
@@ -603,6 +610,7 @@ describe('training history — hydration and metrics mapping', () => {
       totalReps: 18,
       totalDurationSeconds: 30,
       volume: 10 * 40 + 8 * 45,
+      hasExternalLoad: true,
     });
     expect(dto?.exerciseLogs.map((log) => log.order)).toEqual([1, 2]);
     const first = dto?.exerciseLogs[0];
@@ -923,6 +931,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'push-up',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -935,6 +944,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'not-a-real-exercise',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -980,6 +990,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -990,19 +1001,22 @@ describe('training history — per-exercise occurrences', () => {
     expect(result.data.entries[0]?.workingLoadKg).toBe(22.5);
     expect(result.data.entries[1]?.workingLoadKg).toBe(20);
     // Trend is chronological (oldest first) over the loaded occurrences,
-    // each point carrying its (sessionId, exerciseOrder) identity.
+    // each point carrying its (sessionId, exerciseOrder) identity and — since
+    // both are first exposures in this fixture — its max-load record marker.
     expect(result.data.trend).toEqual([
       {
         sessionId: 'session-occ-old',
         exerciseOrder: 1,
         completedAt: '2025-01-06T11:00:00.000Z',
         workingLoadKg: 20,
+        recordKg: 20,
       },
       {
         sessionId: 'session-occ-new',
         exerciseOrder: 1,
         completedAt: '2025-02-03T11:00:00.000Z',
         workingLoadKg: 22.5,
+        recordKg: 22.5,
       },
     ]);
   });
@@ -1026,12 +1040,12 @@ describe('training history — per-exercise occurrences', () => {
       }),
     );
 
-    const forA = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'bodyweight-squat' });
+    const forA = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'bodyweight-squat', now: HISTORY_NOW });
     expect(forA.ok).toBe(true);
     if (!forA.ok) return;
     expect(forA.data.entries.map((entry) => entry.sessionId)).toEqual(['session-occ-a']);
 
-    const forB = await exerciseHistoryUseCase.execute({ userId: OWNER_B, slug: 'bodyweight-squat' });
+    const forB = await exerciseHistoryUseCase.execute({ userId: OWNER_B, slug: 'bodyweight-squat', now: HISTORY_NOW });
     expect(forB.ok).toBe(true);
     if (!forB.ok) return;
     expect(forB.data.entries.map((entry) => entry.sessionId)).toEqual(['session-occ-b']);
@@ -1052,6 +1066,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'bodyweight-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1077,6 +1092,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'bodyweight-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1109,6 +1125,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1130,6 +1147,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1140,6 +1158,9 @@ describe('training history — per-exercise occurrences', () => {
         exerciseOrder: 1,
         completedAt: '2025-01-06T11:00:00.000Z',
         workingLoadKg: 0,
+        // A logged 0 kg is a real external load: an eligible first exposure,
+        // so it is both the working load and the record value.
+        recordKg: 0,
       },
     ]);
   });
@@ -1165,6 +1186,7 @@ describe('training history — per-exercise occurrences', () => {
     const result = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'bodyweight-squat',
+      now: HISTORY_NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1207,6 +1229,7 @@ describe('training history — per-exercise occurrences', () => {
     const performed = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'dumbbell-bench-press',
+      now: HISTORY_NOW,
     });
     expect(performed.ok).toBe(true);
     if (!performed.ok) return;
@@ -1219,6 +1242,7 @@ describe('training history — per-exercise occurrences', () => {
     const authored = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(authored.ok).toBe(true);
     if (!authored.ok) return;
@@ -1253,6 +1277,7 @@ describe('training history — per-exercise occurrences', () => {
     const performed = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'dumbbell-bench-press',
+      now: HISTORY_NOW,
     });
     expect(performed.ok).toBe(true);
     if (!performed.ok) return;
@@ -1265,6 +1290,7 @@ describe('training history — per-exercise occurrences', () => {
     const authored = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(authored.ok).toBe(true);
     if (!authored.ok) return;
@@ -1296,6 +1322,7 @@ describe('training history — per-exercise occurrences', () => {
     const performed = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'dumbbell-bench-press',
+      now: HISTORY_NOW,
     });
     expect(performed.ok).toBe(true);
     if (!performed.ok) return;
@@ -1306,6 +1333,7 @@ describe('training history — per-exercise occurrences', () => {
     const authored = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(authored.ok).toBe(true);
     if (!authored.ok) return;
@@ -1722,6 +1750,7 @@ describe('training history — progression performance windows', () => {
       const history = await exerciseHistoryUseCase.execute({
         userId: OWNER_A,
         slug: 'dumbbell-bench-press',
+        now: HISTORY_NOW,
       });
       expect(history.ok).toBe(true);
       if (!history.ok) return;
@@ -1737,6 +1766,7 @@ describe('training history — progression performance windows', () => {
       const authored = await exerciseHistoryUseCase.execute({
         userId: OWNER_A,
         slug: 'goblet-squat',
+        now: HISTORY_NOW,
       });
       expect(authored.ok).toBe(true);
       if (!authored.ok) return;
@@ -1845,6 +1875,7 @@ describe('training history — skipped and reordered occurrences (M10)', () => {
     const skippedHistory = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'dumbbell-bench-press',
+      now: HISTORY_NOW,
     });
     expect(skippedHistory.ok).toBe(true);
     if (!skippedHistory.ok) return;
@@ -1853,6 +1884,7 @@ describe('training history — skipped and reordered occurrences (M10)', () => {
     const genuineHistory = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'goblet-squat',
+      now: HISTORY_NOW,
     });
     expect(genuineHistory.ok).toBe(true);
     if (!genuineHistory.ok) return;
@@ -1935,6 +1967,7 @@ describe('training history — skipped and reordered occurrences (M10)', () => {
     const squatHistory = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'bodyweight-squat',
+      now: HISTORY_NOW,
     });
     expect(squatHistory.ok).toBe(true);
     if (!squatHistory.ok) return;
@@ -2017,7 +2050,7 @@ describe('training history — user-added occurrences (M11)', () => {
 
     // Per-exercise history keys on the PERFORMED id + set_logs existence; a
     // user-added occurrence is an ordinary occurrence there.
-    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug', now: HISTORY_NOW });
     expect(history.ok).toBe(true);
     if (!history.ok) return;
     expect(history.data.entries.map((entry) => [entry.sessionId, entry.exerciseOrder])).toEqual([
@@ -2049,7 +2082,7 @@ describe('training history — user-added occurrences (M11)', () => {
       }),
     );
 
-    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug', now: HISTORY_NOW });
     expect(history.ok).toBe(true);
     if (!history.ok) return;
     expect(history.data.entries).toEqual([]);
@@ -2075,7 +2108,7 @@ describe('training history — user-added occurrences (M11)', () => {
       }),
     );
 
-    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug', now: HISTORY_NOW });
     expect(history.ok).toBe(true);
     if (!history.ok) return;
     expect(history.data.entries).toEqual([]);
@@ -2112,13 +2145,14 @@ describe('training history — user-added occurrences (M11)', () => {
     const performed = await exerciseHistoryUseCase.execute({
       userId: OWNER_A,
       slug: 'one-arm-dumbbell-row',
+      now: HISTORY_NOW,
     });
     expect(performed.ok).toBe(true);
     if (!performed.ok) return;
     expect(performed.data.entries.map((entry) => entry.sessionId)).toEqual(['session-added-sub']);
 
     // The originally ADDED exercise gets no performance credit.
-    const authored = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug' });
+    const authored = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'dead-bug', now: HISTORY_NOW });
     expect(authored.ok).toBe(true);
     if (!authored.ok) return;
     expect(authored.data.entries).toEqual([]);
@@ -2151,7 +2185,7 @@ describe('training history — user-added occurrences (M11)', () => {
       }),
     );
 
-    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'goblet-squat' });
+    const history = await exerciseHistoryUseCase.execute({ userId: OWNER_A, slug: 'goblet-squat', now: HISTORY_NOW });
     expect(history.ok).toBe(true);
     if (!history.ok) return;
     // Identity is (sessionId, exerciseOrder): same session, orders 2 and 1.

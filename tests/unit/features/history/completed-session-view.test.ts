@@ -52,7 +52,7 @@ function sessionDto(overrides?: {
         },
       ],
     metrics:
-      overrides?.metrics ?? { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500 },
+      overrides?.metrics ?? { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500, hasExternalLoad: true },
   };
 }
 
@@ -71,7 +71,7 @@ describe('toCompletedSessionView', () => {
     expect(view.contextLabel).toBe('Fit40 Beginner Strength');
     expect(view.completedAtLabel).toBe('Jan 1, 2026');
     expect(view.elapsedLabel).toBe('45 min');
-    expect(view.metricsLineLabel).toBe('2 sets · 20 reps · 500 kg');
+    expect(view.metricsLineLabel).toBe('2 sets · 20 reps · 500 kg × reps');
   });
 
   it('omits elapsed time when the completedAt gap is not positive', () => {
@@ -147,10 +147,112 @@ describe('toCompletedSessionView', () => {
       },
     ];
     const view = toCompletedSessionView(
-      sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0 } }),
+      sessionDto({ entries, metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0, hasExternalLoad: false } }),
       [],
     );
     expect(view.metricsLineLabel).toBe('1 set');
+  });
+
+  it('renders a genuine 0 kg × reps segment when eligible sets sum to zero (C)', () => {
+    const entries: CompletedSessionDto['entries'] = [
+      {
+        authoredExerciseId: 'ex-001',
+        source: 'template',
+        performedExerciseId: 'ex-001',
+        isSubstituted: false,
+        isSkipped: false,
+        exerciseOrder: 1,
+        exerciseName: 'Goblet Squat',
+        authoredExerciseName: 'Goblet Squat',
+        exerciseSlug: 'goblet-squat',
+        equipment: 'kettlebell',
+        restSeconds: 90,
+        prescription: { type: 'reps', sets: 2, minReps: 8, maxReps: 10 },
+        sets: [
+          { type: 'reps', setNumber: 1, reps: 10, weightKg: 0, rpe: null },
+          { type: 'reps', setNumber: 2, reps: 10, weightKg: 0, rpe: null },
+        ],
+      },
+    ];
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries,
+        metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
+      }),
+      [],
+    );
+
+    expect(view.metricsLineLabel).toBe('2 sets · 20 reps · 0 kg × reps');
+  });
+
+  it('omits the volume segment for weighted timed work', () => {
+    const entries: CompletedSessionDto['entries'] = [
+      {
+        authoredExerciseId: 'ex-014',
+        source: 'template',
+        performedExerciseId: 'ex-014',
+        isSubstituted: false,
+        isSkipped: false,
+        exerciseOrder: 1,
+        exerciseName: 'Farmer Carry',
+        authoredExerciseName: 'Farmer Carry',
+        exerciseSlug: 'farmer-carry',
+        equipment: 'dumbbell',
+        restSeconds: 60,
+        prescription: { type: 'duration', sets: 3, seconds: 45 },
+        sets: [{ type: 'duration', setNumber: 1, durationSeconds: 45, weightKg: 10, rpe: null }],
+      },
+    ];
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries,
+        metrics: { totalSets: 1, totalReps: 0, totalDurationSeconds: 45, volume: 0, hasExternalLoad: false },
+      }),
+      [],
+    );
+
+    // Duration sets never yield volume, even when a weight was logged.
+    expect(view.metricsLineLabel).toBe('1 set');
+  });
+
+  it('omits the volume segment for bodyweight-only reps (B)', () => {
+    const entries: CompletedSessionDto['entries'] = [
+      {
+        authoredExerciseId: 'ex-007',
+        source: 'template',
+        performedExerciseId: 'ex-007',
+        isSubstituted: false,
+        isSkipped: false,
+        exerciseOrder: 1,
+        exerciseName: 'Push Up',
+        authoredExerciseName: 'Push Up',
+        exerciseSlug: 'push-up',
+        equipment: 'bodyweight',
+        restSeconds: 60,
+        prescription: { type: 'reps', sets: 3, minReps: 8, maxReps: 12 },
+        sets: [{ type: 'reps', setNumber: 1, reps: 12, weightKg: null, rpe: null }],
+      },
+    ];
+    const view = toCompletedSessionView(
+      sessionDto({
+        entries,
+        metrics: { totalSets: 1, totalReps: 12, totalDurationSeconds: 0, volume: 0, hasExternalLoad: false },
+      }),
+      [],
+    );
+
+    expect(view.metricsLineLabel).toBe('1 set · 12 reps');
+  });
+
+  it('trusts DTO presence rather than rescanning loaded sets', () => {
+    const hidden = toCompletedSessionView(sessionDto({
+      metrics: { totalSets: 2, totalReps: 20, totalDurationSeconds: 0, volume: 500, hasExternalLoad: false },
+    }), []);
+    expect(hidden.metricsLineLabel).not.toContain('kg × reps');
+    const shown = toCompletedSessionView(sessionDto({ entries: [],
+      metrics: { totalSets: 0, totalReps: 0, totalDurationSeconds: 0, volume: 0, hasExternalLoad: true },
+    }), []);
+    expect(shown.metricsLineLabel).toContain('0 kg × reps');
   });
 
   it('links a resolved catalog slug to the exercise history page', () => {

@@ -12,12 +12,14 @@ import type { ExerciseRepository } from '@/application/ports/exercise-repository
 import type { PersonalRecordRepository } from '@/application/ports/personal-record-repository';
 import type { Exercise } from '@/domain/entities/exercise';
 import type { SetLog } from '@/domain/entities/workout-session';
-import type { PersonalBest } from '@/domain/services/personal-records';
+import type { CandidatePriorBest, PersonalBest } from '@/domain/services/personal-records';
 import { RecordMetric } from '@/domain/services/personal-record-metrics';
+import type { RecordCandidate } from '@/domain/services/personal-record-metrics';
 import {
   createExerciseId,
   createUserId,
   createWorkoutSessionId,
+  type UserId,
 } from '@/domain/types/ids';
 import {
   Difficulty as DifficultyEnum,
@@ -32,6 +34,12 @@ function uid(v: string) {
   if (!r.ok) throw new Error(r.error.message);
   return r.data;
 }
+
+/**
+ * The request clock for the exercise-history comparison (M18 Slice 8): a
+ * Thursday, so the fixed 13-week horizon starts Monday 2026-06-29.
+ */
+const HISTORY_NOW = new Date('2026-09-24T10:00:00.000Z');
 
 function eid(v: string) {
   const r = createExerciseId(v);
@@ -108,6 +116,8 @@ function occurrence(
   return {
     sessionId: sid(sessionId),
     exerciseOrder,
+    // One hour of session wall-clock, so the ladder's second rung is real.
+    startedAt: new Date(new Date(completedAt).getTime() - 3_600_000),
     completedAt: new Date(completedAt),
     programName: 'Fit40 Beginner Strength',
     workoutName,
@@ -116,12 +126,23 @@ function occurrence(
   };
 }
 
-function makeHistoryRepo(occurrences: ReadonlyArray<CompletedExerciseOccurrence>) {
+function makeHistoryRepo(
+  occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
+  /**
+   * What the period read answers (M18 Slice 8). Defaults to "nothing completed
+   * in the 13-week horizon", which is the state every pre-Slice-8 test expects;
+   * comparison scenarios pass their own in-horizon occurrences.
+   */
+  periodOccurrences: ReadonlyArray<CompletedExerciseOccurrence> = [],
+) {
   return {
     listCompletedSessions: vi.fn(),
     listCompletedExerciseOccurrences: vi.fn().mockResolvedValue(occurrences),
+    listCompletedExerciseOccurrencesSince: vi.fn().mockResolvedValue(periodOccurrences),
     listRecentCompletedExercisePerformances: vi.fn(),
     listCompletedSessionActivity: vi.fn(),
+    listProgressSessionActivity: vi.fn(),
+    listCompletedSessionsSince: vi.fn(),
     getTotals: vi.fn(),
     findCompletedSessionById: vi.fn().mockResolvedValue(null),
   } satisfies TrainingHistoryRepository;
@@ -135,12 +156,44 @@ function makeExerciseRepo(exercise: Exercise | null) {
   } satisfies ExerciseRepository;
 }
 
-function makePersonalRecordRepo(bests: ReadonlyArray<PersonalBest>) {
+function makePersonalRecordRepo(
+  bests: ReadonlyArray<PersonalBest>,
+  /**
+   * The prior-best read (M18 Slice 7), defaulting to the port's own shape for
+   * "no eligible prior history": exactly one answer per candidate, all null —
+   * under which every logged set is a first-exposure event. A scenario that
+   * needs out-of-window priors supplies its own implementation.
+   */
+  findBestValuesBefore: PersonalRecordRepository['findBestValuesBefore'] = async (
+    _userId,
+    candidates,
+  ) => candidates.map((candidate) => ({ candidate, bestBefore: null })),
+) {
   return {
     findCurrentPersonalBests: vi.fn().mockResolvedValue(bests),
     findCurrentPersonalBestsSetBetween: vi.fn(),
-    findBestValuesBefore: vi.fn(),
+    findBestValuesBefore: vi.fn(findBestValuesBefore),
   } satisfies PersonalRecordRepository;
+}
+
+/** The logged-set identity of one candidate — what a prior-best stub keys on. */
+function setKey(candidate: RecordCandidate): string {
+  const { sessionId, exerciseOrder, setNumber } = candidate.position;
+  return `${sessionId}#${exerciseOrder}#${setNumber}`;
+}
+
+/**
+ * Prior bests keyed by the candidate's own logged set, so the stub is
+ * order-independent and the resolved events depend only on the scenario.
+ */
+function priorBestsAt(
+  bestBySet: ReadonlyMap<string, number | null>,
+): (userId: UserId, candidates: ReadonlyArray<RecordCandidate>) => Promise<CandidatePriorBest[]> {
+  return async (_userId, candidates) =>
+    candidates.map((candidate) => ({
+      candidate,
+      bestBefore: bestBySet.get(setKey(candidate)) ?? null,
+    }));
 }
 
 describe('GetExerciseHistoryUseCase', () => {
@@ -156,7 +209,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries).toEqual([]);
@@ -168,7 +221,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const historyRepo = makeHistoryRepo([]);
     const uc = new GetExerciseHistoryUseCase(historyRepo, makeExerciseRepo(null), makePersonalRecordRepo([]));
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise', now: HISTORY_NOW });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('EXERCISE_NOT_FOUND');
@@ -180,7 +233,7 @@ describe('GetExerciseHistoryUseCase', () => {
     const exerciseRepo = makeExerciseRepo(makeExercise('ex-001', 'goblet-squat'));
     const uc = new GetExerciseHistoryUseCase(historyRepo, exerciseRepo, makePersonalRecordRepo([]));
 
-    const result = await uc.execute({ userId: ' ', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: ' ', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INVALID_INPUT');
@@ -196,7 +249,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(historyRepo.listCompletedExerciseOccurrences).toHaveBeenCalledWith(
       uid('user-a'),
       eid('ex-001'),
@@ -220,7 +273,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries.map((entry) => entry.sessionId)).toEqual([
@@ -247,7 +300,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries[0]?.workingLoadKg).toBe(0);
@@ -268,7 +321,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries[0]?.workingLoadKg).toBeNull();
@@ -287,7 +340,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.entries[0]?.prescription).toEqual({
@@ -317,7 +370,7 @@ describe('GetExerciseHistoryUseCase', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.trend).toEqual([
@@ -326,12 +379,14 @@ describe('GetExerciseHistoryUseCase', () => {
         exerciseOrder: 1,
         completedAt: '2026-01-01T10:00:00.000Z',
         workingLoadKg: 50,
+        recordKg: 50,
       },
       {
         sessionId: 'session-new',
         exerciseOrder: 1,
         completedAt: '2026-03-01T10:00:00.000Z',
         workingLoadKg: 55,
+        recordKg: 55,
       },
     ]);
   });
@@ -368,7 +423,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       recordsRepo,
     );
 
-    await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
 
     expect(recordsRepo.findCurrentPersonalBests).toHaveBeenCalledWith(uid('user-a'), [
       eid('ex-007'),
@@ -386,7 +441,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       recordsRepo,
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -420,7 +475,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       makePersonalRecordRepo([]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -436,7 +491,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       recordsRepo,
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'unknown-exercise', now: HISTORY_NOW });
 
     expect(result.ok).toBe(false);
     expect(recordsRepo.findCurrentPersonalBests).not.toHaveBeenCalled();
@@ -450,7 +505,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       recordsRepo,
     );
 
-    const result = await uc.execute({ userId: ' ', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: ' ', slug: 'goblet-squat', now: HISTORY_NOW });
 
     expect(result.ok).toBe(false);
     expect(recordsRepo.findCurrentPersonalBests).not.toHaveBeenCalled();
@@ -468,7 +523,7 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
       makePersonalRecordRepo([personalBest({ value: 60 })]),
     );
 
-    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat' });
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -488,3 +543,445 @@ describe('GetExerciseHistoryUseCase — personal bests (M12)', () => {
   });
 });
 
+/**
+ * M18 Slice 7 — historical max-load PR markers on the exercise trend
+ * (`docs/training-progress.md` §8.6, acceptance datasets J and Q).
+ *
+ * The candidate extraction and the event resolution are the M12 pipeline
+ * verbatim; the stub supplies a scenario's prior bests, so what these tests
+ * observe is the REAL Domain strictness rule (strict-greater only), projected
+ * onto occurrence identities.
+ */
+describe('GetExerciseHistoryUseCase — max-load record markers (M18 Slice 7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function markers(priorBests: ReadonlyMap<string, number | null>) {
+    return makePersonalRecordRepo([], priorBestsAt(priorBests));
+  }
+
+  function useCaseFor(
+    occurrences: ReadonlyArray<CompletedExerciseOccurrence>,
+    recordsRepo: ReturnType<typeof makePersonalRecordRepo>,
+  ) {
+    return new GetExerciseHistoryUseCase(
+      makeHistoryRepo(occurrences),
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      recordsRepo,
+    );
+  }
+
+  it('dataset Q: an out-of-window prior gates 27.5 and the equal 30, so only 32.5 is marked', async () => {
+    const occurrences = [
+      occurrence('session-32.5', 1, '2026-09-01T10:00:00Z', [{ reps: 8, weightKg: 32.5 }]),
+      occurrence('session-30', 1, '2026-08-01T10:00:00Z', [{ reps: 8, weightKg: 30 }]),
+      occurrence('session-27.5', 1, '2026-07-01T10:00:00Z', [{ reps: 8, weightKg: 27.5 }]),
+    ];
+    // The exercise's all-time best before these workouts is 30 kg, logged
+    // outside the displayed window — invisible in the rows, decisive here.
+    const recordsRepo = markers(
+      new Map([
+        ['session-27.5#1#1', 30],
+        ['session-30#1#1', 30],
+        ['session-32.5#1#1', 30],
+      ]),
+    );
+    const uc = useCaseFor(occurrences, recordsRepo);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The trend is chronological (oldest → newest) and only the strictly
+    // greater 32.5 workout carries a record marker.
+    expect(result.data.trend.map((point) => point.workingLoadKg)).toEqual([27.5, 30, 32.5]);
+    expect(result.data.trend.map((point) => point.recordKg)).toEqual([null, null, 32.5]);
+  });
+
+  it('marks a first-ever eligible max-load occurrence (no prior history at all)', async () => {
+    const occurrences = [
+      occurrence('session-first', 1, '2026-09-01T10:00:00Z', [{ reps: 10, weightKg: 0 }]),
+    ];
+    const uc = useCaseFor(occurrences, markers(new Map()));
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // A logged 0 kg is a real external load, so it is an eligible first
+    // exposure — and a record.
+    expect(result.data.trend).toHaveLength(1);
+    expect(result.data.trend[0]?.recordKg).toBe(0);
+  });
+
+  it('never marks an unloaded occurrence, even when its own event is a first exposure', async () => {
+    const occurrences = [
+      occurrence('session-bodyweight', 1, '2026-09-01T10:00:00Z', [
+        { reps: 12, weightKg: null },
+      ]),
+      occurrence('session-duration', 1, '2026-08-01T10:00:00Z', [
+        { type: 'duration', durationSeconds: 45 },
+      ]),
+    ];
+    const recordsRepo = markers(new Map());
+    const uc = useCaseFor(occurrences, recordsRepo);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Both occurrences resolve as events (bodyweight-reps and duration), and
+    // neither may mark a trend point: those metrics have no externally loaded
+    // point to mark (§8.6). They produce no trend point at all.
+    const candidates = recordsRepo.findBestValuesBefore.mock.calls[0]?.[1] ?? [];
+    expect(candidates.map((candidate) => candidate.metric).sort()).toEqual([
+      'max-bodyweight-reps',
+      'max-duration',
+    ]);
+    expect(result.data.trend).toEqual([]);
+    expect(result.data.entries.every((entry) => entry.workingLoadKg === null)).toBe(true);
+  });
+
+  it('keeps multiple sets of one occurrence as ONE marker carrying the heaviest event', async () => {
+    const occurrences = [
+      occurrence('session-multi', 1, '2026-09-01T10:00:00Z', [
+        { reps: 8, weightKg: 30 },
+        { reps: 5, weightKg: 45 },
+      ]),
+    ];
+    // Both sets strictly exceed their priors, so both are events; they share
+    // one occurrence identity, which therefore carries the heaviest of them.
+    const uc = useCaseFor(
+      occurrences,
+      markers(
+        new Map([
+          ['session-multi#1#1', null],
+          ['session-multi#1#2', 30],
+        ]),
+      ),
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.trend).toHaveLength(1);
+    expect(result.data.trend[0]?.recordKg).toBe(45);
+    // The plotted working load stays the occurrence's own minimum — the marker
+    // carries the record set, never a rewritten plot.
+    expect(result.data.trend[0]?.workingLoadKg).toBe(30);
+  });
+
+  it('keys markers on (sessionId, exerciseOrder): two occurrences in one session stay distinct', async () => {
+    const occurrences = [
+      occurrence('session-dup', 2, '2026-09-01T10:00:00Z', [{ reps: 8, weightKg: 35 }]),
+      occurrence('session-dup', 1, '2026-09-01T10:00:00Z', [{ reps: 8, weightKg: 35 }]),
+    ];
+    // The later position repeats the earlier occurrence's value: equal is not
+    // strictly greater, so the earliest equal set keeps the record and only
+    // occurrence 1 is marked (M12 earliest-equal ownership) — even though both
+    // occurrences are the SAME exercise inside the SAME session.
+    const uc = useCaseFor(
+      occurrences,
+      markers(
+        new Map([
+          ['session-dup#1#1', null],
+          ['session-dup#2#1', 35],
+        ]),
+      ),
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.trend.map((point) => `${point.sessionId}#${point.exerciseOrder}`)).toEqual([
+      'session-dup#1',
+      'session-dup#2',
+    ]);
+    expect(result.data.trend.map((point) => point.recordKg)).toEqual([35, null]);
+  });
+
+  it('attributes every candidate to the RESOLVED (performed) exercise of the slug', async () => {
+    // A substituted occurrence reaches this read already addressed to its
+    // PERFORMED exercise id (the query filters on exercise_id, which persists
+    // the performed id), so its sets are attributed to the resolved exercise
+    // and never to the authored one (memo §9, dataset J).
+    const occurrences = [
+      occurrence('session-sub', 1, '2026-09-01T10:00:00Z', [{ reps: 8, weightKg: 24 }]),
+    ];
+    const recordsRepo = markers(new Map([['session-sub#1#1', null]]));
+    const uc = useCaseFor(occurrences, recordsRepo);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const candidates = recordsRepo.findBestValuesBefore.mock.calls[0]?.[1] ?? [];
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.exerciseId).toBe(eid('ex-001'));
+    expect(candidates[0]?.position.sessionId).toBe(sid('session-sub'));
+    expect(result.data.trend[0]?.recordKg).toBe(24);
+  });
+
+  it('reads prior bests in ONE batched user-global call over every window set', async () => {
+    const occurrences = [
+      occurrence('session-a', 1, '2026-09-02T10:00:00Z', [
+        { reps: 8, weightKg: 30 },
+        { reps: 8, weightKg: 32.5 },
+      ]),
+      occurrence('session-b', 1, '2026-09-01T10:00:00Z', [{ reps: 8, weightKg: 20 }]),
+    ];
+    const recordsRepo = markers(new Map());
+    const uc = useCaseFor(occurrences, recordsRepo);
+
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+
+    // One round trip, the user id plus the candidate collection — no window,
+    // page size or per-occurrence call: the exactness contract is the port's.
+    expect(recordsRepo.findBestValuesBefore).toHaveBeenCalledTimes(1);
+    expect(recordsRepo.findBestValuesBefore.mock.calls[0]).toHaveLength(2);
+    expect(recordsRepo.findBestValuesBefore.mock.calls[0]?.[0]).toBe(uid('user-a'));
+    expect(recordsRepo.findBestValuesBefore.mock.calls[0]?.[1]).toHaveLength(3);
+  });
+
+  it('skips the prior-best read entirely when the window holds no logged set', async () => {
+    const recordsRepo = markers(new Map());
+    const uc = useCaseFor([], recordsRepo);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(recordsRepo.findBestValuesBefore).not.toHaveBeenCalled();
+    expect(result.data.trend).toEqual([]);
+  });
+
+  it('leaves the trend and the personal-best cards untouched by the marker read', async () => {
+    const occurrences = [
+      occurrence('session-new', 1, '2026-09-02T10:00:00Z', [{ reps: 10, weightKg: 55 }]),
+      occurrence('session-old', 1, '2026-09-01T10:00:00Z', [{ reps: 10, weightKg: 50 }]),
+    ];
+    const recordsRepo = makePersonalRecordRepo(
+      [personalBest({ value: 60 })],
+      priorBestsAt(
+        new Map([
+          ['session-old#1#1', null],
+          ['session-new#1#1', 50],
+        ]),
+      ),
+    );
+    const uc = useCaseFor(occurrences, recordsRepo);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Entry order, plotted loads and the M12 cards are exactly as before the
+    // marker read existed; only the record facts are new.
+    expect(result.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'session-new',
+      'session-old',
+    ]);
+    expect(result.data.trend.map((point) => point.workingLoadKg)).toEqual([50, 55]);
+    expect(result.data.personalBests.map((record) => record.value)).toEqual([60]);
+    expect(result.data.trend.map((point) => point.recordKg)).toEqual([50, 55]);
+  });
+});
+
+
+/**
+ * M18 Slice 8 — the 13-week period's first-vs-latest working load
+ * (`docs/training-progress.md` §7, acceptance datasets F, G, H, I).
+ *
+ * The Application's part is the horizon and the wiring: it hands the port the
+ * horizon's inclusive Monday and maps the Domain's answer into the DTO
+ * unchanged. The comparison rules themselves are pinned in the Domain suite.
+ */
+describe('GetExerciseHistoryUseCase — period working-load comparison (M18 Slice 8)', () => {
+  const HORIZON_START = new Date('2026-06-29T00:00:00.000Z');
+
+  function useCaseFor(periodOccurrences: ReadonlyArray<CompletedExerciseOccurrence>) {
+    const historyRepo = makeHistoryRepo([], periodOccurrences);
+    const uc = new GetExerciseHistoryUseCase(
+      historyRepo,
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      makePersonalRecordRepo([]),
+    );
+    return { uc, historyRepo };
+  }
+
+  it.each([
+    ['2026-09-27T23:59:59.999Z', '2026-06-29T00:00:00.000Z', '2026-09-28T00:00:00.000Z'],
+    ['2026-09-28T00:00:00.000Z', '2026-07-06T00:00:00.000Z', '2026-10-05T00:00:00.000Z'],
+  ])('forwards request period bounds for %s', async (instant, start, end) => {
+    const { uc, historyRepo } = useCaseFor([]);
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: new Date(instant) });
+    expect(historyRepo.listCompletedExerciseOccurrencesSince.mock.calls[0]?.slice(2)).toEqual([new Date(start), new Date(end)]);
+  });
+
+  it('reads the period from the horizon start, inclusive, uncapped', async () => {
+    const { uc, historyRepo } = useCaseFor([]);
+
+    await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+
+    expect(historyRepo.listCompletedExerciseOccurrencesSince).toHaveBeenCalledWith(
+      uid('user-a'),
+      eid('ex-001'),
+      HORIZON_START,
+      new Date('2026-09-28T00:00:00.000Z'),
+    );
+    // Two arguments plus the period bounds: the period read takes no display limit.
+    expect(historyRepo.listCompletedExerciseOccurrencesSince.mock.calls[0]).toHaveLength(4);
+  });
+
+  it('dataset F: maps the Domain comparison and the direction into the DTO', async () => {
+    const { uc } = useCaseFor([
+      occurrence('session-jun', 1, '2026-07-02T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+      occurrence('session-sep', 1, '2026-09-08T10:00:00Z', [{ reps: 10, weightKg: 22.5 }]),
+    ]);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.comparison).toEqual({
+      status: 'compared',
+      first: { loadKg: 20, completedAt: '2026-07-02T10:00:00.000Z' },
+      latest: { loadKg: 22.5, completedAt: '2026-09-08T10:00:00.000Z' },
+      direction: 'increased',
+    });
+  });
+
+  it('dataset G/H: equal loads read unchanged, a lighter latest reads decreased', async () => {
+    const equal = useCaseFor([
+      occurrence('session-a', 1, '2026-07-02T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+      occurrence('session-b', 1, '2026-09-08T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+    ]);
+    const equalResult = await equal.uc.execute({
+      userId: 'user-a',
+      slug: 'goblet-squat',
+      now: HISTORY_NOW,
+    });
+    expect(equalResult.ok).toBe(true);
+    if (!equalResult.ok) return;
+    expect(equalResult.data.comparison).toMatchObject({ status: 'compared', direction: 'unchanged' });
+
+    const lighter = useCaseFor([
+      occurrence('session-a', 1, '2026-07-02T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+      occurrence('session-b', 1, '2026-09-08T10:00:00Z', [{ reps: 10, weightKg: 17.5 }]),
+    ]);
+    const lighterResult = await lighter.uc.execute({
+      userId: 'user-a',
+      slug: 'goblet-squat',
+      now: HISTORY_NOW,
+    });
+    expect(lighterResult.ok).toBe(true);
+    if (!lighterResult.ok) return;
+    expect(lighterResult.data.comparison).toMatchObject({
+      status: 'compared',
+      direction: 'decreased',
+    });
+  });
+
+  it('dataset I: zero or one eligible period point states the ≥2-points reason', async () => {
+    const none = useCaseFor([]);
+    const noneResult = await none.uc.execute({
+      userId: 'user-a',
+      slug: 'goblet-squat',
+      now: HISTORY_NOW,
+    });
+    expect(noneResult.ok).toBe(true);
+    if (!noneResult.ok) return;
+    expect(noneResult.data.comparison).toEqual({
+      status: 'insufficient',
+      reason: 'fewer_than_two_points',
+    });
+
+    const one = useCaseFor([
+      occurrence('session-only', 1, '2026-07-02T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+    ]);
+    const oneResult = await one.uc.execute({
+      userId: 'user-a',
+      slug: 'goblet-squat',
+      now: HISTORY_NOW,
+    });
+    expect(oneResult.ok).toBe(true);
+    if (!oneResult.ok) return;
+    expect(oneResult.data.comparison).toEqual({
+      status: 'insufficient',
+      reason: 'fewer_than_two_points',
+    });
+  });
+
+  it('states no_external_load when the period holds only unloaded occurrences', async () => {
+    const { uc } = useCaseFor([
+      occurrence('session-bw', 1, '2026-07-02T10:00:00Z', [{ reps: 12, weightKg: null }]),
+      occurrence('session-timed', 1, '2026-08-02T10:00:00Z', [
+        { type: 'duration', durationSeconds: 45 },
+      ]),
+    ]);
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.comparison).toEqual({
+      status: 'insufficient',
+      reason: 'no_external_load',
+    });
+  });
+});
+
+
+
+describe('GetExerciseHistoryUseCase — comparison independence (M18 Slice 8)', () => {
+  it('leaves the display window, the trend, the markers and the PB cards untouched', async () => {
+    // A window whose occurrences span two loaded sessions, with Slice 7 markers
+    // in play, plus a period whose comparison is a separate fact.
+    const window = [
+      occurrence('window-new', 1, '2026-09-20T10:00:00Z', [{ reps: 10, weightKg: 55 }]),
+      occurrence('window-old', 1, '2026-09-01T10:00:00Z', [{ reps: 10, weightKg: 50 }]),
+    ];
+    const period = [
+      occurrence('period-a', 1, '2026-07-02T10:00:00Z', [{ reps: 10, weightKg: 20 }]),
+      occurrence('period-b', 1, '2026-09-08T10:00:00Z', [{ reps: 10, weightKg: 22.5 }]),
+    ];
+    const historyRepo = makeHistoryRepo(window, period);
+    const recordsRepo = makePersonalRecordRepo(
+      [personalBest({ value: 60 })],
+      priorBestsAt(
+        new Map([
+          ['window-old#1#1', null],
+          ['window-new#1#1', 50],
+        ]),
+      ),
+    );
+    const uc = new GetExerciseHistoryUseCase(
+      historyRepo,
+      makeExerciseRepo(makeExercise('ex-001', 'goblet-squat')),
+      recordsRepo,
+    );
+
+    const result = await uc.execute({ userId: 'user-a', slug: 'goblet-squat', now: HISTORY_NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Slice 7 markers and the display window are exactly as before …
+    expect(result.data.entries.map((entry) => entry.sessionId)).toEqual([
+      'window-new',
+      'window-old',
+    ]);
+    expect(result.data.trend.map((point) => point.recordKg)).toEqual([50, 55]);
+    expect(result.data.personalBests.map((record) => record.value)).toEqual([60]);
+    expect(result.data.isLimited).toBe(false);
+    // … and the comparison is its own period fact, never taken from them.
+    expect(result.data.comparison).toMatchObject({
+      status: 'compared',
+      first: { loadKg: 20 },
+      latest: { loadKg: 22.5 },
+      direction: 'increased',
+    });
+  });
+});

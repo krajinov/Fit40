@@ -39,16 +39,16 @@ describe('formatHistoryCount', () => {
 });
 
 describe('formatHistoryVolume', () => {
-  it('formats zero volume', () => {
-    expect(formatHistoryVolume(0)).toBe('0 kg');
+  it('renders a genuine zero with the load × reps unit', () => {
+    expect(formatHistoryVolume(0)).toBe('0 kg × reps');
   });
 
   it('formats whole volumes without decimals', () => {
-    expect(formatHistoryVolume(760)).toBe('760 kg');
+    expect(formatHistoryVolume(760)).toBe('760 kg × reps');
   });
 
-  it('rounds fractional volumes to whole kilograms', () => {
-    expect(formatHistoryVolume(1234.6)).toBe('1,235 kg');
+  it('rounds fractional volumes to whole kg × reps', () => {
+    expect(formatHistoryVolume(1234.6)).toBe('1,235 kg × reps');
   });
 });
 

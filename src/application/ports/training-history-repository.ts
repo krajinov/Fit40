@@ -103,6 +103,14 @@ export interface CompletedExerciseOccurrence {
   readonly sessionId: WorkoutSessionId;
   /** Position of the exercise log within the session — its identity part. */
   readonly exerciseOrder: number;
+  /**
+   * The owning session's START instant (additive, M18 Slice 7; the column is
+   * NOT NULL, so this is never absent). It is the second rung of the Domain's
+   * `PerformancePosition` ladder, so a caller can assemble a complete position
+   * without a second read. It is not a display field and changes no ordering:
+   * the recency ladder still leads with `completedAt`.
+   */
+  readonly startedAt: Date;
   /** ISO instant of the owning session's completion — history recency. */
   readonly completedAt: Date;
   readonly programName: string;
@@ -179,6 +187,41 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     exerciseId: ExerciseId,
     limit: number,
+  ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
+
+  /**
+   * Returns the user's PERIOD-SCOPED occurrences of one exercise: every
+   * completed occurrence of the resolved (performed) exercise whose
+   * `completedAt` is at or after `since`, UNCAPPED (M18 Slice 8's
+   * first-vs-latest working-load comparison).
+   *
+   * This is deliberately separate from `listCompletedExerciseOccurrences`,
+   * whose `limit` is a DISPLAY bound (the exercise-history screen shows at most
+   * the newest 50). A comparison scoped to a period must never be truncated by
+   * how many rows a screen happens to render, so this read has no page size,
+   * no top-K and no artificial ceiling: `[since, before)` is the caller's
+   * own period.
+   *
+   * Contract (everything else matches `listCompletedExerciseOccurrences`):
+   * - Scopes to sessions OWNED by the user, regardless of enrollment: detached
+   *   sessions are the user's training past and count.
+   * - Completed sessions only, and every returned occurrence holds at least one
+   *   logged set (a skipped exercise is not an occurrence).
+   * - `exercise_id` persists the PERFORMED exercise, so a substituted
+   *   occurrence belongs to the exercise actually trained (M12's attribution
+   *   rule) and the authored exercise receives nothing.
+   * - `since` is INCLUSIVE: an occurrence completed exactly at `since` belongs
+   *   to the period; `before` is EXCLUSIVE (`[since, before)`).
+   * - Ordered ascending by the M18 §7.2 comparison ladder — `completed_at`,
+   *   `started_at`, session id, `exercise_order` — so `[0]` is the period's
+   *   first and the last element its latest occurrence.
+   * - Implementation must batch set hydration (no per-occurrence queries).
+   */
+  listCompletedExerciseOccurrencesSince(
+    userId: UserId,
+    exerciseId: ExerciseId,
+    since: Date,
+    before: Date,
   ): Promise<ReadonlyArray<CompletedExerciseOccurrence>>;
 
   /**
@@ -276,6 +319,77 @@ export interface TrainingHistoryRepository {
     userId: UserId,
     since: Date,
   ): Promise<ReadonlyArray<CompletedSessionActivityEntry>>;
+
+  /**
+   * Returns the user's completed sessions with `since <= completedAt < before` as the
+   * M18 Progress surface's lightweight activity projection — the
+   * `listCompletedSessionActivity` contract family plus the session's
+   * external-load fact.
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached (left-program) history is the user's training past
+   *   and counts; every program contributes to one user-global series.
+   * - Completed sessions only; an in-progress session never appears.
+   * - `since` is INCLUSIVE: a session completed exactly at `since` is
+   *   returned; `before` is EXCLUSIVE. No pagination or cap applies, because the
+   *   caller buckets and totals the whole window and a truncated read would
+   *   silently under-count it.
+   * - Ordering is the deterministic history recency ladder: `completedAt`
+   *   desc, `startedAt` desc, session id desc. Bucketing is by `completedAt`
+   *   alone, so ordering never affects the caller's facts.
+   * - `externalLoadVolume` follows the Domain's volume rule
+   *   (`calculateSessionMetrics`): the sum of `reps × weightKg` over rep sets
+   *   with `weightKg !== null`; duration sets and bodyweight rep sets
+   *   contribute nothing and `0 kg` contributes `0`. It is `null` when the
+   *   session logged NO eligible loaded set, and a number (including a
+   *   genuine `0`) otherwise — the two cases must never collapse.
+   * - `loggedSets` is a plain COUNT of the session's persisted set rows, so a
+   *   completed session with no set rows reports `0` instead of being
+   *   dropped — the same defensive guarantee as
+   *   `listCompletedSessionActivity`.
+   * - Implementations must answer in a bounded number of statements (one
+   *   session query plus one batched raw-set read with Domain aggregation),
+   *   never one query per session.
+   */
+  listProgressSessionActivity(
+    userId: UserId,
+    since: Date,
+    before: Date,
+  ): Promise<ReadonlyArray<ProgressSessionActivityEntry>>;
+
+  /**
+   * Returns the user's COMPLETED sessions with `since <= completedAt < before` as fully
+   * hydrated aggregates — the M18 Progress horizon's PR-event candidate read
+   * (docs/training-progress.md §8.1–§8.2).
+   *
+   * Contract:
+   * - Scopes to sessions OWNED by the user (`user_id`), regardless of
+   *   enrollment: detached (left-program) history contributes candidates, and
+   *   every program feeds one user-global series.
+   * - Completed sessions only; an in-progress session never appears. The
+   *   returned aggregates carry a non-null `completedAt` by construction
+   *   (the established `CompletedWorkoutSession` type).
+   * - `since` is INCLUSIVE and `before` is EXCLUSIVE: candidate origin is the
+   *   caller's horizon, while the prior-best evaluation stays user-global and
+   *   exact — this read deliberately never truncates the candidate set with a
+   *   page size, offset or top-K, because a truncated read would silently
+   *   under-count the period's events.
+   * - Ordered ascending by `completedAt`, then `startedAt`, then session id —
+   *   a total order even when instants tie, so the combined candidate array is
+   *   already in `PerformancePosition` order (the M14 convention). The order is
+   *   deterministic output, never an identity or a deduplication mechanism.
+   * - Fully hydrated: exercise logs with their set logs ride the aggregate, so
+   *   the Domain can extract record candidates without a second read.
+   * - Bounded statements: a constant number regardless of how many sessions
+   *   the window holds (never one query per session).
+   * - Pure read: nothing is created, resumed, mutated or re-versioned.
+   */
+  listCompletedSessionsSince(
+    userId: UserId,
+    since: Date,
+    before: Date,
+  ): Promise<ReadonlyArray<CompletedWorkoutSession>>;
 }
 
 /**
@@ -310,4 +424,28 @@ export interface CompletedSessionActivityEntry {
   /** Non-null: the read is completed-only by construction. */
   readonly completedAt: Date;
   readonly loggedSets: number;
+}
+
+/**
+ * One M18 progress-activity row: a completed session reduced to the facts the
+ * Progress surface aggregates — its completion instant, its logged-set count,
+ * and its external-load volume (memo §4.1–§4.3, §6.3).
+ *
+ * `externalLoadVolume` preserves the memo's presence distinction exactly:
+ * a number (including `0`) means the session logged at least one rep set with
+ * `weightKg !== null` and the value is that session's `reps × weightKg` sum;
+ * `null` means it logged none, so the session contributes no external-load
+ * data — bodyweight-only and duration-only training is never reported as a
+ * zero. `0` and `null` are different facts and must never be conflated.
+ *
+ * `loggedSets` is the plain count of persisted set rows, so a zero-set
+ * completed session reports `0` rather than disappearing.
+ */
+export interface ProgressSessionActivityEntry {
+  readonly sessionId: WorkoutSessionId;
+  /** Non-null: the read is completed-only by construction. */
+  readonly completedAt: Date;
+  readonly loggedSets: number;
+  /** A session with no eligible loaded set reports `null`, never `0`. */
+  readonly externalLoadVolume: number | null;
 }

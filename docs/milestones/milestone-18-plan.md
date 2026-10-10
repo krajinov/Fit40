@@ -11,7 +11,9 @@ convention: one plan per milestone, sliced for independent verification, each
 slice with a single commit boundary (matching the "Commit chain (milestone_N)"
 sections of the canonical docs).
 
-**Status:** planning only — approved for review, not yet implemented.
+**Status:** Slices 1–9 complete. Application checks and the webpack production
+build pass; the normal Turbopack build remains blocked solely by the documented
+worker-port restriction, accepted explicitly for completion by the user.
 
 ## Global verification commands
 
@@ -663,8 +665,9 @@ surface, and the full verification gate is green.
 
 **Tests & acceptance criteria.**
 - Architecture guard tests (source-scan idiom of `tests/unit/architecture/`):
-  - `src/features/progress/` imports neither ports nor infrastructure; view
-    mappers never call repositories; no `Date.now()` in `src/application/`
+  - `src/features/progress/` imports no ports; only its approved `services.ts`
+    composition root imports infrastructure (see the reported clarification
+    below); view mappers never call repositories; no `Date.now()` in `src/application/`
     or `src/domain/`;
   - `AppNavLinks` contains `/progress`; `MobileTabBar` still has exactly 4
     tabs (no fifth tab);
@@ -711,3 +714,109 @@ of this plan's creation. Implementation begins only after review approval;
 slices then execute in the sequence above, each ending green before the next
 begins.
 
+
+## Slice 9 acceptance traceability and completion evidence
+
+Starting state verified locally: branch `milestone_18`, clean worktree, HEAD
+`955e9617e764cabf3ab7e8accc31354372ec7800` (Slice 8). No prior Slice 9
+completion report or claimed commit was used as evidence.
+
+**Reported plan clarification:** the original S9 blanket infrastructure-import
+ban contradicted S4/S6's required `src/features/progress/services.ts` composition
+root and the repository DI convention. The guard permits infrastructure only
+in that existing root, forbids ports across the whole feature, and forbids
+repository calls in view mappers. No production code or semantic rule changes.
+The canonical training-progress memo remains unchanged.
+
+Paths below are relative to `tests/`; test names identify executable evidence,
+not a separate manual acceptance claim.
+
+| Dataset | Test reference and acceptance evidence |
+|---|---|
+| A | `unit/domain/services/training-progress.test.ts`: “dataset A week facts”, “totals the full horizon”, “27 ÷ 12 = 2.25”; `unit/features/progress/progress-view.test.ts`: average formatting and 13-week view |
+| B | `unit/domain/services/training-progress.test.ts`: “bodyweight/duration-only weeks”; `integration/database/training-progress-activity.test.ts`: “equals calculateSessionMetrics … (B, C)” |
+| C | Same integration oracle; Domain “genuine 0 kg session”; `unit/architecture/training-progress.test.ts`: genuine-zero `kg × reps` formatting |
+| D | `unit/application/use-cases/get-training-progress-record-events.test.ts`: “user-global priors (D)”; `integration/database/progress-record-events.test.ts`: “user-global priors and current-PB ownership” with fold oracle |
+| E | Same use-case suite: “first exposure … (E)”; same integration fold covers `40<-none`; `unit/features/progress/personal-best-timeline.test.ts`: first-time copy |
+| F | `unit/domain/services/occurrence-working-load.test.ts`: “dataset F”; `unit/features/history/exercise-history-view.test.ts`: both dates and DTO direction |
+| G | Same Domain suite: “dataset G”; same view suite: each direction verbatim |
+| H | Same Domain suite: “dataset H”; same view suite: each direction verbatim, no percentage or judgement |
+| I | Same Domain suite: “dataset I”; same view suite: locked ≥2-points note |
+| J | `unit/application/use-cases/get-exercise-history.test.ts`: substituted performed exercise candidates; `unit/application/use-cases/get-training-progress-record-events.test.ts`: “credits the performed exercise”; integration record-event fold includes substituted occurrence |
+| K | `integration/database/training-progress-activity.test.ts`: “counts detached history … (K, L)”; integration record-event oracle includes standing detached event; `integration/database/exercise-occurrences-since.test.ts`: detached period rows |
+| L | Same activity integration test: real not-performed fact and skipped exercise leave training metrics unchanged |
+| M | `unit/domain/services/training-progress.test.ts`: Monday 00:10 completion; activity integration: inclusive `since` edge (M) |
+| N | Same Domain suite: “15 ÷ 5 = 3 (N)” excludes pre-tracking weeks |
+| O | Same Domain suite: “first workout … current partial week (O)” gives no average |
+| P | Same Domain suite: “24 ÷ 12 = 2 (P)” counts trailing inactive weeks |
+| Q | `unit/application/use-cases/get-exercise-history.test.ts`: “dataset Q”; `integration/database/exercise-history-markers.test.ts`: complete-history detection beyond 50, equal-value exclusion and fold oracle |
+
+Cross-slice checks include the whole unit/integration suites (M8/M12/M13/M14/
+M15/M16/M17), the activity parity guard, dashboard link-only test, independent
+Progress degradation, volume badge presence, marker geometry preservation,
+and the full-horizon comparison beyond 50 occurrences. Bounded-statement
+integration tests cover activity, record events, markers and comparison reads.
+The 8,320-candidate suite is also run separately:
+`pnpm test:integration tests/integration/database/personal-record-candidate-capacity.test.ts`.
+
+### Observed verification (local, 2026-10-10)
+
+| Command | Observed result |
+|---|---|
+| `pnpm typecheck` | Exit 0 after the RootLayout correction, with generated Next.js route types present |
+| `pnpm lint` | Exit 0 |
+| `pnpm test` | Exit 0: 214 files, 2,958 tests passed, including seven new architecture guards |
+| `pnpm test:integration` | Post-fix exit 0: 47 files, 486 tests passed against real PostgreSQL |
+| Separate capacity command above | Exit 0: one file, two tests passed with 8,320 candidates |
+| `pnpm build` | Post-fix attempt exit 1: `TurbopackInternalError: Failed to write app endpoint /page`; CSS worker creation → port binding → `Operation not permitted (os error 1)`, despite permitted execution |
+| `pnpm build --webpack` | Post-fix exit 0: compiled, Next.js type validation passed, page data collected, all 13 static pages generated, optimization and build traces completed |
+
+**Authorized minimal correction:** Next.js validates layout modules against
+an allowed export list (`default`, metadata and route configuration hooks);
+the extra named `RootLayout` export is rejected by generated `checkFields`
+types. Removed only the `export` keyword from that function, retaining the
+default export, JSX, fonts and metadata unchanged. No named imports existed,
+so no test/import changes were necessary. This resolves the earlier webpack
+and post-generation typecheck failures without changing layout behavior.
+
+The remaining normal-build failure is an execution-environment restriction
+on Turbopack's CSS worker port binding, distinct from application validation:
+the webpack production build and generated Next.js type checks now pass. The
+user explicitly authorized completion with this restriction documented.
+
+Initial integration attempts encountered sandbox `EPERM` and a connection
+timeout. The permitted capacity run and subsequent full suite passed. The
+existing PostgreSQL process was confirmed responding; an attempted startup
+was refused by its existing PID lock and no cluster files were removed.
+
+**Browser evidence:** installed Chrome launched headlessly against the actual
+local Next.js app (`pnpm dev --webpack --port 3018`) and existing training
+history. Progress returned HTTP 200 at 1440×1000 and 390×844; all five section
+headings, three current-week semantics and four mobile tabs were observed,
+with no horizontal overflow or page errors. Screenshots were opened and
+inspected: 26 historical events with ten displayed, both standing contexts,
+volume units, average basis, text-first weekly charts. Mobile exercise history
+covered unloaded Dead Bug and loaded Dumbbell Bench Press: record 12 kg at a
+10 kg working-load point, another 14 kg record, and the dated 10 → 14 kg
+increased comparison. Browser coverage used existing loaded/unloaded data;
+empty, degraded, genuine-zero and remaining matrix cases rely on passing tests.
+Temporary authentication sessions were deleted and the dev server stopped.
+The dev server's generated AGENTS.md block was reverted to the starting file.
+
+Local evidence artifacts (outside the commit):
+`/tmp/fit40-m18-{unit,integration,capacity,build,build-webpack,browser,browser-loaded}.log`,
+`/tmp/fit40-m18-progress-{desktop,mobile}.png`,
+`/tmp/fit40-m18-history-mobile.png`,
+`/tmp/fit40-m18-history-loaded-mobile.png`. Post-fix verification logs:
+`/tmp/fit40-m18-final-{typecheck,lint,unit,integration,webpack,turbopack}.log`.
+
+**Completion report:** A–Q references and browser evidence above are retained
+from the prepared Slice 9 audit. Seven architecture guards and cross-slice
+regression tests pass. The only production correction is the authorized
+one-line removal of the redundant RootLayout named export. No new feature,
+migration, dependency or semantic change. Post-fix typecheck, lint, 2,958 unit
+tests, 486 integration tests and the webpack production build all pass on the
+final source tree. The separate 8,320-candidate regression passed in the
+prepared audit and remains covered by the full integration rerun. Slice 9 is
+complete under the user-authorized environment exception; normal Turbopack
+success is not claimed. One focused Slice 9 commit; no push or PR.

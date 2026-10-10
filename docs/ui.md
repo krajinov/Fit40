@@ -879,3 +879,33 @@ M13 integration suites in
   `tests/unit/features/schedule/follow-through-view.test.ts`, and
   `tests/unit/architecture/{settlement-presentation,session-creation-authority}.test.ts`.
 - Canonical reference: [Run Closure & Not-Performed Settlement](run-closure.md).
+
+## Training Progress & Long-Horizon Trends (M18)
+
+- **Progress (`/progress`):** dedicated user-global surface, linked in desktop
+  navigation and from dashboard/history. Mobile retains its four tabs.
+- **Activity and external load:** 13 Monday UTC windows, oldest first, including
+  the current partial week labeled “This week” with `aria-current="date"`.
+  Text lists carry chart values; SVGs are decorative. Zero-activity weeks stay
+  visible. Bodyweight/duration-only load is absent; eligible zero loads render
+  `0 kg × reps`. Totals include this week; the average excludes it and counts
+  completed weeks since the first in-period completed workout, including gaps
+  and trailing inactivity. No completed training week means no average.
+- **Historical personal bests:** exact period count, newest ten events displayed
+  oldest to newest by full position order, with a cap note, session links,
+  “First time” or previous value, and “Still your best” / “Since surpassed”.
+  Unresolved catalog rows are omitted without changing the count. Empty and
+  unavailable reads have distinct copy; activity and records degrade separately.
+- **Exercise history:** the existing 50-occurrence working-load trend gains
+  accessible max-load record text. A marker means the occurrence contains a
+  record set; the plotted minimum working load need not equal that record.
+  Complete prior history gates detection. Beneath the trend, the independent
+  13-week comparison states first/latest loads and dates with increased,
+  unchanged or decreased from the DTO. Fewer than two eligible occurrences
+  shows the honest insufficient-data note; unloaded history keeps its note.
+- **Approved volume alignment:** History and completed-session badges share
+  `formatHistoryVolume` (`kg × reps`); genuine zero is present, unloaded
+  training has no badge. This is presentation only (memo §6.4).
+- **Verification:** architecture guards and A–Q acceptance references are in
+  [the M18 plan](milestones/milestone-18-plan.md). Canonical semantics:
+  [Training Progress](training-progress.md).

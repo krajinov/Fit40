@@ -35,6 +35,11 @@ history.
 - **Training history** — completed sessions across programs with per-exercise
   detail, plus user-global exercise history (`/history/exercises/[slug]`)
   showing every completed occurrence and a working-load trend.
+- **Training progress** — `/progress` shows 13 UTC weeks of workouts, sets,
+  external load (`kg × reps`), an anchored weekly average, and historical
+  personal-best events with standing context. Exercise history adds max-load
+  record markers and a period first-vs-latest working-load comparison (see
+  [`docs/training-progress.md`](docs/training-progress.md)).
 - **Program completion & restart** — finishing every scheduled workout
   unlocks a truthful completion summary (`/programs/[slug]/completed`):
   workout tally, derived completion date, distinct exercises trained, and
@@ -226,10 +231,11 @@ pnpm test:integration  # integration tests against a real PostgreSQL database
 | Workout detail        | `/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]`                                   |
 | Active session        | `/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session`                            |
 | Exercise catalog      | `/exercises`, `/exercises/[slug]`                                                                      |
+| Training progress     | `/progress`                                                                                            |
 | Training history      | `/history`, `/history/sessions/[sessionId]`, `/history/exercises/[slug]`                                |
 
 Feature modules under `src/features/`: `auth`, `dashboard`, `enrollment`,
-`exercises`, `history`, `profile`, `programs`, `sessions`.
+`exercises`, `history`, `profile`, `programs`, `progress`, `sessions`.
 
 ## Design / Engineering Principles
 
@@ -260,7 +266,9 @@ Move) are implemented. So is plan follow-through on program detail: a
 read-only report of how the current run's calendar held up over the last 8
 UTC weeks. Settlement of unperformed workouts ("Didn't train this" / "Undo")
 and honest run closure ("Run closed", restartable concluded runs) are
-implemented as well. Program generation via AI, richer progress charts, OAuth,
+implemented as well. M18 training progress, historical personal-best timelines,
+record markers and period working-load comparisons are implemented. Program
+generation via AI, OAuth,
 and email verification are listed as planned work in the docs. No deployment or
 Docker setup is included yet.
 

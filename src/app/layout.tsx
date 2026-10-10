@@ -29,7 +29,7 @@ interface RootLayoutProps {
   children: React.ReactNode;
 }
 
-export function RootLayout({ children }: RootLayoutProps) {
+function RootLayout({ children }: RootLayoutProps) {
   return (
     <html
       lang="en"

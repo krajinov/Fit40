@@ -343,3 +343,31 @@ the dashboard focus card, the program-detail weekly calendar and the two
 Server Actions (weekday form + Move form) never recompute status, eligibility
 or dates, and expose only authored public coordinates. Canonical reference:
 [Workout Scheduling & Training Calendar](scheduling.md).
+
+## Training Progress & Long-Horizon Trends (M18)
+
+Domain owns period bucketing, volume presence, totals and the anchored workout
+average (`training-progress.ts`), and first/latest occurrence comparison
+(`occurrence-working-load.ts`). UTC weeks, session-volume eligibility and M12
+record detection remain the existing semantic authorities. Application owns
+`GetTrainingProgressActivityUseCase`, `GetTrainingProgressRecordEventsUseCase`
+and the exercise-history orchestration: candidate origin is period-scoped,
+priors are user-global, event count is exact before the newest-10 display cap,
+and standing context uses owning position identity. One caller-supplied clock
+resolves the fixed 13-week horizon; the 50-occurrence history display cap never
+limits prior detection or the period comparison.
+
+Infrastructure implements the history ports with constant batched statement
+counts and no new schema or derived writes. Volume projections are checked
+against `calculateSessionMetrics`; record projections against
+`foldPersonalRecords`. The prior-best transport handles uncapped candidates
+with a parameter count independent of collection size.
+
+Presentation consumes DTOs and formats factual labels. The feature composition
+root `src/features/progress/services.ts` wires shared repository singletons;
+it is the explicit exception to the plan's literal feature-wide infrastructure
+import ban. Other Progress files import neither persistence nor ports, and view
+mappers never call repositories. The dashboard gains only a link; M8, M12,
+M14, M16 and M17 semantics are preserved. Canonical reference:
+[Training Progress](training-progress.md); acceptance and verification evidence:
+[M18 plan](milestones/milestone-18-plan.md).

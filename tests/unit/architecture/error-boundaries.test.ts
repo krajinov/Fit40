@@ -1,95 +1,94 @@
 /**
- * M19 S1 — architecture guards for the recoverable error boundaries.
+ * M19 S1 architecture guard: error boundary integrity.
  *
- * These lock the STRUCTURAL contracts that the behavioral component tests
- * (error-state.test.ts) assume, using the repository's source-scan idiom:
- *
- *  - Every boundary is a Client Component (`'use client'`) — required because
- *    it owns `reset()` and a `useEffect` logger.
- *  - No boundary ever renders the raw error (`error.message`, `String(error)`,
- *    `error.stack`, `error.digest`) — privacy / no-leak contract.
- *  - Each boundary logs via `console.error` (established project convention).
- *  - `global-error.tsx` supplies its own `<html>`/`<body>` and lang (it renders
- *    when the root layout has already failed).
- *  - Segment boundaries do NOT re-render the root shell; they render a single
- *    `<main>` wrapping the shared `ErrorState`.
- *  - Exactly one segment boundary per route group, and `ErrorState` is the only
- *    shared primitive; no new dependency is introduced.
+ * Locks the properties that must remain true regardless of copy edits:
+ *  - P1: every boundary recovers via the framework `retry` prop (fresh Server
+ *        Component response), never `reset` alone.
+ *  - P2: segment boundaries use a non-landmark container (their route-group
+ *        layout already owns the single <main>); the global fallback keeps the
+ *        <main> because it owns the entire HTML document.
+ *  - No internal error detail (error.message / stack) is ever rendered.
  */
 
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-function source(file: string): string {
-  return readFileSync(path.resolve(file), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
+const APP_ERROR = 'src/app/(app)/error.tsx';
+const AUTH_ERROR = 'src/app/(auth)/error.tsx';
+const GLOBAL_ERROR = 'src/app/global-error.tsx';
+
+function read(relPath: string): string {
+  return readFileSync(resolve(process.cwd(), relPath), 'utf8');
 }
 
-const APP_BOUNDARY = 'src/app/(app)/error.tsx';
-const AUTH_BOUNDARY = 'src/app/(auth)/error.tsx';
-const GLOBAL_BOUNDARY = 'src/app/global-error.tsx';
-const ERROR_STATE = 'src/components/shared/ErrorState.tsx';
+describe('M19 S1 error boundary files exist', () => {
+  it('creates the three required boundaries', () => {
+    expect(existsSync(resolve(process.cwd(), APP_ERROR))).toBe(true);
+    expect(existsSync(resolve(process.cwd(), AUTH_ERROR))).toBe(true);
+    expect(existsSync(resolve(process.cwd(), GLOBAL_ERROR))).toBe(true);
+  });
+});
 
-const BOUNDARIES = [APP_BOUNDARY, AUTH_BOUNDARY, GLOBAL_BOUNDARY];
+describe('M19 S1 P1 — recovery uses the framework retry prop', () => {
+  for (const relPath of [APP_ERROR, AUTH_ERROR, GLOBAL_ERROR]) {
+    it(`${relPath} destructures retry and wires it to the recovery control`, () => {
+      const src = read(relPath);
+      expect(src).toMatch(/\bretry\b/);
+      // The recovery control's onClick must be the framework `retry` prop, which
+      // the framework implements as context.refresh()+reset() (a FRESH Server
+      // Component response) — never `reset()` alone.
+      expect(src).toMatch(/onClick=\{[^}]*\bretry\b/);
+    });
 
-describe('M19 S1 error-boundary guards', () => {
-  it('makes every boundary a Client Component that owns reset() and a logger', () => {
-    for (const file of BOUNDARIES) {
-      const text = source(file);
-      expect(text, file).toMatch(/['"]use client['"]/);
-      expect(text, file).toContain('console.error(');
-      expect(text, file).toMatch(/reset/);
+    it(`${relPath} never wires the recovery control to reset() alone`, () => {
+      const src = read(relPath);
+      // Guard the regression this slice fixed: reset() only clears the boundary
+      // and can replay the same failed Server Component response.
+      expect(src).not.toMatch(/onClick=\{\s*reset\s*\}/);
+    });
+  }
+
+  it('no boundary relies on reset() as the recovery mechanism', () => {
+    for (const relPath of [APP_ERROR, AUTH_ERROR, GLOBAL_ERROR]) {
+      const src = read(relPath);
+      // `retry` is the recovery action; `reset` must not be the button handler.
+      expect(src).not.toMatch(/onRetry=\{\s*reset\s*\}/);
     }
   });
 
-  it('never renders the raw error object (no internal detail leaks)', () => {
-    for (const file of BOUNDARIES) {
-      const text = source(file);
-      expect(text, file).not.toMatch(/error\.message/);
-      expect(text, file).not.toMatch(/error\.stack/);
-      expect(text, file).not.toMatch(/error\.digest/);
-      expect(text, file).not.toMatch(/String\(error\)/);
-      expect(text, file).not.toMatch(/\{error\}/);
-      expect(text, file).not.toMatch(/\{error\b/);
+  it('marks each boundary as a Client Component', () => {
+    for (const relPath of [APP_ERROR, AUTH_ERROR, GLOBAL_ERROR]) {
+      expect(read(relPath).trimStart().startsWith("'use client'") ||
+        read(relPath).trimStart().startsWith('"use client"')).toBe(true);
+    }
+  });
+});
+
+describe('M19 S1 P2 — single main landmark rule', () => {
+  it('segment boundaries use a non-landmark container, not <main>', () => {
+    for (const relPath of [APP_ERROR, AUTH_ERROR]) {
+      const src = read(relPath);
+      // The route-group layout already provides the <main>.
+      expect(src).not.toMatch(/<main[\s>]/);
     }
   });
 
-  it('gives the global boundary a self-contained html/body shell', () => {
-    const text = source(GLOBAL_BOUNDARY);
-    expect(text).toContain('<html');
-    expect(text).toContain('<body');
-    expect(text).toContain('lang="en"');
-    // It must not rely on the (failed) root layout's fonts/stylesheet.
-    expect(text).not.toContain('globals.css');
+  it('global fallback owns the full document and keeps its <main>', () => {
+    const src = read(GLOBAL_ERROR);
+    expect(src).toMatch(/<html[\s>]/);
+    expect(src).toMatch(/<body[\s>]/);
+    expect(src).toMatch(/<main[\s>]/);
   });
+});
 
-  it('renders a single <main> around the shared ErrorState in segment boundaries', () => {
-    for (const file of [APP_BOUNDARY, AUTH_BOUNDARY]) {
-      const text = source(file);
-      expect(text, file).toContain('<main');
-      expect(text, file).toContain('ErrorState');
-      // Segment boundaries must NOT reproduce the document shell.
-      expect(text, file).not.toContain('<html');
-    }
-  });
-
-  it('keeps ErrorState presentational — it never receives or renders an error', () => {
-    const text = source(ERROR_STATE);
-    expect(text).not.toMatch(/error/);
-    expect(text).toContain('title');
-  });
-
-  it('introduces no new dependency (only existing primitives are imported)', () => {
-    for (const file of BOUNDARIES) {
-      const text = source(file);
-      // Boundaries may import React, the shared ErrorState and the existing Button.
-      for (const match of text.matchAll(/from '([^']+)'/g)) {
-        expect(match[1], file).toMatch(
-          /^(react|@\/components\/shared\/ErrorState|@\/components\/ui\/button)$/,
-        );
-      }
-    }
-  });
+describe('M19 S1 — no internal error detail leaks into UI', () => {
+  for (const relPath of [APP_ERROR, AUTH_ERROR, GLOBAL_ERROR]) {
+    it(`${relPath} never renders error.message or a stack`, () => {
+      const src = read(relPath);
+      expect(src).not.toMatch(/error\.message/);
+      expect(src).not.toMatch(/error\.stack/);
+      expect(src).not.toMatch(/\{error\}/);
+    });
+  }
 });

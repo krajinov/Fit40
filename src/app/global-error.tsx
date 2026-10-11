@@ -17,13 +17,19 @@ import { useEffect } from 'react';
  * fully styled `ErrorState`; this file is intentionally self-contained.
  *
  * PRIVACY: the raw `error` is logged and never rendered.
+ *
+ * RECOVERY (M19 P1 fix): the retry control calls Next.js `retry()`, not
+ * `reset()`. Verified against next@16.3.1: the root boundary also receives
+ * `retry`, which runs `context.refresh()` before `reset()` so recovery fetches
+ * a FRESH Server Component response instead of replaying the failed one.
  */
 interface GlobalErrorProps {
-  readonly error: Error & { digest?: string };
+  readonly error: unknown;
   readonly reset: () => void;
+  readonly retry: () => void;
 }
 
-export default function GlobalError({ error, reset }: GlobalErrorProps) {
+export default function GlobalError({ error, retry }: GlobalErrorProps) {
   useEffect(() => {
     console.error('Unhandled error in Fit40 root layout', error);
   }, [error]);
@@ -63,7 +69,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
           <div>
             <button
               type="button"
-              onClick={reset}
+              onClick={retry}
               style={{
                 minHeight: '44px',
                 padding: '0 28px',

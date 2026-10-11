@@ -26,29 +26,39 @@ import { ErrorState } from '@/components/shared/ErrorState';
  * PRIVACY: the raw `error` is logged to the server/console and is NEVER passed
  * to `ErrorState` (which renders only fixed, user-facing copy), so internal
  * messages, stack traces, SQL and digests cannot reach the user.
+ *
+ * RECOVERY (M19 P1 fix): the retry control calls Next.js `retry()`, not
+ * `reset()`. Verified against next@16.3.1 (`ErrorInfo = { error, reset, retry }`;
+ * `retry()` runs `context.refresh()` before `reset()`), so a transient
+ * database/server failure is recovered by fetching a FRESH Server Component
+ * response. `reset()` alone only clears the boundary and can replay the same
+ * failed response. This is the reason `retry` is used here.
  */
 interface AppErrorProps {
-  readonly error: Error & { digest?: string };
+  readonly error: unknown;
   readonly reset: () => void;
+  readonly retry: () => void;
 }
 
-export default function AppError({ error, reset }: AppErrorProps) {
+export default function AppError({ error, retry }: AppErrorProps) {
   useEffect(() => {
     console.error('Unhandled error in Fit40 application route', error);
   }, [error]);
 
   return (
-    <main className="flex flex-1 items-center justify-center px-4 py-12">
+    // A `div`, not `a main landmark`: the `(app)` layout already provides the single
+    // `main` landmark for this subtree (M19 P2 — avoid a nested landmark).
+    <div className="flex flex-1 items-center justify-center px-4 py-12">
       <ErrorState
         className="w-full max-w-md"
         title="Something went wrong while loading this page."
         body="This is a temporary problem, not something you did. You can try again — if it keeps happening, reloading the page may help."
         action={
-          <Button type="button" onClick={reset}>
+          <Button type="button" onClick={retry}>
             Try again
           </Button>
         }
       />
-    </main>
+    </div>
   );
 }

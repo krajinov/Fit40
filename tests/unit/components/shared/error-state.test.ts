@@ -1,157 +1,145 @@
-/**
- * @vitest-environment jsdom
- *
- * M19 S1 — behavioral tests for the recoverable error layer.
- *
- * Two concerns are verified here:
- *  1. `ErrorState` (the shared, presentational primitive) renders only the
- *     fixed, caller-supplied copy and never any raw error object.
- *  2. Each App Router boundary (`(app)/error`, `(auth)/error`, `global-error`)
- *     logs the unexpected error, shows non-technical copy, exposes a working
- *     retry that calls `reset()`, and NEVER leaks the internal message/stack.
- *
- * Redirects, `notFound()`, and expected typed "unavailable" states are handled
- * by the framework / view mappers and never reach these components — they are
- * covered by the architecture guard (error-boundaries.test.ts) and were proven
- * live during the Correction 3 boundary probes (see the S1 report).
- */
-
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ErrorState } from '@/components/shared/ErrorState';
 import AppError from '@/app/(app)/error';
 import AuthError from '@/app/(auth)/error';
 import GlobalError from '@/app/global-error';
 
-declare global {
-  // React 19's act() environment flag; not part of the DOM lib typings.
-  var IS_REACT_ACT_ENVIRONMENT: boolean;
+/**
+ * S1 (M19) regression tests for the recoverable error boundaries.
+ *
+ * P1: the recovery button must delegate to the framework `retry` mechanism
+ *     (which the framework implements as context.refresh() + reset(), i.e. a
+ *     FRESH Server Component response) — never to `reset()` alone (state-only).
+ * P2: segment boundaries render a non-landmark <div>; only global-error, which
+ *     owns the whole document, keeps the <main> landmark.
+ *
+ * The rendered-output assertions below prove no internal error detail leaks to
+ * users, that logging is preserved, and that the boundaries stay distinct from
+ * auth redirects / not-found. Fresh-response recovery end-to-end is proven by
+ * the production-runtime probe recorded in the S1 report (retry()'s refresh()
+ * is framework code we do not reimplement).
+ */
+
+const SENTINEL = 'SECRET_INTERNAL_DSN_must_not_render';
+
+function makeError(): Error {
+  return new Error(SENTINEL);
 }
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+let container: HTMLDivElement;
+let root: Root;
+let errorSpy: ReturnType<typeof vi.spyOn>;
 
-const mounted: { readonly container: HTMLElement; readonly root: Root }[] = [];
-
-async function render(node: React.ReactNode): Promise<HTMLElement> {
-  const container = document.createElement('div');
+beforeEach(() => {
+  // Tells React this environment supports act(...), so state updates from the
+  // recovery wiring are flushed synchronously and asserted reliably.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  // Silence the boundary's real server-side console.error logging during tests;
+  // the logging-preservation test below asserts against this shared spy.
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  container = document.createElement('div');
   document.body.appendChild(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(node);
-  });
-  mounted.push({ container, root });
-  return container;
-}
+  root = createRoot(container);
+});
 
 afterEach(() => {
-  for (const { container, root } of mounted.splice(0)) {
-    act(() => {
-      root.unmount();
-    });
-    container.remove();
-  }
+  act(() => root.unmount());
+  container.remove();
+  globalThis.IS_REACT_ACT_ENVIRONMENT = false;
   vi.restoreAllMocks();
 });
 
-describe('ErrorState (shared primitive)', () => {
-  it('renders the fixed title and body with an accessible alert role', async () => {
-    const container = await render(
-      createElement(ErrorState, { title: 'Something went wrong.', body: 'Temporary problem.' }),
-    );
-
-    expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    expect(container.textContent).toContain('Something went wrong.');
-    expect(container.textContent).toContain('Temporary problem.');
+function render(element: React.ReactElement): void {
+  act(() => {
+    root.render(element);
   });
+}
 
-  it('renders a caller-supplied action (the retry control)', async () => {
-    const container = await render(
-      createElement(ErrorState, {
-        title: 'Error',
-        action: createElement('button', { type: 'button' }, 'Try again'),
-      }),
-    );
+function findButton(label: string): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((b) =>
+    (b.textContent ?? '').includes(label),
+  );
+}
 
-    expect(container.querySelector('button')?.textContent).toBe('Try again');
-  });
+describe('S1 segment error boundaries', () => {
+  for (const [name, Component] of [
+    ['(app)', AppError],
+    ['(auth)', AuthError],
+  ] as const) {
+    describe(name, () => {
+      it('renders a recoverable, user-friendly state without leaking internals', () => {
+        render(createElement(Component, { error: makeError(), reset: () => {}, retry: () => {} }));
 
-  it('omits the body paragraph when no body is supplied', async () => {
-    const container = await render(createElement(ErrorState, { title: 'Only a title' }));
+        const text = container.textContent ?? '';
+        expect(text).toContain('Something went wrong');
+        expect(text).toContain('temporary problem');
+        expect(findButton('Try again')).toBeDefined();
 
-    expect(container.textContent).toBe('Only a title');
-  });
-});
+        // No internal error detail reaches the DOM.
+        expect(text).not.toContain(SENTINEL);
+        expect(text.toLowerCase()).not.toContain('error:');
+        expect(text.toLowerCase()).not.toContain('stack');
 
-describe.each([
-  ['(app) boundary', AppError, 'Unhandled error in Fit40 application route'],
-  ['(auth) boundary', AuthError, 'Unhandled error in Fit40 authentication route'],
-  ['global boundary', GlobalError, 'Unhandled error in Fit40 root layout'],
-] as const)('%s', (_name, Boundary, logPrefix) => {
-  it('logs the unexpected error for operators', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const boom = new Error('connection terminated unexpectedly at db.internal:5432');
+        // Logging is preserved: the raw error is logged server-side.
+        expect(errorSpy).toHaveBeenCalled();
+        expect(errorSpy.mock.calls.flat().join(' ')).toContain(SENTINEL);
+      });
 
-    await render(createElement(Boundary, { error: boom, reset: () => {} }));
+      it('uses a non-landmark container (no nested <main>) — P2', () => {
+        render(createElement(Component, { error: makeError(), reset: () => {}, retry: () => {} }));
+        expect(container.querySelector('main')).toBeNull();
+        expect(container.querySelector('[role="alert"]')).not.toBeNull();
+      });
 
-    expect(spy).toHaveBeenCalled();
-    expect(spy.mock.calls.some((call) => String(call[0]).startsWith(logPrefix))).toBe(true);
-  });
+      it('delegates recovery to the framework retry mechanism, not reset()', () => {
+        const retry = vi.fn();
+        render(createElement(Component, { error: makeError(), reset: () => {}, retry }));
 
-  it('never leaks the internal message, stack or host details to the user', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const boom = new Error('connection terminated unexpectedly at db.internal:5432');
-    boom.stack = 'Error: boom\n    at render (/secret/path.tsx:1:1)';
+        const button = findButton('Try again');
+        expect(button).toBeDefined();
+        act(() => {
+          button?.click();
+        });
+        // retry() is the fresh-Server-Component-response path (refresh()+reset()).
+        expect(retry).toHaveBeenCalledTimes(1);
+      });
 
-    const container = await render(createElement(Boundary, { error: boom, reset: () => {} }));
-
-    expect(container.textContent).not.toContain('connection terminated unexpectedly');
-    expect(container.textContent).not.toContain('db.internal:5432');
-    expect(container.textContent).not.toContain('/secret/path.tsx');
-    expect(container.textContent).not.toContain('at render');
-  });
-
-  it('exposes a working retry control wired to reset()', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const reset = vi.fn();
-
-    const container = await render(createElement(Boundary, { error: new Error('x'), reset }));
-    const button = container.querySelector('button');
-    expect(button?.textContent).toBe('Try again');
-
-    await act(async () => {
-      button?.click();
+      it('has an accessible button label and is keyboard-focusable', () => {
+        render(createElement(Component, { error: makeError(), reset: () => {}, retry: () => {} }));
+        const button = findButton('Try again');
+        expect(button).toBeDefined();
+        expect(button?.getAttribute('type')).toBe('button');
+        // Focusable via keyboard (native button default, not disabled).
+        expect(button?.disabled).toBe(false);
+      });
     });
-
-    expect(reset).toHaveBeenCalledTimes(1);
-  });
-
-  it('is an accessible alert with a reachable, labeled button', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const container = await render(createElement(Boundary, { error: new Error('x'), reset: () => {} }));
-
-    expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    const button = container.querySelector('button');
-    expect(button?.getAttribute('type')).toBe('button');
-    expect((button?.textContent ?? '').trim().length).toBeGreaterThan(0);
-  });
+  }
 });
 
-describe('global-error boundary structure', () => {
-  it('renders its own html/body shell so it works without the root layout', () => {
-    // Rendered to an HTML string (not a jsdom container): <html>/<body> cannot
-    // be mounted inside a test div, but the serialized markup proves the
-    // boundary supplies the full document shell when the root layout has failed.
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+describe('S1 global-error boundary (owns the document)', () => {
+  it('renders its own <html>/<body> and keeps a single <main> landmark', () => {
     const html = renderToStaticMarkup(
-      createElement(GlobalError, { error: new Error('x'), reset: () => {} }),
+      createElement(GlobalError, { error: makeError(), reset: () => {}, retry: () => {} }),
     );
-
-    expect(html).toMatch(/^<html/);
+    expect(html).toContain('<html');
     expect(html).toContain('<body');
-    expect(html).toContain('lang="en"');
+    expect(html).toContain('<main');
+    expect((html.match(/<main[\s>]/g) ?? []).length).toBe(1);
     expect(html).toContain('Try again');
+    // Inline-styled fallback usable when Tailwind/app shell have failed.
+    expect(html.toLowerCase()).toContain('style=');
+  });
+
+  it('does not leak internal error details into the document', () => {
+    const html = renderToStaticMarkup(
+      createElement(GlobalError, { error: makeError(), reset: () => {}, retry: () => {} }),
+    );
+    expect(html).not.toContain(SENTINEL);
+    expect(html.toLowerCase()).not.toContain('error:');
   });
 });

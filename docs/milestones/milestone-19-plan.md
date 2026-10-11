@@ -124,7 +124,7 @@ Route files (`loading`/`error`/`not-found`) render shared components and perform
 **App Router error-boundary limitations to respect (Next 16.3.1, verify in S1):**
 - `error.tsx` catches errors in its **child segments**, not in its own `layout` — hence a root `global-error.tsx` for root-layout failures.
 - `global-error.tsx` must render its own `<html>`/`<body>` and cannot rely on the root layout.
-- Boundaries do not re-render on navigation; `reset()` is the recovery action.
+- Boundaries do not re-render on navigation; `retry()` is the recovery action (`reset()` alone only clears the boundary — see §6).
 - `loading.tsx` auto-wraps in a Suspense boundary.
 - `not-found.tsx` is not an error state.
 - Boundaries do **not** catch Server Action or event-handler errors (already handled by typed action state).
@@ -134,7 +134,7 @@ Route files (`loading`/`error`/`not-found`) render shared components and perform
 
 ## 6. Slice 1 — Error boundary foundation
 
-**Goal.** Unexpected failures show a recoverable, non-technical message instead of a raw error screen; auth redirects and 404s stay distinct; `reset()` retries.
+**Goal.** Unexpected failures show a recoverable, non-technical message instead of a raw error screen; auth redirects and 404s stay distinct; `retry()` recovers by fetching a fresh Server Component response.
 
 **Preconditions.** None. Purely additive; independent of every other slice.
 
@@ -153,7 +153,7 @@ Route files (`loading`/`error`/`not-found`) render shared components and perform
 - `global-error.tsx` is the last resort for root-layout failures and must be self-contained.
 
 **6.2 Verification protocol (Correction 3).** Before finalizing placement, confirm against `next@16.3.1` and the actual layouts:
-1. Add a throwaway child that throws → confirm `(app)/error.tsx` catches and `reset()` re-renders.
+1. Add a throwaway child that throws → confirm `(app)/error.tsx` catches and `retry()` re-renders (fetching a fresh response).
 2. Make `(app)/layout.tsx` throw → confirm `(app)/error.tsx` does **not** catch it and `global-error.tsx` does.
 3. Make the root layout throw → confirm only `global-error.tsx` catches.
 4. `redirect('/login?next=…')` → confirm the boundary does not intercept; the login page renders.
@@ -161,10 +161,10 @@ Route files (`loading`/`error`/`not-found`) render shared components and perform
 6. An expected `{status:'unavailable'}` view → confirm it renders its own copy, not the boundary.
 Record findings; adjust placement if the installed version differs. Remove the throwaway probes before commit.
 
-**6.3 Copy & a11y.** `ErrorState` reuses `EmptyState` geometry; no new tokens. Log via `console.error` (existing convention). **Never** render `error.message`. Approved framing: *"Something went wrong while loading this page."* / *"This is a temporary problem, not something you did."* with a `Try again` button (`reset()`). `global-error.tsx` uses plain styling (Tailwind may not have loaded). Do **not** add try/catch around existing degrade logic.
+**6.3 Copy & a11y.** `ErrorState` reuses `EmptyState` geometry; no new tokens. Log via `console.error` (existing convention). **Never** render `error.message`. Approved framing: *"Something went wrong while loading this page."* / *"This is a temporary problem, not something you did."* with a `Try again` button wired to the framework `retry()` (not `reset()`), so recovery fetches a fresh Server Component response. Segment fallbacks use a non-landmark `<div>` (the route-group layout owns the single `<main>`); `global-error.tsx` keeps its own `<main>` because it owns the whole document. `global-error.tsx` uses plain styling (Tailwind may not have loaded). Do **not** add try/catch around existing degrade logic.
 
 **6.4 Acceptance.**
-- A throw in an `(app)` child page renders the recoverable boundary; `reset()` retries.
+- A throw in an `(app)` child page renders the recoverable boundary; `retry()` recovers by fetching a fresh response.
 - `requireUser` redirect still reaches login (no boundary interception).
 - `notFound()` still renders 404.
 - A typed `{status:'unavailable'}` still renders its own copy, not the boundary.
@@ -355,7 +355,7 @@ Record findings; adjust placement if the installed version differs. Remove the t
 
 | Slice | Unit | Component | Integration | Guard / manual |
 |---|---|---|---|---|
-| S1 | `error-state.test.ts` | boundary render + reset | — | throwaway throw probes (Correction 3); manual per-route |
+| S1 | `error-state.test.ts` + `error-boundary-recovery.test.ts` | boundary render + fresh-response `retry` (real framework handler) + single-`main` composition | — | throwaway throw probes (Correction 3); manual per-route |
 | S2 | `RoutePlaceholder` unit | no digits, `aria-hidden`, `role=status` | — | source-scan: all `loading.tsx` import the primitive |
 | S3 | `nav-items.test.ts` | jsdom both auth states | — | `auth-aware-navigation.test.ts`; manual 375/393/1440 |
 | S4 | nav-items update | active-state assertions | — | update M18 guard; manual tab + session-hide |

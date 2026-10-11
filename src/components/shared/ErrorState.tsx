@@ -11,7 +11,9 @@ import { cn } from '@/lib/utils';
  * CONTRACT: this component only ever renders the caller-supplied `title` and
  * `body`. It never receives or renders a raw `Error`, so internal messages,
  * stack traces, SQL and digests cannot leak through it. The retry control is
- * supplied by the caller as `action` so the client boundary owns `reset()`.
+ * supplied by the caller as `action` so the client boundary owns `retry()`.
+ * (`retry()` — not `reset()` — is the M19 P1 recovery control, because it
+ * fetches a fresh Server Component response; see milestone-19-plan.md §6.)
  */
 export interface ErrorStateProps {
   readonly title: string;

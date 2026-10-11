@@ -335,7 +335,12 @@ function CompleteWorkoutButton({ sessionId }: { sessionId: string }) {
 ```typescript
 'use client';
 
-export default function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
+// `retry` (not `reset`) is the recovery action. Verified against next@16.3.1:
+// `ErrorInfo = { error: unknown; reset: () => void; retry: () => void }`, and the
+// framework's `retry()` runs `context.refresh()` before `reset()` — so recovery
+// fetches a FRESH Server Component response. `reset()` alone only clears the
+// boundary and can replay the same failed response.
+export default function ErrorPage({ error, retry }: { error: unknown; retry: () => void }) {
   useEffect(() => {
     // Log to error reporting service
     console.error(error);
@@ -347,7 +352,7 @@ export default function ErrorPage({ error, reset }: { error: Error; reset: () =>
       <p className="text-muted-foreground">
         An unexpected error occurred. Please try again.
       </p>
-      <button onClick={reset}>Try again</button>
+      <button onClick={retry}>Try again</button>
     </div>
   );
 }
@@ -355,10 +360,26 @@ export default function ErrorPage({ error, reset }: { error: Error; reset: () =>
 
 ### Rules
 
-1. **Every route group should have an `error.tsx`.**
+1. **Every route group should have an `error.tsx`.** Implemented in M19 S1: `(app)/error.tsx`, `(auth)/error.tsx`, and a root `global-error.tsx` (see below).
 2. **Log errors in `useEffect`.** Do not log during render.
-3. **Do not expose error details to users.** No stack traces, no internal messages.
-4. **Provide a recovery path.** "Try again" or link to home.
+3. **Do not expose error details to users.** No stack traces, no internal messages. Boundaries log the raw `error` and render only fixed, user-facing copy via `ErrorState`; Next.js itself sends a digest, not the message, to the client.
+4. **Provide a recovery path that fetches a fresh response.** "Try again" (`retry()`) is provided on every boundary. Verified against `next@16.3.1`: the framework hands each boundary a `retry` prop implemented as `startTransition(() => { context.refresh(); reset(); })`. `context.refresh()` requests a **fresh Server Component response**; `reset()` alone only clears boundary state and can replay the failed response, so a transient database/server failure would stay unrecoverable after the service recovers. Boundaries therefore wire the button to `retry`, never `reset`.
+5. **A boundary does not cover its own layout.** Verified against `next@16.3.1`: a segment's `error.tsx` catches failures in its **child pages**, but a failure in that segment's own `layout.tsx` propagates to the parent — ultimately to the root `global-error.tsx`. Therefore a root-level `global-error.tsx` is required in addition to the route-group boundaries.
+6. **Exactly one `main` landmark per page (M19 P2).** Each route-group layout already owns the single `<main>` for its subtree, so a segment `error.tsx` fallback renders a non-landmark `<div>` — never a second `<main>`. Only `global-error.tsx` renders a `<main>`, because when it renders it owns the entire HTML document (it supplies its own `<html>`/`<body>`).
+
+Automated S1 tests verify Fit40-owned rendering, privacy, accessibility, callback delegation (including repeated retry attempts), and single-`main` composition. The refresh behavior above comes from prior inspection of the installed Next.js 16.3.1 runtime; production HTTP probes verified scope, redirects, 404s and payload privacy. These are distinct evidence sources, and no real-browser end-to-end retry/recovery test was performed. Tests must not import private framework internals to assert Next.js behavior.
+
+### Root `global-error.tsx`
+
+- Must be a Client Component and must render its own `<html>`/`<body>`.
+- It is the **only** boundary that catches failures in the root layout (`src/app/layout.tsx`). When it renders, the application layout, fonts and Tailwind stylesheet have already failed, so it uses plain inline-styled HTML and no design tokens.
+
+### Contracts the boundaries must preserve
+
+- `redirect()` (including `requireUser`) is navigation, not a rendering failure — boundaries never intercept it.
+- `notFound()` renders the 404 route, not an error boundary.
+- Expected domain/application errors are returned as typed `Result`/view states and render their own truthful "unavailable"/empty copy. Unexpected failures are converted to recoverable errors only at this boundary layer — never into empty or successful results.
+
 
 ---
 

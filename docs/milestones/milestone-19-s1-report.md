@@ -15,7 +15,9 @@ domain/application "unavailable" states are never replaced by a generic error.
 
 Correction 3 required evidence, not assumption. Isolated probe routes were
 built, exercised against a real `next build` + `next start` server, and then
-fully removed. Findings (recorded before writing the final boundaries):
+fully removed. HTTP probe findings were recorded before writing the final
+boundaries. Recovery semantics below come separately from inspection of the
+installed framework runtime, not from browser retry/recovery testing:
 
 | Case | Verified behavior |
 |------|-------------------|
@@ -25,7 +27,7 @@ fully removed. Findings (recorded before writing the final boundaries):
 | `redirect()` / `requireUser()` | HTTP **307** to `/login?next=…` — a navigation; never intercepted by a boundary. |
 | `notFound()` | HTTP **404** via the `/_not-found` route; never an error boundary. |
 | Expected typed app error | Rendered by its own view state; never reaches a boundary. |
-| `retry()` recovery | Fetches a **fresh** Server Component response (`context.refresh()` then `reset()`), so a transient failure is recovered once the underlying cause clears. `reset()` alone only clears boundary state. |
+| `retry()` recovery (runtime inspection only) | Fetches a **fresh** Server Component response (`context.refresh()` then `reset()`), so a transient failure is recovered once the underlying cause clears. `reset()` alone only clears boundary state. |
 | Internal-detail leak | **0** occurrences of the thrown message / `Error:` / stack in the streamed payload; Next.js sends a **digest**, not the message. |
 
 `ErrorInfo` in 16.3.1 is `{ error: unknown; reset: () => void; retry: () => void }`.
@@ -74,21 +76,19 @@ affect the build's type gate.
 
 - `tests/unit/components/shared/error-state.test.ts` (10 tests) — behavioral
   render (jsdom + `react-dom/client` + `act`, matching repo convention):
-  renders title/body/action; omits optional parts; `role="alert"`; renders only
+  renders error copy and retry controls; `role="alert"`; renders only
   fixed copy (a sentinel thrown message never appears); global-error document
   shell verified via `react-dom/server` `renderToStaticMarkup` (own
   `<html>`/`<body>`); recovery delegates to the injected `retry` prop.
 - `tests/unit/components/shared/error-boundary-recovery.test.ts` (15 tests) —
-  **honest framework-integration recovery harness** (P1). Drives the REAL
-  `ErrorBoundaryHandler` class from `next/dist/client/components/error-boundary`
-  with a REAL `AppRouterContext` whose `refresh()` is observed, using each real
-  boundary as `errorComponent`. A throwing child simulates a failed Server
-  Component; the test clicks the actual `Try again` button and asserts the
-  framework's own `retry()` reached `context.refresh()` (the fresh-response
-  path) — not a mocked callback. Covers initial failure, fresh-response
-  request, repeated failure + retry, recovery once the failure clears, and the
-  same across all three boundaries. Also asserts the single-`main` rule (P2) by
-  composing each segment fallback with its REAL owning layout.
+  **application-level component contract coverage**. Renders the three Fit40
+  boundaries directly with supplied `error`, `reset` and `retry` props. Checks
+  fixed error rendering, logging, DOM privacy, alert semantics and focusable
+  retry controls. Verifies callback invocation, repeated invocation while the
+  fallback remains visible, and that `reset` is never called. Retains the
+  single-`main` assertions using the actual application-owned layouts and the
+  global document fallback. No private Next.js imports, framework handler,
+  simulated server recovery, or framework refresh assertion remains.
 - `tests/unit/architecture/error-boundaries.test.ts` (14 tests) — source-scan
   guard, matching the existing architecture-guard idiom: `global-error.tsx`
   is a client component rendering `<html>`/`<body>`; the `(app)` and `(auth)`
@@ -104,7 +104,7 @@ affect the build's type gate.
 | Focused S1 tests | `npx vitest run tests/unit/components/shared/error-state.test.ts tests/unit/components/shared/error-boundary-recovery.test.ts tests/unit/architecture/error-boundaries.test.ts` | **39 passed** (10 + 15 + 14) |
 | Typecheck | `npx tsc --noEmit` | **exit 0, 0 errors** |
 | Lint | `npm run lint` | **exit 0** |
-| Full unit suite | `npx vitest run` | **219 files / 3008 tests passed** (S1 baseline 218/2991 → +1 file, +17 tests) |
+| Full unit suite | `npx vitest run` | **219 files / 3008 tests passed** |
 | Production build | `npx next build --webpack` | **exit 0, prerendered routes, no probe routes** |
 | `git diff --check` | `git diff --check` | **clean** |
 
@@ -120,10 +120,11 @@ typecheck. `.next/` is git-ignored (`.gitignore:17`).
 - **Low:** `global-error.tsx` intentionally uses inline styles, so it will not
   visually match the app theme — acceptable, since it only renders when the app
   shell/styles have already failed.
-- **Verified, not assumed:** manual browser behavior for redirect/404/leak was
-  confirmed against a real `next start` server during the probe phase (§2);
-  the final UI itself is covered by unit/component tests, not by a manual
-  click-through of the shipped pages.
+- **Evidence limits:** redirect/404/leak and boundary scope were checked by
+  production HTTP probes against `next start` (§2), not by browser interaction.
+  Current automated tests cover application-level callback delegation and UI
+  contracts. Runtime inspection established Next.js retry semantics separately.
+  No real-browser end-to-end retry/recovery test was performed.
 
 ## 8. S2–S6 untouched
 
@@ -142,11 +143,24 @@ An independent code review raised two findings, both fixed on this branch:
   recovered. All three boundaries now wire the `Try again` control to the
   framework `retry` prop (verified in `next@16.3.1` to run
   `context.refresh()` + `reset()`, i.e. a **fresh** Server Component response).
-  Proven behaviorally by `error-boundary-recovery.test.ts`, which drives the
-  real `ErrorBoundaryHandler` and observes `context.refresh()` being called.
+  The current component tests verify delegation to the supplied callback;
+  framework fresh-response behavior is supported by the prior runtime inspection.
 - **P2 — nested `main` landmarks.** Both route-group layouts already own the
   single `<main>` for their subtree, so the segment fallbacks previously added a
   second one. `(app)/error.tsx` and `(auth)/error.tsx` now render a non-landmark
   `<div>`; `global-error.tsx` keeps its `<main>` because it owns the entire
   document. Asserted by the architecture guard and by composing each fallback
-  with its real layout in the recovery harness.
+  with its real layout in the component contract tests.
+
+## 10. PR #24 review fixes
+
+- **P1 — private framework test coupling removed.** Replaced the internal
+  Next.js handler/router harness with Fit40-owned public component contract
+  tests. Preserved production `retry` wiring and application-layout landmark
+  coverage. Coverage claims now distinguish callback tests, prior runtime
+  inspection and prior production HTTP probes.
+- **P2 — recovery guidance aligned.** The coding-conventions error example
+  uses `error: unknown` and a native button bound to `retry`; error-handling
+  guidance and the M19 plan consistently specify `retry` as the recovery action.
+
+The verification table in §6 records the checks rerun for these review fixes.

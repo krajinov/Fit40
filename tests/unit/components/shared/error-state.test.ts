@@ -10,24 +10,9 @@ import AuthError from '@/app/(auth)/error';
 import GlobalError from '@/app/global-error';
 
 /**
- * S1 (M19) regression tests for the recoverable error boundaries.
- *
- * P1: the recovery button must delegate to the framework `retry` mechanism
- *     (which the framework implements as context.refresh() + reset(), i.e. a
- *     FRESH Server Component response) — never to `reset()` alone (state-only).
- * P2: segment boundaries render a non-landmark <div>; only global-error, which
- *     owns the whole document, keeps the <main> landmark.
- *
- * The rendered-output assertions below prove no internal error detail leaks to
- * users, that logging is preserved, and that the boundaries stay distinct from
- * auth redirects / not-found. Fresh-response recovery is covered by the
- * framework-integration harness in `error-boundary-recovery.test.ts`, which
- * drives the real Next.js ErrorBoundaryHandler retry() -> router refresh() ->
- * reset() mechanism and asserts repeated failures plus a simulated successful
- * recovery. The production probe recorded in the S1 report verifies only the
- * HTTP error response and information-leak behavior; no real-browser
- * end-to-end retry/recovery test was performed (retry()'s refresh() is
- * framework code we do not reimplement).
+ * Fit40 boundary rendering and callback delegation only. Retry semantics come
+ * from prior runtime inspection; scope/privacy come from prior HTTP probes;
+ * no real-browser end-to-end retry/recovery test has been performed.
  */
 
 const SENTINEL = 'SECRET_INTERNAL_DSN_must_not_render';
@@ -44,7 +29,7 @@ beforeEach(() => {
   // Tells React this environment supports act(...), so state updates from the
   // recovery wiring are flushed synchronously and asserted reliably.
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  // Silence the boundary's real server-side console.error logging during tests;
+  // Silence the boundary's console.error logging during tests;
   // the logging-preservation test below asserts against this shared spy.
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   container = document.createElement('div');
@@ -90,7 +75,7 @@ describe('S1 segment error boundaries', () => {
         expect(text.toLowerCase()).not.toContain('error:');
         expect(text.toLowerCase()).not.toContain('stack');
 
-        // Logging is preserved: the raw error is logged server-side.
+        // Logging is preserved: the supplied error is logged.
         expect(errorSpy).toHaveBeenCalled();
         expect(errorSpy.mock.calls.flat().join(' ')).toContain(SENTINEL);
       });
@@ -110,7 +95,7 @@ describe('S1 segment error boundaries', () => {
         act(() => {
           button?.click();
         });
-        // retry() is the fresh-Server-Component-response path (refresh()+reset()).
+        // This assertion covers delegation only, not framework refresh behavior.
         expect(retry).toHaveBeenCalledTimes(1);
       });
 

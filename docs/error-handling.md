@@ -367,6 +367,8 @@ export default function ErrorPage({ error, retry }: { error: unknown; retry: () 
 5. **A boundary does not cover its own layout.** Verified against `next@16.3.1`: a segment's `error.tsx` catches failures in its **child pages**, but a failure in that segment's own `layout.tsx` propagates to the parent — ultimately to the root `global-error.tsx`. Therefore a root-level `global-error.tsx` is required in addition to the route-group boundaries.
 6. **Exactly one `main` landmark per page (M19 P2).** Each route-group layout already owns the single `<main>` for its subtree, so a segment `error.tsx` fallback renders a non-landmark `<div>` — never a second `<main>`. Only `global-error.tsx` renders a `<main>`, because when it renders it owns the entire HTML document (it supplies its own `<html>`/`<body>`).
 
+Automated S1 tests verify Fit40-owned rendering, privacy, accessibility, callback delegation (including repeated retry attempts), and single-`main` composition. The refresh behavior above comes from prior inspection of the installed Next.js 16.3.1 runtime; production HTTP probes verified scope, redirects, 404s and payload privacy. These are distinct evidence sources, and no real-browser end-to-end retry/recovery test was performed. Tests must not import private framework internals to assert Next.js behavior.
+
 ### Root `global-error.tsx`
 
 - Must be a Client Component and must render its own `<html>`/`<body>`.

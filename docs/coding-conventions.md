@@ -398,7 +398,11 @@ export const getWorkout = cache(async (id: WorkoutId) => {
 // error.tsx (must be client)
 'use client';
 
-export function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
+import { useEffect } from 'react';
+
+// Next.js 16.3.1 supplies retry to request a fresh response; reset alone
+// only clears boundary state. See docs/error-handling.md.
+export default function ErrorPage({ error, retry }: { error: unknown; retry: () => void }) {
   useEffect(() => {
     console.error(error); // Log to error reporting service
   }, [error]);
@@ -406,7 +410,7 @@ export function ErrorPage({ error, reset }: { error: Error; reset: () => void })
   return (
     <div>
       <h2>Something went wrong</h2>
-      <button onClick={reset}>Try again</button>
+      <button type="button" onClick={retry}>Try again</button>
     </div>
   );
 }

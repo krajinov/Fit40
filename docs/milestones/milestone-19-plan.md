@@ -94,7 +94,7 @@ Correction 3 requires an **implementation-time verification step**, documented i
 | Auth redirect | `requireUser` → `redirect('/login?next=…')` | login page (a navigation, never an error) |
 | Not found | `notFound()` / malformed params | `not-found.tsx` (404) |
 | Expected domain/application error | `Result.err` → typed view state | truthful `unavailable` / empty copy |
-| Unexpected rendering failure | thrown | **new** `error.tsx` with `reset()` |
+| Unexpected rendering failure | thrown | **new** `error.tsx` with `retry()` |
 
 `redirect()` throws `NEXT_REDIRECT`; `notFound()` throws `NEXT_NOT_FOUND`. **Neither may be caught, logged as an error, or converted to boundary UI.** The error boundary must re-throw these sentinel errors unchanged.
 
@@ -160,6 +160,8 @@ Route files (`loading`/`error`/`not-found`) render shared components and perform
 5. `notFound()` → confirm `not-found.tsx` renders, not the boundary.
 6. An expected `{status:'unavailable'}` view → confirm it renders its own copy, not the boundary.
 Record findings; adjust placement if the installed version differs. Remove the throwaway probes before commit.
+
+S1 evidence: the prior production HTTP probes verified boundary scope, redirects, 404s and streamed-payload privacy. The fresh-response `retry()` behavior was established by inspecting the installed Next.js 16.3.1 runtime. Current automated tests exercise only Fit40-owned component contracts and callback delegation; no real-browser end-to-end retry/recovery test was performed.
 
 **6.3 Copy & a11y.** `ErrorState` reuses `EmptyState` geometry; no new tokens. Log via `console.error` (existing convention). **Never** render `error.message`. Approved framing: *"Something went wrong while loading this page."* / *"This is a temporary problem, not something you did."* with a `Try again` button wired to the framework `retry()` (not `reset()`), so recovery fetches a fresh Server Component response. Segment fallbacks use a non-landmark `<div>` (the route-group layout owns the single `<main>`); `global-error.tsx` keeps its own `<main>` because it owns the whole document. `global-error.tsx` uses plain styling (Tailwind may not have loaded). Do **not** add try/catch around existing degrade logic.
 
@@ -355,7 +357,7 @@ Record findings; adjust placement if the installed version differs. Remove the t
 
 | Slice | Unit | Component | Integration | Guard / manual |
 |---|---|---|---|---|
-| S1 | `error-state.test.ts` + `error-boundary-recovery.test.ts` | boundary render + fresh-response `retry` (real framework handler) + single-`main` composition | — | throwaway throw probes (Correction 3); manual per-route |
+| S1 | `error-state.test.ts` + `error-boundary-recovery.test.ts` | boundary rendering/privacy/accessibility + supplied `retry` callback (including repeated invocation) + single-`main` composition | — | throwaway throw probes (Correction 3); manual per-route |
 | S2 | `RoutePlaceholder` unit | no digits, `aria-hidden`, `role=status` | — | source-scan: all `loading.tsx` import the primitive |
 | S3 | `nav-items.test.ts` | jsdom both auth states | — | `auth-aware-navigation.test.ts`; manual 375/393/1440 |
 | S4 | nav-items update | active-state assertions | — | update M18 guard; manual tab + session-hide |

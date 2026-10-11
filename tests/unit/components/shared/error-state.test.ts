@@ -20,9 +20,14 @@ import GlobalError from '@/app/global-error';
  *
  * The rendered-output assertions below prove no internal error detail leaks to
  * users, that logging is preserved, and that the boundaries stay distinct from
- * auth redirects / not-found. Fresh-response recovery end-to-end is proven by
- * the production-runtime probe recorded in the S1 report (retry()'s refresh()
- * is framework code we do not reimplement).
+ * auth redirects / not-found. Fresh-response recovery is covered by the
+ * framework-integration harness in `error-boundary-recovery.test.ts`, which
+ * drives the real Next.js ErrorBoundaryHandler retry() -> router refresh() ->
+ * reset() mechanism and asserts repeated failures plus a simulated successful
+ * recovery. The production probe recorded in the S1 report verifies only the
+ * HTTP error response and information-leak behavior; no real-browser
+ * end-to-end retry/recovery test was performed (retry()'s refresh() is
+ * framework code we do not reimplement).
  */
 
 const SENTINEL = 'SECRET_INTERNAL_DSN_must_not_render';

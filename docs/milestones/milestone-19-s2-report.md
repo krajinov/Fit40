@@ -82,19 +82,37 @@ isolated probe routes (now removed):
 - **Deepest matching boundary wins.** `/history → /history/exercises/[slug]`
   resolves the exercise placeholder; `/dashboard → /programs/x` the program one.
   The nested routes each carry their own `loading.tsx`.
-- **Auth redirect — documented tradeoff.** With a `loading.tsx` present, the
-  route-group layout resolves and Next flushes `200 + fallback` before the
-  page's `requireUser()` runs; the redirect then rides the stream
-  (`NEXT_REDIRECT` digest + meta-refresh) instead of a native `307`. Without a
-  fallback there is nothing to flush, so the redirect throws first as a native
-  `307`. The redirect **still functions** in both cases (both mechanisms are
-  emitted). Correcting this to a native redirect would require hoisting the auth
-  guard above the loading boundary — i.e. changing `(app)/layout.tsx`'s mixed
-  public/private design — which is explicitly out of S2 scope. Recorded as a
-  known limitation (§8), not silently accepted as ideal.
-- `notFound()` and the S1 error boundaries remain reachable through the same
-  segments; the probe confirmed a 404 body and a 500 error state respectively
-  were unaffected by adding the fallback.
+- **Auth redirect — HTTP status behavior.** With a `loading.tsx` present, the
+  route-group layout resolves and Next flushes the response head (`200`) and the
+  fallback before the page's `requireUser()` runs; the redirect then rides the
+  stream (`NEXT_REDIRECT` digest + meta-refresh) rather than being sent as a
+  native `307`. Without a fallback there is nothing to flush, so the redirect
+  throws first as a native `307`. This is standard Next.js streaming behavior
+  (`loading.tsx` commits the response status before the segment resolves).
+  - **Independently verified:** all five private targets reach the correct
+    `/login?next=…` destination in a real browser, with JavaScript both enabled
+    and disabled. Private page reads stay behind `requireUser()`, and
+    personalized metadata also checks authentication, so no unauthenticated
+    private content is exposed. Tested responses carry `private, no-cache,
+    no-store` headers; no shared-cache exposure was observed.
+  - **Operational consequence:** status-only monitors and ordinary HTTP clients
+    (which follow a `Location` header that is absent here) see `200` and may
+    interpret these responses as successful. This is a documented streaming
+    tradeoff, not an authentication bypass.
+- **`notFound()` — HTTP status behavior.** The probe confirmed the not-found
+  *content* renders correctly through the same segments, but some not-found
+  routes (`/programs/unknown`, malformed exercise-history parameters) also
+  return HTTP `200` with the not-found body and `noindex`, rather than a native
+  `404`. As with redirects, status-only clients can misread these as
+  successful. Actual crawler indexing was not verified.
+- **Possible localized remedy (NOT implemented or verified in S2).** Preserving
+  native `307`/`404` statuses does **not** necessarily require restructuring the
+  mixed public/private `(app)/layout.tsx`. A narrower approach is to
+  authenticate before an explicit Suspense boundary around the slow content, and
+  to narrow the inherited program-detail loading boundary where necessary for
+  session routes. This is recorded as a potential future improvement only; it is
+  not implemented, verified, or silently deferred to S3 — S3 navigation changes
+  alone will not change streaming HTTP status behavior.
 
 No diagnostic routes, intentional crashes, or temporary files remain; the final
 build listed all 18 app routes with **no probe routes**.
@@ -140,12 +158,19 @@ supported config.
 
 ## 8. Known limitations & risks
 
-- **Auth-redirect status change (documented, not fixed).** Signed-out cold
+- **Streamed HTTP status behavior (documented, not fixed).** Signed-out cold
   navigation to a target route now returns `200 + streamed fallback +`
-  `NEXT_REDIRECT`/meta-refresh instead of a native `307` (§5). The redirect is
-  preserved and functional. A native-redirect fix requires moving the auth guard
-  above the loading boundary, which changes `(app)/layout.tsx`'s deliberately
-  mixed public/private design — out of S2 scope.
+  `NEXT_REDIRECT`/meta-refresh instead of a native `307`, and some not-found
+  routes return `200 + noindex` instead of a native `404` (§5). The login
+  destination and not-found content are preserved and functional, and responses
+  carry `private, no-cache, no-store`; no private content is exposed. However,
+  status-only monitors and ordinary HTTP clients can misinterpret these as
+  successful. No locked contract requires native `307`/`404`, so this is not an
+  authentication release blocker. A native-status fix does **not** require
+  restructuring the mixed `(app)/layout.tsx`: a localized remedy (authenticate
+  before an explicit Suspense boundary; narrow the inherited program-detail
+  boundary for session routes) is a potential future improvement — not
+  implemented or verified here, and not resolved by S3 navigation changes.
 - **Evidence limits.** Loading-boundary behavior and the redirect/404/error
   interactions were verified by production HTTP probes against `next start`, not
   by browser interaction. No visual/manual verification at 375/393/1440px was

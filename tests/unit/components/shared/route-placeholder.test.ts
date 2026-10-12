@@ -19,6 +19,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -31,7 +32,9 @@ import ExerciseHistoryLoading from '@/app/(app)/history/exercises/[slug]/loading
 import ProgramDetailLoading from '@/app/(app)/programs/[programSlug]/loading';
 import SessionLoading from '@/app/(app)/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session/loading';
 
-const SRC = '/Users/krajinov/Excercises AI/Fit40/src';
+// Vitest runs from the repository root (the `global-setup` path convention);
+// resolve the source root from cwd so the tests are checkout-location agnostic.
+const SRC = path.join(process.cwd(), 'src');
 
 describe('RoutePlaceholder (M19 S2)', () => {
   it('renders exactly one polite loading status carrying the label', () => {

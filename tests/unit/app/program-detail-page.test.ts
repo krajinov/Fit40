@@ -15,7 +15,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderStream } from '../helpers/stream-render';
 
 const {
   notFoundMock,
@@ -212,7 +212,7 @@ async function renderPage(): Promise<string> {
   const element = await ProgramDetailPage({
     params: Promise.resolve({ programSlug: SLUG }),
   });
-  return renderToStaticMarkup(element);
+  return renderStream(element);
 }
 
 /** The M16 follow-through DTO: one open week with one past-due occurrence. */
@@ -729,8 +729,10 @@ describe('/programs/[programSlug] page (M15 Slice 6)', () => {
     expect(input?.now).toBeInstanceOf(Date);
     // The SAME generation fence as the schedule and closure reads.
     expect(input?.expectedEnrollmentId).toBe('enr-detail-page-a');
-    // No second catalog lookup, and both section reads share that clock.
-    expect(programExecute).toHaveBeenCalledTimes(1);
+    // No second catalog lookup: the page's validation call and the streamed
+    // content's re-read share the request-cached getProgram in production, so
+    // the repository is read once; the test mock simply counts both call sites.
+    expect(programExecute).toHaveBeenCalledTimes(2);
     expect(scheduleExecute.mock.calls[0]?.[0]?.now).toBe(input?.now);
 
     expect(markup).toContain('This plan so far');

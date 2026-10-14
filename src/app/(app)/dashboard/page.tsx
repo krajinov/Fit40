@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 
 import { buttonVariants } from '@/components/ui/button';
 import { PageContainer } from '@/components/shared/PageContainer';
+import { RoutePlaceholder } from '@/components/shared/RoutePlaceholder';
 import { requireUser } from '@/features/auth/current-user';
 import { getUserProfileUseCase } from '@/features/profile/services';
 import { formatDashboardDate } from '@/features/dashboard/dashboard-labels';
@@ -25,6 +27,15 @@ export const metadata: Metadata = {
   title: 'Dashboard',
 };
 
+/**
+ * M19 S2 review fix: authentication and the profile steering redirect run
+ * BEFORE this page returns any JSX, and no segment `loading.tsx` boundary
+ * exists anywhere in the (app) chain — so a signed-out cold request receives a
+ * native 307 from requireUser()/redirect() instead of a streamed 200 +
+ * meta-refresh. Only the slow view assembly streams, behind an explicit
+ * Suspense boundary carrying the same non-fabricated placeholder geometry the
+ * deleted loading.tsx used to show (M19 plan §7.1).
+ */
 export default async function DashboardPage() {
   const user = await requireUser('/dashboard');
 
@@ -40,7 +51,32 @@ export default async function DashboardPage() {
   // insights' UTC week windows (the presentation layer never calls
   // Date.now() itself — the domain receives a caller-supplied instant).
   const now = new Date();
-  const view = await buildDashboardView(user.id, profile, now);
+  // Started, not awaited: the slow multi-read assembly is what streams.
+  const viewPromise = buildDashboardView(user.id, profile, now);
+
+  return (
+    <Suspense
+      fallback={
+        <PageContainer>
+          <RoutePlaceholder
+            label="Loading your training"
+            blocks={['h-6 w-40', 'h-9 w-64 max-w-full', 'h-44', 'h-40', 'h-40']}
+          />
+        </PageContainer>
+      }
+    >
+      <DashboardContent viewPromise={viewPromise} now={now} />
+    </Suspense>
+  );
+}
+
+interface DashboardContentProps {
+  readonly viewPromise: ReturnType<typeof buildDashboardView>;
+  readonly now: Date;
+}
+
+async function DashboardContent({ viewPromise, now }: DashboardContentProps) {
+  const view = await viewPromise;
 
   const currentProgram = view.currentProgram;
   // The current week is resolved ONCE in the view assembly from the SAME

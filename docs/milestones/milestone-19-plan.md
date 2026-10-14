@@ -194,22 +194,23 @@ S1 evidence: the prior production HTTP probes verified boundary scope, redirects
 
 **Excluded:** public catalog routes (`/exercises`, `/programs`) — cheap already; latency UI there would be novelty, not value.
 
-**7.1 Shared vs route-specific — no skeleton framework.** NEW `src/components/shared/RoutePlaceholder.tsx` (props `label`, optional `blocks`, `className`; `aria-hidden` geometry using `SectionCard` radius/border and the `bg-surface-2/50` treatment proven at `exercises/page.tsx:39-44`; one `role="status"` polite live region carrying only label text, never a number). Plus six `loading.tsx` files composing it with route-appropriate geometry: dashboard (header + card stack), progress (three chart-height blocks + summary), history (totals + rows), history/exercises (trend + rows), program detail (header + section cards), session.
+**7.1 Shared vs route-specific — no skeleton framework.** `src/components/shared/RoutePlaceholder.tsx` (props `label`, optional `blocks`, `className`; `aria-hidden` geometry using `SectionCard` radius/border and the `bg-surface-2/50` treatment proven at `exercises/page.tsx:39-44`; one `role="status"` polite live region carrying only label text, never a number). Each target **page** composes it as its own explicit `Suspense` fallback with route-appropriate geometry: dashboard (header + card stack), progress (three chart-height blocks + summary), history (totals + rows), program detail (header + section cards), session. **Review fix (PR #25, four P2 threads):** the originally planned six `loading.tsx` files were deleted — a segment boundary flushed `200` before the pages' own `requireUser()`/`notFound()` could run. Status-critical checks (auth, param validation, resource existence) now complete before the page returns any JSX; only the slow success path streams. `/history/exercises/[slug]` has no boundary at all (its view is already awaited by `generateMetadata`; a boundary could only reintroduce the post-flush `notFound()` hazard).
 
-**7.2 Nested behavior.** Deepest matching boundary wins: `/history → /history/exercises/[slug]` must show the exercise placeholder; `/dashboard → /programs/x` the program one.
+**7.2 Nested behavior.** Each page owns its boundary, so there is no inherited-boundary hazard: removing the program-detail segment boundary also cleared the session route that inherited it. `/history` and `/history/exercises/[slug]` no longer interact through a shared ancestor boundary.
 
 **7.3 Layout stability & a11y.** Placeholder heights approximate the loaded layout to avoid shift. Geometry is `aria-hidden`; at most one polite status message; no digits.
 
 **7.4 Acceptance.**
-- Placeholder appears immediately on cold navigation for all six routes.
+- Placeholder appears on cold navigation for the five streaming routes; `/history/exercises/[slug]` deliberately has none (§7.1).
 - Contains no number, date, exercise name or workout name.
 - `aria-hidden` geometry + at most one `role="status"` message.
 - Heights approximate the loaded layout (no large shift).
 - Truthful unavailable/empty states are unchanged.
 - Public catalog routes are untouched.
 - Exactly one shared primitive; no framework.
+- **Signed-out private requests return a native `307` to `/login?next=…`; unknown programs, malformed exercise slugs and malformed session params return a native `404`** (probe-verified, S2 report §9.2).
 
-**7.5 Verification.** typecheck, lint, test. Component assertions: no digits, `aria-hidden` present, `role="status"` present. Source-scan guard: every `loading.tsx` imports `RoutePlaceholder`.
+**7.5 Verification.** typecheck, lint, test, production `next build --webpack` + `next start` HTTP probes. Component assertions: no digits, `aria-hidden` present, `role="status"` present. Guards: no `loading.tsx` anywhere under `src/app`; the five streaming pages compose `RoutePlaceholder` behind `Suspense`; status-critical rejects precede any JSX (`tests/unit/app/loading-boundary-status.test.ts`).
 
 **7.6 Commit.** `feat(m19): shared loading placeholders for the primary private routes`. Independently reviewable: **yes**.
 

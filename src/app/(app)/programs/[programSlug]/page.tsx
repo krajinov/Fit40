@@ -1,8 +1,9 @@
-import { cache } from 'react';
+import { Suspense, cache } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
 import { PageContainer } from '@/components/shared/PageContainer';
+import { RoutePlaceholder } from '@/components/shared/RoutePlaceholder';
 import type { EnrollmentFollowThroughDto } from '@/application/dto/follow-through';
 import type { ProgramEnrollmentViewDto } from '@/application/dto/enrollment';
 import type { RunClosureSummaryDto } from '@/application/dto/run-closure';
@@ -197,6 +198,15 @@ export async function generateMetadata({
   return { title: result.data.detail.name };
 }
 
+/**
+ * M19 S2 review fix: parameter and existence validation run BEFORE this page
+ * returns any JSX, and no segment `loading.tsx` exists in the chain (this
+ * boundary used to be inherited by the nested session route as well) — so
+ * /programs/unknown is a native 404 again instead of a streamed 200 +
+ * not-found body. The personalized success path streams behind an explicit
+ * Suspense boundary with the same non-fabricated placeholder geometry as the
+ * deleted loading.tsx. The page stays public: no authentication happens here.
+ */
 export default async function ProgramDetailPage({
   params,
 }: ProgramDetailPageProps) {
@@ -208,6 +218,39 @@ export default async function ProgramDetailPage({
   }
 
   const result = await getProgram(programSlug);
+  if (!result.ok) {
+    notFound();
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <PageContainer className="pt-10 md:pt-10">
+          <RoutePlaceholder
+            label="Loading program details"
+            blocks={['h-10 w-72 max-w-full', 'h-5 w-96 max-w-full', 'h-44', 'h-40', 'h-40']}
+          />
+        </PageContainer>
+      }
+    >
+      <ProgramDetailContent programSlug={programSlug} />
+    </Suspense>
+  );
+}
+
+/**
+ * The personalized success path, streamed behind the page's Suspense boundary.
+ * The program aggregate comes from the page's request-cached lookup, so this
+ * re-read is a cache hit, never a second catalog query.
+ */
+async function ProgramDetailContent({
+  programSlug,
+}: {
+  readonly programSlug: string;
+}) {
+  const result = await getProgram(programSlug);
+  // Unreachable — the page validated the slug above; kept so this child is
+  // total on its own contract.
   if (!result.ok) {
     notFound();
   }

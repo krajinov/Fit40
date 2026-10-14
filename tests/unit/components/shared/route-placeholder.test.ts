@@ -1,36 +1,32 @@
 /**
- * M19 S2 — behavioral tests for the shared RoutePlaceholder primitive and the
- * six route `loading.tsx` boundaries that compose it.
+ * M19 S2 — behavioral tests for the shared RoutePlaceholder primitive, plus the
+ * review-fix guards (P2): no segment `loading.tsx` boundary may exist anywhere
+ * under src/app, and the private pages must compose RoutePlaceholder as an
+ * explicit Suspense fallback around only their slow success-path content.
  *
  * These are real React renders (react-dom/server) of the actual application
- * components, not source-text scans — they assert rendered markup. The one
- * filesystem check (that each loading.tsx composes RoutePlaceholder) is a
- * Next.js boundary-wiring fact that cannot be expressed as a rendered prop.
+ * components, not source-text scans — except the two Next.js boundary-wiring
+ * facts that cannot be expressed as a rendered prop (no loading.tsx on disk;
+ * which module composes the fallback).
  *
- * Contracts pinned (M19 plan 7.1–7.5):
+ * Contracts pinned (M19 plan 7.1–7.5 + the P2 review fix):
  * - Exactly one polite loading status (role="status"); no competing live region.
  * - All decorative geometry is aria-hidden; the live region carries label text
  *   only (sr-only, so it is not part of the visual geometry).
  * - No fabricated value: no digits anywhere in the rendered markup.
  * - Server components: no "use client" directive, no hooks.
- * - All six target routes render their placeholder; the excluded public catalog
- *   routes have no loading.tsx.
- * - Session placeholder renders no bottom bar (mobile finish-bar frame intact).
+ * - No `loading.tsx` remains anywhere (it committed HTTP 200 before the pages'
+ *   redirect()/notFound() could run — see loading-boundary-status.test.ts for
+ *   the behavioral status contracts).
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { RoutePlaceholder } from '@/components/shared/RoutePlaceholder';
-import DashboardLoading from '@/app/(app)/dashboard/loading';
-import ProgressLoading from '@/app/(app)/progress/loading';
-import HistoryLoading from '@/app/(app)/history/loading';
-import ExerciseHistoryLoading from '@/app/(app)/history/exercises/[slug]/loading';
-import ProgramDetailLoading from '@/app/(app)/programs/[programSlug]/loading';
-import SessionLoading from '@/app/(app)/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session/loading';
 
 // Vitest runs from the repository root (the `global-setup` path convention);
 // resolve the source root from cwd so the tests are checkout-location agnostic.
@@ -77,69 +73,60 @@ describe('RoutePlaceholder (M19 S2)', () => {
   });
 });
 
-const routes = [
-  { name: 'dashboard', Component: DashboardLoading, path: `${SRC}/app/(app)/dashboard/loading.tsx`, label: 'Loading your training' },
-  { name: 'progress', Component: ProgressLoading, path: `${SRC}/app/(app)/progress/loading.tsx`, label: 'Loading progress' },
-  { name: 'history', Component: HistoryLoading, path: `${SRC}/app/(app)/history/loading.tsx`, label: 'Loading training history' },
-  { name: 'exercise history', Component: ExerciseHistoryLoading, path: `${SRC}/app/(app)/history/exercises/[slug]/loading.tsx`, label: 'Loading exercise history' },
-  { name: 'program detail', Component: ProgramDetailLoading, path: `${SRC}/app/(app)/programs/[programSlug]/loading.tsx`, label: 'Loading program details' },
-  { name: 'session', Component: SessionLoading, path: `${SRC}/app/(app)/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session/loading.tsx`, label: 'Loading workout session' },
-] as const;
+/** Every `loading.tsx` under src/app, as repository-relative paths. */
+function loadingFiles(directory = 'src/app'): string[] {
+  return readdirSync(path.join(process.cwd(), directory), { withFileTypes: true }).flatMap((entry) => {
+    const file = path.posix.join(directory, entry.name);
+    if (entry.isDirectory()) return loadingFiles(file);
+    return entry.name === 'loading.tsx' ? [file] : [];
+  });
+}
 
-describe('route loading boundaries (M19 S2)', () => {
-  for (const route of routes) {
-    describe(route.name, () => {
-      const html = renderToStaticMarkup(createElement(route.Component));
-
-      it('renders inside the shared page container', () => {
-        expect(html).toContain('max-w-[1120px]');
-      });
-
-      it('exposes exactly one polite loading status', () => {
-        expect(html.match(/role="status"/g) ?? []).toHaveLength(1);
-        expect(html).toContain(route.label);
-      });
-
-      it('hides decorative geometry and fabricates no readable values', () => {
-        const text = html.replace(/<[^>]*>/g, ' ');
-        expect(text).not.toMatch(/\d/);
-        expect(html.match(/aria-hidden="true"/g) ?? []).not.toHaveLength(0);
-      });
-
-      it('renders substantive placeholder geometry', () => {
-        expect(html.match(/bg-surface-2\/50/g) ?? []).not.toHaveLength(0);
-      });
-
-      it('composes the shared primitive (Next.js boundary wiring)', () => {
-        expect(readFileSync(route.path, 'utf8')).toContain('RoutePlaceholder');
-      });
-
-      it('is a server component (no client boundary)', () => {
-        const source = readFileSync(route.path, 'utf8');
-        const firstCodeLine = source.split('\n').find((line) => line.trim().length > 0) ?? '';
-        expect(firstCodeLine).not.toMatch(/^['"]use (client|server)['"]/);
-      });
-    });
-  }
-
-  it('the session placeholder renders no bottom action bar of its own', () => {
-    const html = renderToStaticMarkup(createElement(SessionLoading));
-    expect(html).not.toContain('aria-label="Primary"');
-    expect(html).not.toContain('fixed inset-x-0 bottom-0');
+describe('M19 S2 review fix — no segment loading boundary remains', () => {
+  it('finds zero loading.tsx anywhere under src/app', () => {
+    // A segment `loading.tsx` flushes HTTP 200 before the page's own
+    // redirect()/notFound() can run, which turned signed-out private requests
+    // into 200s and /programs/unknown into 200 instead of 404 (PR #25 review).
+    // The pages now own their streaming via explicit Suspense boundaries.
+    expect(loadingFiles()).toEqual([]);
   });
 });
 
-describe('excluded public catalog routes (M19 S2)', () => {
-  it('have no loading.tsx — latency UI there would be novelty, not value', () => {
-    for (const path of [`${SRC}/app/(app)/exercises/loading.tsx`, `${SRC}/app/(app)/programs/loading.tsx`]) {
-      let missing = false;
-      try {
-        readFileSync(path, 'utf8');
-      } catch {
-        missing = true;
-      }
-      expect(missing).toBe(true);
-    }
+const streamedPages = [
+  { name: 'dashboard', path: `${SRC}/app/(app)/dashboard/page.tsx`, label: 'Loading your training' },
+  { name: 'progress', path: `${SRC}/app/(app)/progress/page.tsx`, label: 'Loading progress' },
+  { name: 'history', path: `${SRC}/app/(app)/history/page.tsx`, label: 'Loading training history' },
+  {
+    name: 'program detail',
+    path: `${SRC}/app/(app)/programs/[programSlug]/page.tsx`,
+    label: 'Loading program details',
+  },
+  {
+    name: 'session',
+    path: `${SRC}/app/(app)/programs/[programSlug]/weeks/[weekNumber]/workouts/[workoutOrder]/session/page.tsx`,
+    label: 'Loading workout session',
+  },
+] as const;
+
+describe('streaming pages compose the shared placeholder as their Suspense fallback', () => {
+  for (const page of streamedPages) {
+    it(`${page.name} streams RoutePlaceholder behind an explicit Suspense boundary`, () => {
+      const source = readFileSync(page.path, 'utf8');
+      expect(source).toContain('RoutePlaceholder');
+      expect(source).toContain('Suspense');
+      expect(source).toContain(page.label);
+      const firstCodeLine = source.split('\n').find((line) => line.trim().length > 0) ?? '';
+      expect(firstCodeLine).not.toMatch(/^['"]use (client|server)['"]/);
+    });
+  }
+
+  it('exercise history deliberately has no Suspense boundary and no placeholder', () => {
+    // Its whole view build is already awaited by generateMetadata before the
+    // head flushes, so a boundary could not fire before content; keeping the
+    // page boundary-free is what preserves the native 307/404 statuses.
+    const source = readFileSync(`${SRC}/app/(app)/history/exercises/[slug]/page.tsx`, 'utf8');
+    expect(source).not.toContain('Suspense');
+    expect(source).not.toContain('RoutePlaceholder');
   });
 });
 

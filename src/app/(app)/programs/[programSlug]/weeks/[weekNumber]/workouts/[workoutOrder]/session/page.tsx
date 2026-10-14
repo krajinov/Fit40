@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 
 import { PageContainer } from '@/components/shared/PageContainer';
+import { RoutePlaceholder } from '@/components/shared/RoutePlaceholder';
 import { requireUser } from '@/features/auth/current-user';
 import { lookupScheduledWorkout } from '@/features/programs/scheduled-workout-lookup';
 import {
@@ -44,6 +46,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `${result.data.workout.name} - Session` };
 }
 
+/**
+ * M19 S2 review fix: parameter validation, authentication and the occurrence
+ * existence check all run BEFORE this page returns any JSX, and no segment
+ * `loading.tsx` exists in the chain (this boundary used to be inherited from
+ * the program-detail segment as well) — so signed-out cold requests receive a
+ * native 307 and unknown occurrences a native 404, instead of a streamed 200.
+ * Only the active-workout view assembly streams.
+ */
 export default async function SessionPage({ params }: Props) {
   const { programSlug: rawSlug, weekNumber: rawWeek, workoutOrder: rawOrder } = await params;
 
@@ -62,10 +72,60 @@ export default async function SessionPage({ params }: Props) {
   // the session is resolved through the user's enrollment in the program.
   const user = await requireUser(`/programs/${ps}/weeks/${wn}/workouts/${wo}/session`);
 
-  const view = await buildActiveWorkoutView(
+  // Existence pre-check (M19 S2 review): buildActiveWorkoutView returns null
+  // ONLY when this lookup fails (its documented contract), and the lookup is
+  // request-cached and already executed by generateMetadata — so checking it
+  // here keeps the 404 native without a second database read.
+  const workoutResult = await lookupScheduledWorkout(ps, wn, wo);
+  if (!workoutResult.ok) {
+    notFound();
+  }
+
+  const viewPromise = buildActiveWorkoutView(
     { programSlug: ps, weekNumber: wn, workoutOrder: wo },
     user,
   );
+
+  return (
+    <Suspense
+      fallback={
+        <PageContainer className="pb-6 md:pb-20">
+          <RoutePlaceholder
+            label="Loading workout session"
+            blocks={['h-6 w-56 max-w-full', 'h-10 w-72 max-w-full', 'h-32', 'h-44', 'h-44', 'h-40']}
+          />
+        </PageContainer>
+      }
+    >
+      <SessionContent
+        viewPromise={viewPromise}
+        programSlug={ps}
+        weekNumber={wn}
+        workoutOrder={wo}
+      />
+    </Suspense>
+  );
+}
+
+interface SessionContentProps {
+  readonly viewPromise: ReturnType<typeof buildActiveWorkoutView>;
+  readonly programSlug: string;
+  readonly weekNumber: number;
+  readonly workoutOrder: number;
+}
+
+async function SessionContent({
+  viewPromise,
+  programSlug,
+  weekNumber,
+  workoutOrder,
+}: SessionContentProps) {
+  const ps = programSlug;
+  const wn = weekNumber;
+  const wo = workoutOrder;
+
+  const view = await viewPromise;
+  // Unreachable — the page's lookup pre-check above covers the only null path.
   if (view === null) {
     notFound();
   }

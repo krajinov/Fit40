@@ -74,8 +74,8 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 | PageContainer | `shared/PageContainer.tsx` | server | 1120px column, responsive gutters |
 | AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; account slot, else sign-in link |
 | AppNavLinks | `shared/AppNavLinks.tsx` | client | `usePathname` active state |
-| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; account slot, else sign-in link |
-| MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding; fixed-pixel 76px slot (M19 S4) |
+| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; wraps to a second navigation row at enlarged text (M19 S4); account slot, else sign-in link |
+| MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding; `--mobile-tab-bar-height` slot (76px floor, M19 S4) |
 | Wordmark | `shared/Wordmark.tsx` | server | Sora two-tone "Fit40" link |
 
 ### RecommendationCallout contract
@@ -140,19 +140,26 @@ context. Raw reason codes never reach users. Locked semantics:
 - Touch targets are ≥ 44px everywhere (buttons 52/44, inputs 52, radio cards
   56, chips 48, tab bar 76, history shortcut pills 44).
 - Tab bar includes `env(safe-area-inset-bottom)` padding for iOS.
-- **Mobile navigation integrity (M19 S4).** The 76px tab-bar slot is a
-  fixed-pixel geometry: the row's vertical padding is written in px
-  (`pt-[8px] pb-[16px]`) so a user-enlarged base font size cannot consume the
-  slot and shrink the 52px tab targets below the 44px floor (and the layout
-  clearance stays exactly `76px + env(safe-area-inset-bottom)`). Each tab is
-  `min-w-0` with a truncating label, so four equal slots compress instead of
-  pushing the page into horizontal scrolling. The compact signed-out header row
-  is `min-w-0`/truncating for the same reason, its `Sign in` control carries a
-  fixed 44px floor, and the dashboard's "View all training history" link — the
-  documented mobile entry point to `/history` — is a 44px target. Session
-  routes keep exactly one viewport-bottom bar: the shell tab bar hides on
-  `/session` and the screen's own finish bar takes that slot (1px of the bar's
-  top border overlaps the reserved clearance).
+- **Mobile navigation integrity (M19 S4, extended by the S4 review fixes).**
+  The bottom bar sits in the `--mobile-tab-bar-height` slot: `max(76px,
+  calc(48px + 1.25rem))`, i.e. the locked **76px floor** at the default text
+  size, growing to 78px at 150% and 88px at 200% base text because the 22px
+  icon, the icon/label gap (0.25rem) and the label's line box (1rem) scale with
+  the root font while the bar's 8px/16px paddings deliberately do not. The SAME
+  token is the content clearance in `(app)/layout.tsx` (`+ env(safe-area-inset-
+  bottom)`), so the reserved space and the rendered bar can never disagree and
+  no content can be covered. Labels are `shrink-0` so the column flex layout can
+  never compress them below their line box (the clipping fixed in the review);
+  each tab is `min-w-0` with a truncating label so four slots never force
+  horizontal scrolling. The compact signed-out header (and its nav) **wraps**
+  instead of truncating: the wordmark and the account/sign-in control keep one
+  line, and the public destinations move to a second navigation row — with their
+  full labels — whenever the row runs out of room. `Sign in` carries a fixed
+  44px floor and the dashboard's "View all training history" link (the documented
+  mobile entry point to `/history`) is a 44px target. Session routes keep exactly
+  one viewport-bottom bar: the shell tab bar hides on `/session` and the screen's
+  own finish bar takes that slot (1px of the bar's top border overlaps the
+  reserved clearance).
 
 ## Auth ownership
 

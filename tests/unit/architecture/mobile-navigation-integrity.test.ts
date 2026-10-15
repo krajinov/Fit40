@@ -18,7 +18,7 @@
  * 5. every mobile navigation target keeps the documented 44px floor.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -31,35 +31,21 @@ function source(file: string): string {
     .replace(/^\s*\/\/.*$/gm, '');
 }
 
-function filesIn(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    return entry.isDirectory() ? filesIn(file) : /\.tsx?$/.test(file) ? [file] : [];
-  });
-}
-
 const MOBILE_TAB_BAR = 'src/components/shared/MobileTabBar.tsx';
 const MOBILE_HEADER = 'src/components/shared/MobileHeader.tsx';
 const APP_NAV_LINKS = 'src/components/shared/AppNavLinks.tsx';
 const APP_LAYOUT = 'src/app/(app)/layout.tsx';
-const SESSION_FINISH_BAR = 'src/features/sessions/components/SessionFinishBar.tsx';
 const DASHBOARD_PAGE = 'src/app/(app)/dashboard/page.tsx';
 const RECENT_TRAINING_CARD = 'src/features/dashboard/components/RecentTrainingCard.tsx';
 
 const SHELL_FILES = [MOBILE_TAB_BAR, APP_NAV_LINKS, MOBILE_HEADER];
-
-/** A plain-string `className` that pins an element to the viewport bottom. */
-function hasFixedBottomBar(file: string): boolean {
-  return [...source(file).matchAll(/className="([^"]*)"/g)].some((match) =>
-    /\bfixed\b/.test(match[1] ?? '') && /\bbottom-0\b/.test(match[1] ?? ''),
-  );
-}
+const SLOT_TOKEN = '--mobile-tab-bar-height';
 
 describe('M19 S4 — bottom-bar geometry and content clearance', () => {
-  it('keeps the 76px slot, the safe-area padding and the md:hidden hide', () => {
+  it('keeps the 76px floor, the safe-area padding and the md:hidden hide', () => {
     const bar = source(MOBILE_TAB_BAR);
 
-    expect(bar).toContain('h-[76px]');
+    expect(bar).toContain(`min-h-[var(${SLOT_TOKEN})]`);
     expect(bar).toContain('pb-[env(safe-area-inset-bottom)]');
     expect(bar).toContain('md:hidden');
   });
@@ -67,44 +53,77 @@ describe('M19 S4 — bottom-bar geometry and content clearance', () => {
   it('keeps the bar padding fixed-pixel so font scaling cannot consume the slot', () => {
     const bar = source(MOBILE_TAB_BAR);
 
-    // The row is the 76px slot: rem-scaled vertical padding (`pt-2 pb-4`) grows
-    // with the user's base font size and is what used to squeeze the 52px
-    // targets down to 40px (150% text) and 28px (200% text).
-    expect(bar).toMatch(/h-\[76px\][^"]*pt-\[8px\] pb-\[16px\]/);
-    expect(bar).not.toMatch(/h-\[76px\][^"]*\bpt-2\b/);
+    // The row is the slot: rem-scaled vertical padding (`pt-2 pb-4`) grows with
+    // the user's base font size and is what used to squeeze the 52px targets down
+    // to 40px (150% text) and 28px (200% text).
+    expect(bar).toMatch(/min-h-\[var\(--mobile-tab-bar-height\)\][^"]*pt-\[8px\] pb-\[16px\]/);
+    expect(bar).not.toMatch(/\bpt-2\b/);
     expect(bar).not.toMatch(/\bpb-4\b/);
   });
 
-  it('keeps layout clearance equal to the slot plus the safe-area inset', () => {
+  it('defines ONE slot token that both the bar and the clearance consume', () => {
     const layout = source(APP_LAYOUT);
+    const bar = source(MOBILE_TAB_BAR);
+    const tokens = source('src/app/globals.css');
 
-    expect(layout).toContain('pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0');
-    // …and the bar itself must be exactly the 76px slot plus that same inset.
-    expect(source(MOBILE_TAB_BAR)).toContain('h-[76px]');
+    // The locked 76px floor stays, and the slot only grows when an enlarged base
+    // font needs the extra height (icon + gap + label line box + paddings).
+    expect(tokens).toMatch(
+      /--mobile-tab-bar-height:\s*max\(76px,\s*calc\(48px \+ 1\.25rem\)\)/,
+    );
+    expect(layout).toContain(`pb-[calc(var(${SLOT_TOKEN})+env(safe-area-inset-bottom))] md:pb-0`);
+    expect(bar).toContain(`min-h-[var(${SLOT_TOKEN})]`);
+    // No hard-coded copy of the slot may survive in the layout.
+    expect(layout).not.toMatch(/pb-\[calc\(76px/);
+  });
+
+  it('never lets the row compress a label below its line box', () => {
+    const bar = source(MOBILE_TAB_BAR);
+
+    // `truncate` sets overflow:hidden, which zeroes the column flex item's
+    // automatic minimum size — that is what clipped the label at 200% text.
+    expect(bar).toMatch(/max-w-full min-w-0 shrink-0 truncate text-xs/);
   });
 
   it('lets the tab slots shrink so the bar never scrolls the page sideways', () => {
     const bar = source(MOBILE_TAB_BAR);
 
     expect(bar).toMatch(/flex min-w-0 flex-1 flex-col/);
-    expect(bar).toMatch(/max-w-full min-w-0 truncate text-xs/);
+    expect(bar).toContain('max-w-full');
   });
 });
 
-describe('M19 S4 — exactly one bottom bar per route family', () => {
+describe('M19 S4 review — the compact header wraps instead of losing labels', () => {
+  it('makes the header and its nav wrapping rows with a growable minimum height', () => {
+    const header = source(MOBILE_HEADER);
+    const nav = source(APP_NAV_LINKS);
+
+    expect(header).toContain('flex min-h-16 flex-wrap items-center');
+    expect(header).not.toMatch(/(^|\s)h-16(\s|$)/);
+    expect(nav).toMatch(/flex flex-1 flex-wrap items-center gap-1/);
+    // The nav must keep a content-based minimum width, otherwise it would shrink
+    // to nothing (the pre-review bug) instead of wrapping to a second row.
+    expect(nav).not.toMatch(/min-w-0 flex-1 items-center gap-1/);
+  });
+
+  it('keeps the public labels whole: no truncation, no ellipsis, full text', () => {
+    const nav = source(APP_NAV_LINKS);
+
+    expect(nav).toMatch(/flex min-h-11 shrink-0 items-center px-1 text-sm/);
+    expect(nav).not.toContain('truncate');
+    expect(nav).not.toContain('text-ellipsis');
+  });
+});
+
+describe('M19 S4 — one bottom bar per route family', () => {
   it('keeps the global tab bar hidden on session routes', () => {
     expect(source(MOBILE_TAB_BAR)).toContain("if (pathname.endsWith('/session')) {");
   });
 
-  it('keeps the session finish bar as the only other viewport-bottom bar', () => {
-    const bars = filesIn('src').filter(hasFixedBottomBar).sort();
-
-    expect(bars).toEqual([MOBILE_TAB_BAR, SESSION_FINISH_BAR].sort());
-  });
-
-  it('renders the finish bar only where the tab bar hides itself', () => {
-    // The finish bar is composed by the Active Workout screen, which is reached
-    // only through the `/session` route the tab bar hides on.
+  it('keeps the session finish bar composed only by the active-workout screen', () => {
+    // The repo-wide scan (single source of truth for "which files can render a
+    // bottom bar") lives in mobile-bottom-bars.test.ts, which also asserts the
+    // completed-session and History-detail composition.
     expect(source('src/features/sessions/components/ActiveWorkoutScreen.tsx')).toContain('<SessionFinishBar');
   });
 });
@@ -157,7 +176,7 @@ describe('M19 S4 — landmarks, active state and target floors', () => {
     // Tab slots are stretched to the 52px content box of the 76px slot.
     expect(source(MOBILE_TAB_BAR)).toContain('items-stretch');
     // The compact header links keep the 44px `min-h-11` floor.
-    expect(source(APP_NAV_LINKS)).toMatch(/flex min-h-11 min-w-0 items-center px-1\.5 text-sm/);
+    expect(source(APP_NAV_LINKS)).toMatch(/flex min-h-11 shrink-0 items-center px-1 text-sm/);
     // …and the signed-out sign-in control now floors at 44px too.
     expect(source(MOBILE_HEADER)).toContain('inline-flex min-h-[44px] items-center');
   });

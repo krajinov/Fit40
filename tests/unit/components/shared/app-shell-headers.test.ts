@@ -217,16 +217,43 @@ describe('mobile header compact row (M19 S4)', () => {
     expect(signIn?.textContent).toBe('Sign in');
   });
 
-  it('lets the public links compress and truncate but keeps their full labels', async () => {
+  // M19 S4 review fix (P2): the compact row wraps instead of squeezing the
+  // public labels out of existence. The header and the nav are both wrapping
+  // rows, so an enlarged base font moves the destinations onto a second row.
+  it('wraps instead of truncating: full labels, wrapping header and nav', async () => {
     const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+
+    const header = container.querySelector('header');
+    expect(header?.className).toContain('flex-wrap');
+    expect(header?.className).toContain('min-h-16');
+    // The fixed 64px height would clip a second navigation row.
+    expect(header?.className).not.toMatch(/(^|\s)h-16(\s|$)/);
+
+    const nav = container.querySelector('nav[aria-label="Primary"]');
+    expect(nav?.className).toContain('flex-wrap');
+    expect(nav?.className).not.toContain('min-w-0');
 
     const links = [...container.querySelectorAll('nav[aria-label="Primary"] a')];
     expect(links.map((link) => link.textContent)).toEqual(['Programs', 'Exercises']);
     for (const link of links) {
       expect(link.className).toContain('min-h-11');
-      expect(link.className).toContain('min-w-0');
-      expect(link.querySelector('span')?.className).toContain('truncate');
+      expect(link.className).toContain('shrink-0');
+      // Nothing may ellipsize or clip the label: the row wraps instead.
+      expect(link.className).not.toContain('truncate');
+      expect(link.querySelector('span')).toBeNull();
     }
+  });
+
+  it('keeps the account control in a right-aligned group on its own row when wrapped', async () => {
+    const container = await renderHeader(MobileHeader, {
+      account: null,
+      isAuthenticated: false,
+    });
+
+    const signIn = container.querySelector('a[href="/login"]');
+    const group = signIn?.parentElement;
+    expect(group?.className).toContain('ml-auto');
+    expect(group?.className).toContain('flex');
   });
 
   it('leaves the desktop row unwrapped and untouched', async () => {
@@ -235,6 +262,8 @@ describe('mobile header compact row (M19 S4)', () => {
       isAuthenticated: true,
     });
 
+    const nav = container.querySelector('nav[aria-label="Primary"]');
+    expect(nav?.className).not.toContain('flex-wrap');
     for (const link of container.querySelectorAll('nav[aria-label="Primary"] a')) {
       expect(link.querySelector('span')).toBeNull();
       expect(link.className).toContain('text-[15px]');

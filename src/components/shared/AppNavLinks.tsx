@@ -18,18 +18,24 @@ import { cn } from '@/lib/utils';
  *
  * M19 S4: the compact `mobileHeader` row is the one place where the wordmark,
  * the public destinations and the sign-in control must share a 320px-class row
- * at a user-enlarged font size. It is therefore `min-w-0` with a truncating
- * label and tighter horizontal padding than the desktop row: the row may
- * compress and ellipsize, but it never overlaps its neighbours and never pushes
- * the page into horizontal scrolling. The full label stays in the DOM, so the
- * accessible name is unaffected by visual truncation.
+ * at a user-enlarged font size.
+ *
+ * M19 S4 review fix (P2 — the labels disappeared): the compact row no longer
+ * truncates. Its links keep their full labels (`shrink-0`, no `truncate`), the
+ * nav is itself a wrapping row, and the header around it wraps too — so when the
+ * wordmark + both destinations + the sign-in control cannot share one line, the
+ * destinations move to a second navigation row (and stack individually only at
+ * the largest text sizes) with their labels fully readable. Every link keeps the
+ * `min-h-11` 44px touch-target floor, and no combination of width and text size
+ * produces horizontal page overflow or overlapping controls.
  */
 export interface AppNavLinksProps {
   readonly isAuthenticated: boolean;
   /**
    * `desktop` (default) is the wide header row. `mobileHeader` is the compact
-   * row the mobile header renders for signed-out visitors (public destinations
-   * + 44px touch targets); signed-in mobile navigation is the tab bar's job.
+   * wrapping row the mobile header renders for signed-out visitors (public
+   * destinations + 44px touch targets); signed-in mobile navigation is the tab
+   * bar's job.
    */
   readonly variant?: 'desktop' | 'mobileHeader';
 }
@@ -41,7 +47,11 @@ export function AppNavLinks({ isAuthenticated, variant = 'desktop' }: AppNavLink
   return (
     <nav
       aria-label="Primary"
-      className={variant === 'desktop' ? 'flex items-center gap-7' : 'flex min-w-0 flex-1 items-center gap-1'}
+      className={
+        variant === 'desktop'
+          ? 'flex items-center gap-7'
+          : 'flex flex-1 flex-wrap items-center gap-1'
+      }
     >
       {items.map((item) => {
         const active = isActivePath(pathname, item.href);
@@ -54,13 +64,13 @@ export function AppNavLinks({ isAuthenticated, variant = 'desktop' }: AppNavLink
               'rounded-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
               variant === 'desktop'
                 ? 'text-[15px]'
-                : 'flex min-h-11 min-w-0 items-center px-1.5 text-sm',
+                : 'flex min-h-11 shrink-0 items-center px-1 text-sm',
               active
                 ? 'font-semibold text-foreground'
                 : 'font-medium text-ink-2 hover:text-foreground',
             )}
           >
-            {variant === 'desktop' ? item.label : <span className="min-w-0 truncate">{item.label}</span>}
+            {item.label}
           </Link>
         );
       })}

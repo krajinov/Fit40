@@ -115,6 +115,24 @@
   --amber-tint: #f6eee3;
   --amber-border: #e5d3bc;
   --amber-strong: #92672f;
+
+  /*
+   * Mobile shell bottom-navigation slot (M19 S4 review fix).
+   *
+   * The bar is 76px at the locked default text size (the design's floor). An
+   * enlarged user base font needs a taller slot, because the icon (22px), the
+   * icon/label gap (0.25rem) and the label's line box (1rem) scale with the
+   * root font while the bar's vertical paddings (8px/16px) deliberately do not:
+   *   24px padding + 22px icon + 0.25rem gap + 1rem line box = 46px + 1.25rem,
+   * with 2px of slack so sub-pixel text metrics can never clip the label:
+   *   76px at a 16px root (the locked floor), 78px at 24px, 88px at 32px (200%).
+   *
+   * ONE token is consumed by BOTH halves of the geometry — the bar itself
+   * (`MobileTabBar`) and the route-group content clearance
+   * (`(app)/layout.tsx`) — so the reserved space and the rendered bar can never
+   * disagree and content can never be covered by a taller bar.
+   */
+  --mobile-tab-bar-height: max(76px, calc(48px + 1.25rem));
 }
 
 /*

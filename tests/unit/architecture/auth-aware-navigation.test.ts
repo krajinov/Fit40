@@ -111,10 +111,14 @@ describe('M19 S3 — sign-in flow and preserved contracts', () => {
     }
   });
 
-  it('preserves the session-route tab-bar hide and the layout clearance', () => {
+  it('preserves the session-route tab-bar hide and the shared slot clearance', () => {
     expect(code(MOBILE_TAB_BAR)).toContain("endsWith('/session')");
+    // M19 S4 review: the clearance and the bar's own height are the SAME token
+    // (`--mobile-tab-bar-height`, 76px floor) plus the safe-area inset, so an
+    // enlarged-text bar can never cover content and the two can never drift.
     expect(code(APP_LAYOUT)).toContain(
-      'pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0',
+      'pb-[calc(var(--mobile-tab-bar-height)+env(safe-area-inset-bottom))] md:pb-0',
     );
+    expect(code(MOBILE_TAB_BAR)).toContain('min-h-[var(--mobile-tab-bar-height)]');
   });
 });

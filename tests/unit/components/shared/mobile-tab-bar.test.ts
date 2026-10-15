@@ -90,7 +90,11 @@ describe('MobileTabBar — signed in', () => {
     expect(nav?.getAttribute('aria-label')).toBe('Primary');
     expect(nav?.className).toContain('pb-[env(safe-area-inset-bottom)]');
     expect(nav?.className).toContain('md:hidden');
-    expect(container.querySelector('.h-\\[76px\\]')).not.toBeNull();
+    // The slot comes from the shared shell token (its 76px floor grows only
+    // when an enlarged base font needs it).
+    expect(container.querySelector('nav > div')?.className).toContain(
+      'min-h-[var(--mobile-tab-bar-height)]',
+    );
 
     const icons = [...container.querySelectorAll('svg')];
     expect(icons).toHaveLength(4);
@@ -128,6 +132,21 @@ describe('MobileTabBar — signed in', () => {
 
     expect(container.innerHTML).toBe('');
   });
+
+  // Runtime composition (jsdom) per route family — the tab bar is the ONE bottom
+  // bar on the nested History detail route, and no tab is active there because
+  // History is deliberately not a tab.
+  it('renders the four tabs on a nested History detail route, with no tab active', async () => {
+    pathnameRef.current = '/history/sessions/0f3b1c1e-9f0e-4a4e-8f0e-0f3b1c1e9f0e';
+    const container = await renderBar(true);
+
+    expect(tabs(container)).toEqual([
+      { href: '/dashboard', label: 'Home', active: false },
+      { href: '/programs', label: 'Programs', active: false },
+      { href: '/exercises', label: 'Exercises', active: false },
+      { href: '/progress', label: 'Progress', active: false },
+    ]);
+  });
 });
 
 describe('MobileTabBar — server and client agree (no auth flicker)', () => {
@@ -140,11 +159,11 @@ describe('MobileTabBar — server and client agree (no auth flicker)', () => {
   });
 });
 describe('MobileTabBar — M19 S4 geometry, clearance and overflow guards', () => {
-  it('keeps the 76px slot with fixed-pixel padding so font scaling cannot shrink it', async () => {
+  it('keeps the slot token-backed with fixed-pixel padding so font scaling cannot shrink it', async () => {
     const container = await renderBar(true);
 
     const row = container.querySelector('nav > div');
-    expect(row?.className).toContain('h-[76px]');
+    expect(row?.className).toContain('min-h-[var(--mobile-tab-bar-height)]');
     expect(row?.className).toContain('items-stretch');
     expect(row?.className).toContain('pt-[8px] pb-[16px]');
     // Rem-scaled vertical padding is what used to squeeze the 52px targets down
@@ -152,6 +171,19 @@ describe('MobileTabBar — M19 S4 geometry, clearance and overflow guards', () =
     expect(row?.className).not.toMatch(/\bpt-2\b/);
     expect(row?.className).not.toMatch(/\bpb-4\b/);
     expect(row?.querySelectorAll('a')).toHaveLength(4);
+  });
+
+  it('keeps every label at its natural line-box height (no vertical clipping)', async () => {
+    const container = await renderBar(true);
+
+    for (const label of container.querySelectorAll('nav > div > a > span')) {
+      // `truncate` (overflow: hidden) would otherwise allow the column flex
+      // layout to compress the label below its line box — the vertical clipping
+      // reported at 200% root text.
+      expect(label.className).toContain('shrink-0');
+      expect(label.className).toContain('truncate');
+      expect(label.className).toContain('text-xs');
+    }
   });
 
   it('lets every slot shrink and truncate instead of scrolling the page sideways', async () => {

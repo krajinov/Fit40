@@ -33,16 +33,25 @@ interface AppLayoutProps {
  *
  * The page content area is the route group's single <main> landmark —
  * exactly one per page, since no (app) page renders its own.
+ *
+ * M19 S3: the SAME server-resolved `user` read below feeds `isAuthenticated`
+ * into both headers and the tab bar, so the navigation shown in the server
+ * HTML already matches the session — signed-out visitors never receive private
+ * destinations, and no second authentication state (or client auth fetch)
+ * exists in the shell.
  */
 export default async function AppLayout({ children }: AppLayoutProps) {
   const user = await getCurrentUser();
+  const isAuthenticated = user !== null;
 
   return (
     <>
       <AppHeader
+        isAuthenticated={isAuthenticated}
         account={user === null ? null : <AccountMenu userEmail={user.email} variant="desktop" />}
       />
       <MobileHeader
+        isAuthenticated={isAuthenticated}
         account={user === null ? null : <AccountMenu userEmail={user.email} variant="mobile" />}
       />
       {/* The route group's single primary-content landmark: exactly one <main>
@@ -51,7 +60,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
       <main className="flex-1 pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0">
         {children}
       </main>
-      <MobileTabBar />
+      <MobileTabBar isAuthenticated={isAuthenticated} />
     </>
   );
 }

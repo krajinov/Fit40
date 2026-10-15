@@ -1,21 +1,10 @@
 'use client';
 
-import { Dumbbell, Home, ListChecks, UserRound, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { authenticatedMobileTabs, isActivePath } from '@/components/shared/nav-items';
 import { cn } from '@/lib/utils';
-
-const TABS: ReadonlyArray<{
-  href: string;
-  label: string;
-  icon: LucideIcon;
-}> = [
-  { href: '/dashboard', label: 'Home', icon: Home },
-  { href: '/programs', label: 'Programs', icon: Dumbbell },
-  { href: '/exercises', label: 'Exercises', icon: ListChecks },
-  { href: '/profile', label: 'Profile', icon: UserRound },
-];
 
 /**
  * Mobile bottom tab bar (locked design): h76 surface bar with top border,
@@ -23,12 +12,28 @@ const TABS: ReadonlyArray<{
  * viewport bottom with safe-area padding; hidden at md and up. Client-only
  * because active state needs usePathname.
  *
+ * M19 S3: the four authenticated tabs are Home / Programs / Exercises /
+ * Progress, declared in `nav-items.ts`. Profile is NOT a tab — it stays
+ * reachable from the account menu in both headers (its pre-hydration fallback
+ * is a native `/profile` link). For a signed-out visitor the bar renders
+ * nothing at all: private destinations must never be presented as available
+ * navigation. The state arrives as a server-resolved prop, so the server HTML
+ * is already correct and hydration never switches the bar on.
+ *
  * The Active Workout screen (any `/session` route) hides the tab bar and
  * shows the screen's own finish action bar in the same position instead —
  * the locked mobile frame for that screen carries only the finish bar.
  */
-export function MobileTabBar() {
+export interface MobileTabBarProps {
+  readonly isAuthenticated: boolean;
+}
+
+export function MobileTabBar({ isAuthenticated }: MobileTabBarProps) {
   const pathname = usePathname();
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   if (pathname.endsWith('/session')) {
     return null;
@@ -40,8 +45,8 @@ export function MobileTabBar() {
       className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <div className="flex h-[76px] items-stretch gap-2 px-2 pt-2 pb-4">
-        {TABS.map((tab) => {
-          const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+        {authenticatedMobileTabs().map((tab) => {
+          const active = isActivePath(pathname, tab.href);
           const Icon = tab.icon;
           return (
             <Link

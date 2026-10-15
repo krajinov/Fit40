@@ -184,4 +184,26 @@ describe('mobile header navigation (MobileHeader)', () => {
     expect(container.textContent).not.toContain('Exercises');
     expect(container.textContent).toContain('Account control');
   });
+
+describe.each([
+  ['AppHeader', AppHeader],
+  ['MobileHeader', MobileHeader],
+] as const)('%s wordmark destination (S3 review P2)', (_name, Header) => {
+  it('sends signed-out visitors to the public home route, never /dashboard', async () => {
+    const container = await renderHeader(Header, { account: null, isAuthenticated: false });
+
+    const wordmark = container.querySelector('a[aria-label="Fit40 home"]');
+    expect(wordmark?.getAttribute('href')).toBe('/');
+  });
+
+  it('keeps signed-in visitors on the existing /dashboard destination', async () => {
+    const container = await renderHeader(Header, {
+      account: createElement('span', null, 'Account control'),
+      isAuthenticated: true,
+    });
+
+    const wordmark = container.querySelector('a[aria-label="Fit40 home"]');
+    expect(wordmark?.getAttribute('href')).toBe('/dashboard');
+  });
+});
 });

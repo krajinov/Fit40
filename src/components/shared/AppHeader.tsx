@@ -28,7 +28,10 @@ export function AppHeader({ account, isAuthenticated }: AppHeaderProps) {
   return (
     <header className="hidden h-[76px] border-b border-border bg-card md:block">
       <div className="mx-auto flex h-full w-full max-w-[1120px] items-center gap-10 px-5 md:px-8">
-        <Wordmark />
+        {/* M19 S3 review P2: a signed-out visitor must never be sent to the
+            private /dashboard by the wordmark — the public home route is their
+            working destination; signed-in visitors keep /dashboard. */}
+        <Wordmark href={isAuthenticated ? '/dashboard' : '/'} />
         <AppNavLinks isAuthenticated={isAuthenticated} />
         <div className="flex flex-1 items-center justify-end">
           {account ?? (

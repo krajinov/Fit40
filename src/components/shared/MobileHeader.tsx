@@ -26,7 +26,9 @@ export interface MobileHeaderProps {
 export function MobileHeader({ account, isAuthenticated }: MobileHeaderProps) {
   return (
     <header className="flex h-16 items-center justify-between gap-3 border-b border-border bg-card px-5 md:hidden">
-      <Wordmark className="text-xl" />
+      {/* M19 S3 review P2: same wordmark rule as the desktop header — the
+          public home route for signed-out visitors, /dashboard when signed in. */}
+      <Wordmark href={isAuthenticated ? '/dashboard' : '/'} className="text-xl" />
       {!isAuthenticated && <AppNavLinks isAuthenticated={false} variant="mobileHeader" />}
       {account ?? (
         <Link

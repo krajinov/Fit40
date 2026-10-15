@@ -254,6 +254,13 @@ S1 evidence: the prior production HTTP probes verified boundary scope, redirects
 
 **Goal.** `Progress` reachable in one tap for authenticated users; `Profile` one tap via the account menu; the four-tab locked bar preserved; the bar hidden for signed-out visitors (S3). **Preconditions.** S3 merged (S3 introduces the auth filter and `nav-items.ts`).
 
+> **Landed in S3 (recorded here for accuracy).** The locked four-tab set
+> (`Home / Programs / Exercises / Progress`), the signed-out bar hide, the
+> `nav-items.ts` mobile declaration and the `training-progress.test.ts` tab
+> assertion were implemented in **S3**, because the S3 locked navigation
+> contracts require them. S4 therefore covers the remaining integrity,
+> discoverability and documentation work below.
+
 **Files.** `nav-items.ts` (mobile authenticated set → `Home / Programs / Exercises / Progress`); `MobileTabBar.tsx` (consume `isAuthenticated`, hide when false; `Progress` icon from `lucide-react`, consistent with the 22px set — **verify the export by import, do not guess**; fall back to an icon already used such as `TrendingUp`/`ChartLineIncreasing`/`Activity`); `training-progress.test.ts:80` (update pinned array to `['/dashboard','/programs','/exercises','/progress']` and retitle the test); `docs/ui.md`; `README.md`.
 
 **Explicitly preserved.**

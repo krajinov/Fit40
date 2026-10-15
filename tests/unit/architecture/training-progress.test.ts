@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { formatHistoryVolume } from '@/features/history/history-labels';
+import { authenticatedMobileTabs, visibleNavItems } from '@/components/shared/nav-items';
 
 function source(file: string): string {
   return readFileSync(path.resolve(file), 'utf8')
@@ -73,11 +74,20 @@ describe('M18 architecture guards', () => {
     expect(page).toContain('buildProgressRecordTimeline(user.id, now)');
   });
 
-  it('adds desktop Progress while preserving exactly the four existing mobile tabs', () => {
-    expect(source('src/components/shared/AppNavLinks.tsx')).toMatch(/href: ['"]\/progress['"]/);
-    const mobile = source('src/components/shared/MobileTabBar.tsx');
-    const hrefs = [...mobile.matchAll(/href: ['"]([^'"]+)['"]/g)].map((match) => match[1]);
-    expect(hrefs).toEqual(['/dashboard', '/programs', '/exercises', '/profile']);
+  it('keeps the Progress destination desktop-reachable and in the locked mobile tab set', () => {
+    // M18 added desktop Progress; M19 S3 moved the destination list into
+    // nav-items.ts and replaced the mobile Profile tab with Progress (the
+    // locked M19 four-tab contract) — Profile stays reachable through the
+    // account menu, which is asserted in tests/unit/features/auth.
+    expect(visibleNavItems(true).map((item) => item.href)).toContain('/progress');
+    expect(authenticatedMobileTabs().map((tab) => tab.href)).toEqual([
+      '/dashboard',
+      '/programs',
+      '/exercises',
+      '/progress',
+    ]);
+    // Signed-out visitors never receive the private Progress destination.
+    expect(visibleNavItems(false).map((item) => item.href)).not.toContain('/progress');
   });
 
   it('keeps the locked factual vocabulary in Progress and history labels', () => {

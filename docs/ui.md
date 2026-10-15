@@ -590,8 +590,9 @@ mobile:
 
 - **Recent Training remains visible on mobile.** It is the dashboard's
   existing mobile entry point to `/history`, and `MobileTabBar` has no
-  History tab (Home / Programs / Exercises / Profile only). Hiding it would
-  strand mobile users; a History tab can revisit this decision later.
+  History tab (M19 S3: Home / Programs / Exercises / Progress — the Profile
+  tab was replaced by Progress, configured through the account menu). Hiding
+  it would strand mobile users; a History tab can revisit this decision later.
 - **Profile Summary remains hidden on mobile** (`hidden md:flex`).
 - **M13 insights remain available without a current program**: "This week",
   "Personal bests", and "Recent training" render right after the no-program

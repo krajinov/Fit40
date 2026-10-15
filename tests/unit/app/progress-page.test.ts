@@ -12,7 +12,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderStream } from '../helpers/stream-render';
 
 const { redirectMock, requireUserMock, buildViewMock, buildTimelineMock } = vi.hoisted(() => ({
   redirectMock: vi.fn((target: string) => {
@@ -56,7 +56,7 @@ describe('/progress page (M18 Slice 4 + Slice 6)', () => {
 
   it('requires the session against /progress and renders the heading', async () => {
     const element = await ProgressPage();
-    const markup = renderToStaticMarkup(element);
+    const markup = await renderStream(element);
 
     expect(requireUserMock).toHaveBeenCalledWith('/progress');
     expect(markup).toContain(PROGRESS_HEADING);
@@ -79,7 +79,7 @@ describe('/progress page (M18 Slice 4 + Slice 6)', () => {
 
   it('renders the truthful degraded copy when the reads are unavailable', async () => {
     const element = await ProgressPage();
-    const markup = renderToStaticMarkup(element);
+    const markup = await renderStream(element);
 
     // `renderToStaticMarkup` HTML-escapes the apostrophe in "Couldn't", so the
     // assertion uses the apostrophe-free fragment (the real copy is pinned in
@@ -111,7 +111,7 @@ describe('/progress page (M18 Slice 4 + Slice 6)', () => {
     });
 
     const element = await ProgressPage();
-    const markup = renderToStaticMarkup(element);
+    const markup = await renderStream(element);
 
     // The timeline is independent of the activity read: it still renders.
     expect(markup).toContain(PERSONAL_BESTS_TIMELINE_TITLE);

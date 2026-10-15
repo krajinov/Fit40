@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 
 import { PageContainer } from '@/components/shared/PageContainer';
+import { RoutePlaceholder } from '@/components/shared/RoutePlaceholder';
 import { requireUser } from '@/features/auth/current-user';
 import { ProgressScreen } from '@/features/progress/components/ProgressScreen';
 import { PROGRESS_HEADING, PROGRESS_SUBHEADING } from '@/features/progress/progress-labels';
@@ -24,16 +26,52 @@ export const metadata: Metadata = {
  * (and vice versa). Both receive the same clock instance, so the whole request
  * describes one instant (memo invariant 7).
  */
+/**
+ * M19 S2 review fix: requireUser() runs BEFORE this page returns any JSX and
+ * no segment `loading.tsx` exists in the (app) chain, so a signed-out cold
+ * request receives a native 307 instead of a streamed 200 + meta-refresh. The
+ * two composed reads stream behind an explicit Suspense boundary with the same
+ * non-fabricated placeholder geometry as the deleted loading.tsx.
+ */
 export default async function ProgressPage() {
   const user = await requireUser('/progress');
 
   // Single request clock: the Domain resolves the 13-week horizon from this
   // instant. No other `Date.now()` / `new Date()` runs in the request path.
   const now = new Date();
-  const [state, personalBests] = await Promise.all([
+  // Started, not awaited: the two composed reads are what stream.
+  const viewsPromise = Promise.all([
     buildProgressView(user.id, now),
     buildProgressRecordTimeline(user.id, now),
   ]);
+
+  return (
+    <Suspense
+      fallback={
+        <PageContainer>
+          <RoutePlaceholder
+            label="Loading progress"
+            blocks={['h-9 w-56 max-w-full', 'h-5 w-80 max-w-full', 'h-32', 'h-72', 'h-72']}
+          />
+        </PageContainer>
+      }
+    >
+      <ProgressContent viewsPromise={viewsPromise} />
+    </Suspense>
+  );
+}
+
+interface ProgressContentProps {
+  readonly viewsPromise: Promise<
+    [
+      Awaited<ReturnType<typeof buildProgressView>>,
+      Awaited<ReturnType<typeof buildProgressRecordTimeline>>,
+    ]
+  >;
+}
+
+async function ProgressContent({ viewsPromise }: ProgressContentProps) {
+  const [state, personalBests] = await viewsPromise;
 
   return (
     <PageContainer>

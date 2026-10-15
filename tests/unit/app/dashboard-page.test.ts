@@ -13,7 +13,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderStream } from '../helpers/stream-render';
 
 const { redirect: redirectMock, requireUserMock, profileExecuteMock, buildViewMock } =
   vi.hoisted(() => ({
@@ -178,7 +178,7 @@ function view(currentProgram: DashboardView['currentProgram']): DashboardView {
 async function renderPage(currentProgram: DashboardView['currentProgram']): Promise<string> {
   buildViewMock.mockResolvedValue(view(currentProgram));
   const element = await DashboardPage();
-  return renderToStaticMarkup(element);
+  return renderStream(element);
 }
 
 function activeProgram(schedule: DashboardScheduleState): NonNullable<

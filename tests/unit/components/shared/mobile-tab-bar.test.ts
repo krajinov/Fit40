@@ -139,3 +139,44 @@ describe('MobileTabBar — server and client agree (no auth flicker)', () => {
     }
   });
 });
+describe('MobileTabBar — M19 S4 geometry, clearance and overflow guards', () => {
+  it('keeps the 76px slot with fixed-pixel padding so font scaling cannot shrink it', async () => {
+    const container = await renderBar(true);
+
+    const row = container.querySelector('nav > div');
+    expect(row?.className).toContain('h-[76px]');
+    expect(row?.className).toContain('items-stretch');
+    expect(row?.className).toContain('pt-[8px] pb-[16px]');
+    // Rem-scaled vertical padding is what used to squeeze the 52px targets down
+    // to 40px at 150% text and 28px at 200%.
+    expect(row?.className).not.toMatch(/\bpt-2\b/);
+    expect(row?.className).not.toMatch(/\bpb-4\b/);
+    expect(row?.querySelectorAll('a')).toHaveLength(4);
+  });
+
+  it('lets every slot shrink and truncate instead of scrolling the page sideways', async () => {
+    const container = await renderBar(true);
+
+    const links = [...container.querySelectorAll('nav > div > a')];
+    expect(links).toHaveLength(4);
+    for (const link of links) {
+      expect(link.className).toContain('min-w-0');
+      expect(link.className).toContain('flex-1');
+      const label = link.querySelector('span');
+      expect(label?.className).toContain('truncate');
+      expect(label?.className).toContain('max-w-full');
+      // Truncation is visual only: the full label stays in the DOM, so the
+      // accessible name never degrades.
+      expect(label?.textContent).toBe(link.textContent);
+    }
+  });
+
+  it('keeps the safe-area padding and the 1px top border on the bar surface', async () => {
+    const container = await renderBar(true);
+
+    const nav = container.querySelector('nav');
+    expect(nav?.className).toContain('border-t');
+    expect(nav?.className).toContain('pb-[env(safe-area-inset-bottom)]');
+    expect(nav?.className).toContain('bottom-0');
+  });
+});

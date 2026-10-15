@@ -15,6 +15,14 @@ import { cn } from '@/lib/utils';
  * layout on the server — so a signed-out visitor is never shown a private
  * destination, in the server HTML or after hydration, and no second client-side
  * auth state exists.
+ *
+ * M19 S4: the compact `mobileHeader` row is the one place where the wordmark,
+ * the public destinations and the sign-in control must share a 320px-class row
+ * at a user-enlarged font size. It is therefore `min-w-0` with a truncating
+ * label and tighter horizontal padding than the desktop row: the row may
+ * compress and ellipsize, but it never overlaps its neighbours and never pushes
+ * the page into horizontal scrolling. The full label stays in the DOM, so the
+ * accessible name is unaffected by visual truncation.
  */
 export interface AppNavLinksProps {
   readonly isAuthenticated: boolean;
@@ -46,13 +54,13 @@ export function AppNavLinks({ isAuthenticated, variant = 'desktop' }: AppNavLink
               'rounded-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
               variant === 'desktop'
                 ? 'text-[15px]'
-                : 'flex min-h-11 items-center px-2 text-sm',
+                : 'flex min-h-11 min-w-0 items-center px-1.5 text-sm',
               active
                 ? 'font-semibold text-foreground'
                 : 'font-medium text-ink-2 hover:text-foreground',
             )}
           >
-            {item.label}
+            {variant === 'desktop' ? item.label : <span className="min-w-0 truncate">{item.label}</span>}
           </Link>
         );
       })}

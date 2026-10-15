@@ -207,3 +207,38 @@ describe.each([
   });
 });
 });
+describe('mobile header compact row (M19 S4)', () => {
+  it('floors the signed-out sign-in control at 44px', async () => {
+    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+
+    const signIn = container.querySelector('a[href="/login"]');
+    expect(signIn?.className).toContain('inline-flex');
+    expect(signIn?.className).toContain('min-h-[44px]');
+    expect(signIn?.textContent).toBe('Sign in');
+  });
+
+  it('lets the public links compress and truncate but keeps their full labels', async () => {
+    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+
+    const links = [...container.querySelectorAll('nav[aria-label="Primary"] a')];
+    expect(links.map((link) => link.textContent)).toEqual(['Programs', 'Exercises']);
+    for (const link of links) {
+      expect(link.className).toContain('min-h-11');
+      expect(link.className).toContain('min-w-0');
+      expect(link.querySelector('span')?.className).toContain('truncate');
+    }
+  });
+
+  it('leaves the desktop row unwrapped and untouched', async () => {
+    const container = await renderHeader(AppHeader, {
+      account: createElement('span', null, 'Account control'),
+      isAuthenticated: true,
+    });
+
+    for (const link of container.querySelectorAll('nav[aria-label="Primary"] a')) {
+      expect(link.querySelector('span')).toBeNull();
+      expect(link.className).toContain('text-[15px]');
+      expect(link.className).not.toContain('truncate');
+    }
+  });
+});

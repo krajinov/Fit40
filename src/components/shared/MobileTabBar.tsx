@@ -23,6 +23,14 @@ import { cn } from '@/lib/utils';
  * The Active Workout screen (any `/session` route) hides the tab bar and
  * shows the screen's own finish action bar in the same position instead —
  * the locked mobile frame for that screen carries only the finish bar.
+ *
+ * M19 S4 (mobile navigation integrity): the 76px slot is a FIXED-pixel
+ * geometry — the vertical padding is written in px (`pt-[8px] pb-[16px]`)
+ * precisely so a larger user base font size cannot consume the slot and
+ * shrink the tap targets below the 44px floor. The label text still scales
+ * with the user's font size (it is `text-xs`), and each tab is `min-w-0` with
+ * a truncating label so four slots can never force horizontal page scroll on
+ * a 320px-class screen with enlarged text.
  */
 export interface MobileTabBarProps {
   readonly isAuthenticated: boolean;
@@ -44,7 +52,7 @@ export function MobileTabBar({ isAuthenticated }: MobileTabBarProps) {
       aria-label="Primary"
       className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
     >
-      <div className="flex h-[76px] items-stretch gap-2 px-2 pt-2 pb-4">
+      <div className="flex h-[76px] items-stretch gap-2 px-2 pt-[8px] pb-[16px]">
         {authenticatedMobileTabs().map((tab) => {
           const active = isActivePath(pathname, tab.href);
           const Icon = tab.icon;
@@ -54,12 +62,17 @@ export function MobileTabBar({ isAuthenticated }: MobileTabBarProps) {
               href={tab.href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex flex-1 flex-col items-center justify-center gap-1 rounded-control outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
+                'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-control outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
                 active ? 'text-primary' : 'text-ink-3 hover:text-ink-2',
               )}
             >
-              <Icon aria-hidden="true" className="size-[22px]" />
-              <span className={cn('text-xs', active ? 'font-semibold' : 'font-medium')}>
+              <Icon aria-hidden="true" className="size-[22px] shrink-0" />
+              <span
+                className={cn(
+                  'max-w-full min-w-0 truncate text-xs',
+                  active ? 'font-semibold' : 'font-medium',
+                )}
+              >
                 {tab.label}
               </span>
             </Link>

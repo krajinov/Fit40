@@ -75,7 +75,7 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 | AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; account slot, else sign-in link |
 | AppNavLinks | `shared/AppNavLinks.tsx` | client | `usePathname` active state |
 | MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; account slot, else sign-in link |
-| MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding |
+| MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding; fixed-pixel 76px slot (M19 S4) |
 | Wordmark | `shared/Wordmark.tsx` | server | Sora two-tone "Fit40" link |
 
 ### RecommendationCallout contract
@@ -140,6 +140,19 @@ context. Raw reason codes never reach users. Locked semantics:
 - Touch targets are ≥ 44px everywhere (buttons 52/44, inputs 52, radio cards
   56, chips 48, tab bar 76, history shortcut pills 44).
 - Tab bar includes `env(safe-area-inset-bottom)` padding for iOS.
+- **Mobile navigation integrity (M19 S4).** The 76px tab-bar slot is a
+  fixed-pixel geometry: the row's vertical padding is written in px
+  (`pt-[8px] pb-[16px]`) so a user-enlarged base font size cannot consume the
+  slot and shrink the 52px tab targets below the 44px floor (and the layout
+  clearance stays exactly `76px + env(safe-area-inset-bottom)`). Each tab is
+  `min-w-0` with a truncating label, so four equal slots compress instead of
+  pushing the page into horizontal scrolling. The compact signed-out header row
+  is `min-w-0`/truncating for the same reason, its `Sign in` control carries a
+  fixed 44px floor, and the dashboard's "View all training history" link — the
+  documented mobile entry point to `/history` — is a 44px target. Session
+  routes keep exactly one viewport-bottom bar: the shell tab bar hides on
+  `/session` and the screen's own finish bar takes that slot (1px of the bar's
+  top border overlaps the reserved clearance).
 
 ## Auth ownership
 
@@ -158,9 +171,12 @@ the sign-in links; the menu performs no authorization itself.
   (1–10) in the set logger, an optional prefilled RPE editor in each
   logged-set row, and an "@ RPE n" suffix on rows where an RPE was captured.
   Leaving it empty keeps the locked look — no RPE is shown or stored.
-- **Active Workout bottom bar.** The session page currently shows the shell
-  tab bar; the design's bottom action bar (Complete workout) lands with the
-  Active Workout slice.
+- **Active Workout bottom bar.** The session screen replaces the shell tab bar
+  with its own fixed finish bar on mobile: `MobileTabBar` hides on `/session`
+  (locked contract) and `SessionFinishBar` shows the full-width "Finish workout"
+  action in that slot; at `md`+ the finish action sits inline at the end of the
+  session column and the shell's mobile clearance is 0. Verified in the M19 S4
+  audit (one bar per route, no double bar).
 - **Segmented control.** Not present in the locked design; not built.
 - **Screen migration.** Profile and Onboarding are migrated to the locked
   design (section cards 01-05, desktop section index, radio cards, chips,

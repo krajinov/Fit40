@@ -55,9 +55,12 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         account={user === null ? null : <AccountMenu userEmail={user.email} variant="mobile" />}
       />
       {/* The route group's single primary-content landmark: exactly one <main>
-          per (app) page — no page renders its own. Bottom clearance for the
-          fixed mobile tab bar (incl. safe area) is preserved. */}
-      <main className="flex-1 pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-0">
+          per (app) page — no page renders its own. Bottom clearance is the SAME
+          token the fixed mobile tab bar uses for its height (`--mobile-tab-bar-
+          height`), plus the device safe-area inset: the reserved space therefore
+          always equals the rendered bar, including at enlarged text sizes where
+          the slot grows beyond its 76px floor. */}
+      <main className="flex-1 pb-[calc(var(--mobile-tab-bar-height)+env(safe-area-inset-bottom))] md:pb-0">
         {children}
       </main>
       <MobileTabBar isAuthenticated={isAuthenticated} />

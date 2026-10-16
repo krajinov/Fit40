@@ -207,3 +207,22 @@ describe.each([
   });
 });
 });
+describe('mobile header reading order (M19 S4)', () => {
+  it('offers full public labels in wordmark → destinations → sign-in DOM order', async () => {
+    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+    const controls = [...container.querySelectorAll<HTMLAnchorElement>('a[href]')];
+
+    expect(controls.map((link) => ({
+      name: link.getAttribute('aria-label') ?? link.textContent,
+      href: link.getAttribute('href'),
+      tabIndex: link.tabIndex,
+    }))).toEqual([
+      { name: 'Fit40 home', href: '/', tabIndex: 0 },
+      { name: 'Programs', href: '/programs', tabIndex: 0 },
+      { name: 'Exercises', href: '/exercises', tabIndex: 0 },
+      { name: 'Sign in', href: '/login', tabIndex: 0 },
+    ]);
+    // Visual order and actual Tab/Shift+Tab traversal require a real browser;
+    // jsdom only establishes the semantic controls and their DOM order.
+  });
+});

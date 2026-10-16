@@ -409,8 +409,8 @@ npm run test:unit
 # Integration tests (requires test database)
 npm run test:integration
 
-# E2E tests (requires running app)
-npm run test:e2e
+# E2E: Playwright is the required framework for future critical journeys.
+# No automated E2E runner or test:e2e script is currently installed.
 
 # All tests
 npm run test
@@ -623,3 +623,10 @@ npm run test:coverage
   integration tests.
 - Canonical reference: [Plan Follow-Through](follow-through.md).
 
+## Mobile navigation browser verification (M19 S4)
+
+Layout-only E2E tests are excluded by the policy above. Keep the focused
+header/navigation unit tests and follow [the manual browser procedure](mobile-navigation-verification.md)
+for real keyboard navigation, measured reading order, text enlargement, targets,
+labels, focus indicators and overflow. jsdom does not verify browser layout.
+No custom CDP/WebSocket automation or standalone layout E2E command is retained.

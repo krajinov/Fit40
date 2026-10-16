@@ -67,7 +67,7 @@ export function RecentTrainingCard({ recentTraining, className }: RecentTraining
 
       <Link
         href="/history"
-        className="self-start rounded-control text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="inline-flex min-h-[44px] items-center self-start rounded-control text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         View all training history
       </Link>

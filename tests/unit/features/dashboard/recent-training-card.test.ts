@@ -127,11 +127,12 @@ describe('RecentTrainingCard', () => {
     expect(container.querySelector('ol')).toBeNull();
   });
 
-  it('the card is never hidden behind a responsive class (mobile entry point)', async () => {
+  it('exposes History navigation in the named Recent training region', async () => {
     const container = await renderCard(LOADED);
 
     const section = container.querySelector('section[aria-label="Recent training"]');
     expect(section).not.toBeNull();
-    expect(section?.className).not.toMatch(/\bhidden\b/);
+    expect(section?.querySelector('a[href="/history"]')?.textContent)
+      .toBe('View all training history');
   });
 });

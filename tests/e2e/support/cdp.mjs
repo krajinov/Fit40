@@ -1,17 +1,24 @@
 /**
  * Minimal Chrome DevTools Protocol client built on Node built-ins only
- * (`fetch`, the global `WebSocket`). No third-party dependency, because
- * `AGENTS.md` forbids adding one without explicit approval and this repository
- * has no E2E runner installed (see `tests/e2e/support/browser.mjs`).
+ * (`fetch` plus the dependency-free WebSocket transport in `./websocket.mjs`).
+ * No third-party dependency, because `AGENTS.md` forbids adding one without
+ * explicit approval and this repository has no E2E runner installed (see
+ * `tests/e2e/support/browser.mjs`).
+ *
+ * The socket is obtained from `openWebSocket()` and never from `new WebSocket()`
+ * directly: the global WebSocket does not exist on Node 20.9, the minimum
+ * version Next.js 16 supports (M19 S4 review fix, P2).
  *
  * Only the handful of commands the mobile-header regression test needs:
  * `Runtime.evaluate`, `Input.dispatchKeyEvent` (real Tab), `Emulation` viewport
  * overrides and `Page.navigate`.
  */
+import { openWebSocket } from './websocket.mjs';
+
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function connect(webSocketUrl) {
-  const socket = new WebSocket(webSocketUrl);
+  const socket = openWebSocket(webSocketUrl);
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true });
     socket.addEventListener('error', () => reject(new Error(`cannot open ${webSocketUrl}`)), {

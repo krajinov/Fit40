@@ -38,6 +38,7 @@ import {
   stopProcess,
 } from './support/browser.mjs';
 import { MATRIX, checkCombo } from './support/mobile-header-order.mjs';
+import { assertWebsocketTransport } from './support/websocket.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PAGE_PATH = '/programs'; // public catalog: the signed-out mobile header renders here
@@ -48,6 +49,18 @@ async function main() {
     console.error(
       'E2E: no Chrome/Chromium binary found. Install Chrome, or set CHROME_PATH, to run this test.',
     );
+    process.exitCode = 1;
+    return;
+  }
+
+  // Explicit runtime compatibility check (M19 S4 review fix, P2): the CDP
+  // client must have a usable WebSocket on every Node version this project
+  // supports, including Node 20.9 where the global `WebSocket` does not exist.
+  let transport;
+  try {
+    transport = assertWebsocketTransport();
+  } catch (error) {
+    console.error(`E2E: ${error.message}`);
     process.exitCode = 1;
     return;
   }
@@ -88,6 +101,7 @@ async function main() {
 
   console.log('M19 S4 review fix (P2) — mobile header reading order, real Chrome');
   console.log(`  page ${PAGE_PATH} · browser ${chromePath}`);
+  console.log(`  transport ${transport.label} · Node ${process.version}`);
   for (const row of rows) {
     console.log(
       `  ${row.combo.padEnd(14)} visual order: ${row.order} · ${row.lines} row(s), header ${row.headerHeight}px`,

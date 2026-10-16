@@ -279,8 +279,7 @@ describe('mobile header reading order (M19 S4 review fix, P2)', () => {
   // renders `Exercises` BELOW `Sign in` even though the tab order reaches it
   // first (Codex finding on PR #27, MobileHeader.tsx:39). These assertions pin
   // the structural cause; the rendered geometry and the real Tab sequence are
-  // asserted in the browser regression test
-  // (tests/e2e/mobile-header-focus-order.mjs).
+  // checked manually using docs/mobile-navigation-verification.md.
   it('keeps the compact nav at its natural width so the header breaks the row', async () => {
     const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
 

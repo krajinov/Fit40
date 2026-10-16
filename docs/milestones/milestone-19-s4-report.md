@@ -1,3 +1,11 @@
+# Verification status after P1 review
+
+The current approach is documented in §14 and
+[the manual browser checklist](../mobile-navigation-verification.md). §§1–13
+are historical evidence from earlier commits; their CDP commands, harness
+design rationale and transport limitations are superseded. The custom runner
+and its support infrastructure have been removed.
+
 # Milestone 19 — Slice 4 Implementation Report
 
 **Slice:** S4 — Mobile Navigation Integrity
@@ -762,3 +770,46 @@ the no-overflow assertions all green.
    assertion or measurement was modified for the run.
 6. Beyond-200% text, real iOS/Android safe areas, Safari/Firefox, real screen
    readers, pinch-zoom and RTL remain unverified, as in §11.4 items 4–6.
+
+## 14. P1 review — remove custom browser infrastructure
+
+`AGENTS.md` requires Playwright for E2E and limits automation to critical
+journeys. `docs/testing.md` explicitly excludes styling/layout E2E tests.
+Inspection found no Playwright dependency, configuration or critical journey
+to extend. The smallest compliant change is the documented manual browser
+verification option, with the existing focused unit tests retained.
+
+Removed the CDP runner/client, browser process management, WebSocket selector,
+fallback and frame codec, transport/compatibility tests and echo server. Removed
+`test:e2e` from package.json; no dependency or lockfile change is needed. No
+application UI code changed. No replacement automation framework, unused browser
+helper or standalone layout E2E command remains.
+
+The manual checklist preserves the 320/375/393px × 100/150/200% matrix, actual
+Tab/Shift+Tab navigation, bounding-box reading order, whole labels, 44px controls,
+focus-visible indicators and navigation-attributable horizontal overflow. The
+focused header tests still guard DOM order and the structural cause of the
+regression; jsdom cannot prove measured order or real keyboard behavior.
+
+Manual browser verification is documented, not newly executed in this revision; the
+previous browser measurements in §§11–13 remain historical evidence only.
+
+This addresses the P1 without changing the testing policy. Future automated
+critical journeys must use Playwright. No merge or S5 work is included.
+
+### P1 validation
+
+| Check | Result |
+|---|---|
+| Focused navigation unit tests (6 files) | 78 passed |
+| Full unit suite (`npm test`) | 226 files / 3114 tests passed |
+| Lint (`npm run lint`) | exit 0 |
+| TypeScript (`npx tsc --noEmit`, after build) | exit 0 |
+| Production build (`npx next build --webpack`) | exit 0 |
+| `git diff --check` | clean |
+
+The default Turbopack build failed first fetching Google Fonts, then on a
+restricted port bind after retrying with network access. The webpack production
+build passed without source changes. An initial standalone TypeScript run raced
+with build cleanup of `.next/types`; the rerun after the successful build passed.
+Integration tests were not run: no application, domain or persistence changes.

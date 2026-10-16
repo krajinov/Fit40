@@ -271,3 +271,40 @@ describe('mobile header compact row (M19 S4)', () => {
     }
   });
 });
+
+describe('mobile header reading order (M19 S4 review fix, P2)', () => {
+  // The compact nav must keep its NATURAL width. A `flex-1` nav is placed on
+  // the header's first line with a zero basis and then wraps its own links into
+  // a narrow column while the sign-in control keeps sharing that line — which
+  // renders `Exercises` BELOW `Sign in` even though the tab order reaches it
+  // first (Codex finding on PR #27, MobileHeader.tsx:39). These assertions pin
+  // the structural cause; the rendered geometry and the real Tab sequence are
+  // asserted in the browser regression test
+  // (tests/e2e/mobile-header-focus-order.mjs).
+  it('keeps the compact nav at its natural width so the header breaks the row', async () => {
+    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+
+    const nav = container.querySelector('nav[aria-label="Primary"]');
+    expect(nav?.className).toContain('flex-wrap');
+    expect(nav?.className).not.toContain('flex-1');
+    expect(nav?.className).not.toContain('flex-auto');
+    expect(nav?.className).not.toMatch(/(^|\s)grow(\s|$)/);
+  });
+
+  it('renders wordmark → destinations → sign-in with no order overrides', async () => {
+    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+    const header = container.querySelector('header');
+
+    const rendered = [...(header?.querySelectorAll('a[href], button') ?? [])].map((element) =>
+      element.getAttribute('href'),
+    );
+    expect(rendered).toEqual(['/', '/programs', '/exercises', '/login']);
+
+    // No CSS `order` utility and no tabindex retargeting anywhere in the header:
+    // DOM order is the only order the keyboard can follow.
+    for (const element of header?.querySelectorAll('*') ?? []) {
+      expect(String(element.className)).not.toMatch(/(^|\s)-?order-/);
+      expect(element.getAttribute('tabindex')).toBeNull();
+    }
+  });
+});

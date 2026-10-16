@@ -26,6 +26,13 @@ import { Wordmark } from '@/components/shared/Wordmark';
  * additional line) instead of being squeezed until their labels vanish. The
  * header grows vertically only when it has to; at the default text size the row
  * is still exactly one 64px bar.
+ *
+ * M19 S4 review fix (P2 — visual order vs keyboard order): because the header
+ * wraps as whole ITEMS (the compact nav is no longer `flex-1`, see
+ * `AppNavLinks`), the wordmark, the destinations and the sign-in control always
+ * appear — and receive keyboard focus — in the same order: Fit40 → Programs →
+ * Exercises → Sign in. The header's own flex lines decide the row breaks, so no
+ * `order` utility or `tabindex` is needed to reconcile the two sequences.
  */
 export interface MobileHeaderProps {
   /** Authenticated account control, or null for signed-out visitors. */

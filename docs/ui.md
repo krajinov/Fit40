@@ -74,7 +74,7 @@ palette, untouched; a Fit40 dark theme is future work. No theme toggle exists.
 | PageContainer | `shared/PageContainer.tsx` | server | 1120px column, responsive gutters |
 | AppHeader | `shared/AppHeader.tsx` | server | desktop h76 bar; account slot, else sign-in link |
 | AppNavLinks | `shared/AppNavLinks.tsx` | client | `usePathname` active state |
-| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; wraps to a second navigation row at enlarged text (M19 S4); account slot, else sign-in link |
+| MobileHeader | `shared/MobileHeader.tsx` | server | mobile h64 bar; wraps as whole items (wordmark / destinations / sign-in) at enlarged text so reading order matches tab order (M19 S4 review fix); account slot, else sign-in link |
 | MobileTabBar | `shared/MobileTabBar.tsx` | client | fixed bottom, 4 tabs, safe-area padding; `--mobile-tab-bar-height` slot (76px floor, M19 S4) |
 | Wordmark | `shared/Wordmark.tsx` | server | Sora two-tone "Fit40" link |
 
@@ -151,10 +151,15 @@ context. Raw reason codes never reach users. Locked semantics:
   no content can be covered. Labels are `shrink-0` so the column flex layout can
   never compress them below their line box (the clipping fixed in the review);
   each tab is `min-w-0` with a truncating label so four slots never force
-  horizontal scrolling. The compact signed-out header (and its nav) **wraps**
-  instead of truncating: the wordmark and the account/sign-in control keep one
-  line, and the public destinations move to a second navigation row — with their
-  full labels — whenever the row runs out of room. `Sign in` carries a fixed
+  horizontal scrolling. The compact signed-out header (and its nav) **wraps as
+  whole items** instead of truncating: the wordmark, the public destinations and
+  the sign-in control keep one 64px row while they fit and otherwise move onto
+  additional rows — with their full labels — leaving the rendered reading order
+  (`Fit40 → Programs → Exercises → Sign in`) identical to the tab order. (The
+  compact nav deliberately carries no `flex-1`: a growing/shrinking nav would be
+  squeezed into a narrow column beside `Sign in` and render `Exercises` *below*
+  it, contradicting the keyboard order — the S4 review fix, Codex P2 on PR #27.)
+  `Sign in` carries a fixed
   44px floor and the dashboard's "View all training history" link (the documented
   mobile entry point to `/history`) is a 44px target. Session routes keep exactly
   one viewport-bottom bar: the shell tab bar hides on `/session` and the screen's

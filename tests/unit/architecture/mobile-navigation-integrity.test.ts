@@ -100,10 +100,15 @@ describe('M19 S4 review — the compact header wraps instead of losing labels', 
 
     expect(header).toContain('flex min-h-16 flex-wrap items-center');
     expect(header).not.toMatch(/(^|\s)h-16(\s|$)/);
-    expect(nav).toMatch(/flex flex-1 flex-wrap items-center gap-1/);
-    // The nav must keep a content-based minimum width, otherwise it would shrink
-    // to nothing (the pre-review bug) instead of wrapping to a second row.
-    expect(nav).not.toMatch(/min-w-0 flex-1 items-center gap-1/);
+    // The compact nav is a WRAPPING row that keeps its natural width.
+    expect(nav).toMatch(/flex flex-wrap items-center gap-1/);
+    // It must not grow or shrink either. A shrinking nav is squeezed to nothing
+    // (the pre-review bug); a `flex-1` nav is placed on the header's first line
+    // with a zero basis and wraps its own links into a narrow column beside the
+    // sign-in control, which renders the second destination BELOW the sign-in
+    // link while the tab order still reaches it first (S4 review fix, P2).
+    expect(nav).not.toMatch(/(^|\s)flex-1(\s|$)/);
+    expect(nav).not.toMatch(/\bmin-w-0\b/);
   });
 
   it('keeps the public labels whole: no truncation, no ellipsis, full text', () => {

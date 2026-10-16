@@ -62,7 +62,7 @@ component, no new client state, no migration. (The P2/P3 review fixes in §11 ad
 | File | Change | Why |
 |---|---|---|
 | `src/components/shared/MobileTabBar.tsx` | Row padding `pt-2 pb-4` → `pt-[8px] pb-[16px]`; slot height from `--mobile-tab-bar-height` (see §11.2); each tab `min-w-0`; label span `max-w-full min-w-0 shrink-0 truncate`; icon `shrink-0` | D1, D2, §11.2. The `md:hidden`, `pb-[env(safe-area-inset-bottom)]`, four slots, `aria-label="Primary"`, `aria-current`, 22px icons and `/session` hide are unchanged. |
-| `src/components/shared/AppNavLinks.tsx` | `mobileHeader` variant: wrapping nav, `min-h-11 shrink-0` links with full labels, compact padding (§11.1); the `desktop` variant is untouched | D3, §11.1. |
+| `src/components/shared/AppNavLinks.tsx` | `mobileHeader` variant: wrapping nav, `min-h-11 shrink-0` links with full labels, compact padding (§11.1); the `desktop` variant is untouched. Round 3 additionally drops `flex-1` from that variant (§12.1). | D3, §11.1, §12.1. |
 | `src/components/shared/MobileHeader.tsx` | Wrapping row (`min-h-16 flex-wrap`, §11.1); `Sign in` keeps its fixed 44px floor; account in an `ml-auto` group | D3, D4, §11.1. |
 | `src/app/globals.css` | New `--mobile-tab-bar-height` token (`max(76px, calc(48px + 1.25rem))`) | §11.2 — one shared slot for the bar and the clearance. |
 | `src/app/(app)/layout.tsx` | Clearance now `pb-[calc(var(--mobile-tab-bar-height)+env(safe-area-inset-bottom))]` | §11.2 — the clearance and the bar can never drift. |
@@ -263,6 +263,13 @@ See the commit hash in the final response. Not pushed; no PR opened; S5 not
 started. Reviewed files: the five source files in §3, `docs/ui.md`, the three
 test files in §4 and this report.
 
+**Round 3 (§12)** was pushed to the existing branch `feat/m19-s4-mobile-navigation`
+(same PR [#27](https://github.com/krajinov/Fit40/pull/27)); it touches
+`src/components/shared/AppNavLinks.tsx`, `src/components/shared/MobileHeader.tsx`,
+`package.json` (the new `test:e2e` script, no new dependency), two unit test
+files, the new `tests/e2e/` browser test, `docs/ui.md` and this report. Still no
+merge and no S5.
+
 ## 11. Round 2 — independent review fixes (P2 × 2, P3)
 
 An independent review of `f437d030` raised three findings. All three are fixed in
@@ -284,6 +291,9 @@ truncation. The wordmark keeps the first line and the account/sign-in control
 sits in an `ml-auto` group, so it stays right-aligned on whichever line it lands
 on; the destinations wrap as the space allows — at 320px/200% text the rows read
 `Fit40` / `Programs · Sign in` / `Exercises`, and every label is fully readable.
+(→ **§12.1**: that row *order* put `Sign in` ahead of `Exercises` against the
+keyboard order and is superseded by the round-3 fix; the label widths measured
+here are unaffected.)
 `px-1` link padding plus a 6px row gap keep the default 320px row on ONE line,
 exactly as before.
 
@@ -403,6 +413,8 @@ session screen and the History detail screen were not opened in a browser (see
    of four slots at 320px with 150–200% text: nothing is clipped, navigation adds
    no page overflow, and the icons carry the Programs/Progress distinction.
    Flagged for product sign-off (unchanged conclusion from round 1).
+   (→ **§12.4**: the round-3 order fix makes the compact header take two to four
+   rows; the tab-bar label ellipsis at 200% is unchanged.)
 2. **Desktop nav overflow is pre-existing and outside this review's scope.** The
    locked desktop row (5 destinations, no wrapping) overflows at 768px with
    enlarged text: **107px at 150%** and **268px at 200%** signed in (6px signed
@@ -425,7 +437,7 @@ session screen and the History detail screen were not opened in a browser (see
    `Emulation.setSafeAreaInsetsOverride`), Safari/Firefox, real screen readers,
    pinch-zoom and RTL.
 
-### 11.5 Verification results (round-2 commit)
+### 11.5 Verification results (round-2 commit; round 3 is §12.3)
 
 | Check | Command | Result |
 |---|---|---|
@@ -443,3 +455,132 @@ One caveat on the sequencing, recorded for honesty: running `npx tsc --noEmit`
 *concurrently* with `next build` produced spurious `TS6053` errors because the
 build rewrites `.next/types/**`; the typecheck passes (exit 0) when run on its
 own, which is the result recorded here.
+
+## 12. Round 3 — Codex review fix (P2, PR #27)
+
+An automated review of `9982a50d` (GitHub Codex, PR #27) raised one further P2
+finding about the round-2 fix. It is fixed in this round. §11.1's account of the
+wrapped row is superseded where it describes the *order* of the wrapped rows.
+
+### 12.1 P2 — the rendered order contradicted the keyboard order (fixed)
+
+**Finding (`src/components/shared/MobileHeader.tsx:39`).** At 320px with 200%
+base text the visual order became `Fit40 / Programs · Sign in / Exercises` while
+the DOM and the keyboard order stayed `Fit40 → Programs → Exercises → Sign in`,
+so the tab sequence did not follow what the user sees.
+
+**Reproduced in a real browser** (production build, signed out, `/programs`,
+real Chrome, real `Tab` presses via `Input.dispatchKeyEvent`; the reading order
+is derived from measured boxes — lines are items whose vertical centres are
+within 4px, ordered left to right):
+
+| Viewport / text | Keyboard order (Tab) | Measured visual order | Verdict |
+|---|---|---|---|
+| 320px / 200% | `/ → /programs → /exercises → /login` | `/ → /programs → /login → /exercises` | **mismatch** |
+| 320px / 150% | `/ → /programs → /exercises → /login` | `/programs → / → /exercises → /login` | **mismatch** |
+| 375px / 150% | idem | `/programs → / → /login → /exercises` | **mismatch** |
+| 375px / 200% | idem | `/programs → / → /exercises → /login` | **mismatch** |
+| 393px / 150% | idem | `/programs → / → /login → /exercises` | **mismatch** |
+| 393px / 200% | idem | `/programs → / → /exercises → /login` | **mismatch** |
+| 320 / 375 / 393px @ 100% | idem | idem | consistent (one 64px row) |
+
+At 320px/200% the raw geometry names the cause: the nav occupied
+`40,72 → 163.42×184` (two of its *own* lines) between the wordmark (`40,8`) and
+the account group (`215.42,136.75`), so `Exercises` (centre y 212) rendered below
+`Sign in` (centre y 164) even though the tab order reaches `Exercises` first.
+
+**Root cause.** The compact nav carried `flex-1`, so its flex basis was zero and
+the header's line breaking always placed the whole nav on the first line beside
+the wordmark and the account control; the nav then wrapped *its own* links into a
+narrow column. Round 2 fixed a **shrinking** nav; a **growing** one produced this
+finding. The nav must simply not take part in flex sizing.
+
+**Fix** (`AppNavLinks.tsx`, one class): the `mobileHeader` variant drops `flex-1`
+and becomes `flex flex-wrap items-center gap-1`. The nav keeps its natural width,
+so the HEADER's flex lines — not the nav's — decide where a row ends and the nav
+lands on a row that precedes the account row. No `order` utility, no `tabindex`,
+no DOM reshuffle: the normal DOM order is the only order there is.
+
+**Re-measured after the fix (same harness):**
+
+| Viewport / text | Rows | Header height | Order (visual = keyboard = DOM) | Header overflow | Label width (Programs / Exercises / Sign in) |
+|---|---|---|---|---|---|
+| 320 / 100% | 1 | 64px | Fit40 → Programs → Exercises → Sign in | 0 | 73 / 72 / 57px, no clipping |
+| 320 / 150% | 3 | 180px | idem | 0 | 110 / 108 / 61px, no clipping |
+| 320 / 200% | 4 | 328px | idem | 0 | 147 / 144 / 65px, no clipping |
+| 375 / 100% | 1 | 64px | idem | 0 | as above |
+| 375 / 150% | 2 | 132px | idem | 0 | as above |
+| 375 / 200% | 4 | 328px | idem | 0 | as above |
+| 393 / 100% | 1 | 64px | idem | 0 | as above |
+| 393 / 150% | 2 | 132px | idem | 0 | as above |
+| 393 / 200% | 3 | 232px | idem | 0 | as above |
+
+Every destination keeps its full label (measured `scrollWidth == clientWidth`),
+every keyboard-focused destination reports `:focus-visible` with its 3px ring,
+the nav/Sign-in touch targets are ≥44px (44/66/88px at 100/150/200%), and the
+header contributes **zero** horizontal overflow at every combination
+(`header.scrollWidth == header.clientWidth`, and no item's right edge passes the
+viewport edge). At 100% text the header is still exactly one 64px row.
+
+**The cost, stated plainly:** at 200% text the header is taller than in round 2
+(328px vs 265px at 320px) because the whole nav now takes its own rows instead of
+being squeezed into a column beside the sign-in control. That trade is the point
+of the fix — fully readable labels in a truthful order rather than a shorter but
+misleading layout.
+
+### 12.2 Regression tests
+
+- `tests/e2e/mobile-header-focus-order.mjs` (new; run by `npm run test:e2e`):
+  renders the production build in real Chrome, walks the header with real Tab
+  presses and compares the resulting focus order against the *measured* visual
+  reading order at 320/375/393px × 100/150/200% text, plus label integrity, the
+  44px floor, the focus ring, header overflow and the single 64px row.
+  **Verified to fail on the pre-fix code:** with `flex-1` restored and rebuilt it
+  reports **12 failures across 6 of the 9 combinations** and exits 1, including
+  `320px @ 200% · measured visual order — expected / → /programs → /exercises → /login, measured / → /programs → /login → /exercises`.
+- `tests/unit/components/shared/app-shell-headers.test.ts` (+2): the compact nav
+  must not grow or shrink (`flex-1`, `flex-auto`, `grow`), and the header's
+  rendered focusable order is `/, /programs, /exercises, /login` with no `order-*`
+  utility and no `tabindex` anywhere in the header.
+- `tests/unit/architecture/mobile-navigation-integrity.test.ts`: the round-2
+  guard that asserted the literal `flex flex-1 flex-wrap items-center gap-1`
+  string is updated to assert the class string *without* `flex-1`/`min-w-0`, and
+  now records why both a shrinking and a growing nav are wrong.
+
+The E2E layer is dependency-free **by design**: `docs/testing.md` names Playwright,
+but neither Playwright nor its browsers are dependencies of this repository and
+`AGENTS.md` forbids adding a library without explicit approval. The harness drives
+the already-installed Chrome over the DevTools protocol using Node built-ins only
+— the same technique the S4 browser evidence used — and `npm run test:e2e` boots
+`next start` itself (`E2E_BASE_URL` and `CHROME_PATH` override the defaults).
+
+### 12.3 Verification results (round-3 commit)
+
+| Check | Command | Result |
+|---|---|---|
+| Browser regression test | `npm run test:e2e` | **exit 0**, 9/9 combinations |
+| Same test against the pre-fix code | temporary `flex-1` restore + rebuild | **exit 1**, 12 failures |
+| Focused S4 tests (7 files) | `npx vitest run` on the §11.5 file set | **87 passed** |
+| Full unit suite | `npx vitest run` | **226 files / 3114 tests passed**, exit 0 |
+| Typecheck | `npx tsc --noEmit` | exit 0 |
+| Lint | `npm run lint` | exit 0 |
+| Production build | `npx next build --webpack` | exit 0 |
+| Whitespace | `git diff --check` | clean |
+| Integration tests | — | not run: no Application, Domain or persistence change |
+
+### 12.4 Round-3 limitations
+
+1. **The four-row header at 320px/200% text is tall** (328px). It is the physical
+   limit of a wordmark plus two destinations plus a sign-in control at 320px with
+   doubled text, and it is now taller than round 2's squeezed layout. Order,
+   labels, touch targets and overflow are all correct; only vertical space grew.
+   Flagged for product sign-off together with §11.4 item 1.
+2. **The pre-existing page-content overflow is untouched** (3px at 320/150%;
+   68/30/21px at 200%): the measured offenders are program-card text
+   (`3 workouts/week`), not navigation. Reproduced identically before and after
+   this fix.
+3. **The wordmark's own tap target is 28px tall at 100% text** (pre-existing; it is
+   inline link text, not a control). Round 3 preserves it rather than changing an
+   S3-locked surface; the nav links and `Sign in` are ≥44px.
+4. Beyond-200% text, real iOS/Android safe areas, Safari/Firefox, real screen
+   readers, pinch-zoom and RTL remain unverified, as in §11.4 items 4–6.

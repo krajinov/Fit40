@@ -207,103 +207,22 @@ describe.each([
   });
 });
 });
-describe('mobile header compact row (M19 S4)', () => {
-  it('floors the signed-out sign-in control at 44px', async () => {
+describe('mobile header reading order (M19 S4)', () => {
+  it('offers full public labels in wordmark → destinations → sign-in DOM order', async () => {
     const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
+    const controls = [...container.querySelectorAll<HTMLAnchorElement>('a[href]')];
 
-    const signIn = container.querySelector('a[href="/login"]');
-    expect(signIn?.className).toContain('inline-flex');
-    expect(signIn?.className).toContain('min-h-[44px]');
-    expect(signIn?.textContent).toBe('Sign in');
-  });
-
-  // M19 S4 review fix (P2): the compact row wraps instead of squeezing the
-  // public labels out of existence. The header and the nav are both wrapping
-  // rows, so an enlarged base font moves the destinations onto a second row.
-  it('wraps instead of truncating: full labels, wrapping header and nav', async () => {
-    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
-
-    const header = container.querySelector('header');
-    expect(header?.className).toContain('flex-wrap');
-    expect(header?.className).toContain('min-h-16');
-    // The fixed 64px height would clip a second navigation row.
-    expect(header?.className).not.toMatch(/(^|\s)h-16(\s|$)/);
-
-    const nav = container.querySelector('nav[aria-label="Primary"]');
-    expect(nav?.className).toContain('flex-wrap');
-    expect(nav?.className).not.toContain('min-w-0');
-
-    const links = [...container.querySelectorAll('nav[aria-label="Primary"] a')];
-    expect(links.map((link) => link.textContent)).toEqual(['Programs', 'Exercises']);
-    for (const link of links) {
-      expect(link.className).toContain('min-h-11');
-      expect(link.className).toContain('shrink-0');
-      // Nothing may ellipsize or clip the label: the row wraps instead.
-      expect(link.className).not.toContain('truncate');
-      expect(link.querySelector('span')).toBeNull();
-    }
-  });
-
-  it('keeps the account control in a right-aligned group on its own row when wrapped', async () => {
-    const container = await renderHeader(MobileHeader, {
-      account: null,
-      isAuthenticated: false,
-    });
-
-    const signIn = container.querySelector('a[href="/login"]');
-    const group = signIn?.parentElement;
-    expect(group?.className).toContain('ml-auto');
-    expect(group?.className).toContain('flex');
-  });
-
-  it('leaves the desktop row unwrapped and untouched', async () => {
-    const container = await renderHeader(AppHeader, {
-      account: createElement('span', null, 'Account control'),
-      isAuthenticated: true,
-    });
-
-    const nav = container.querySelector('nav[aria-label="Primary"]');
-    expect(nav?.className).not.toContain('flex-wrap');
-    for (const link of container.querySelectorAll('nav[aria-label="Primary"] a')) {
-      expect(link.querySelector('span')).toBeNull();
-      expect(link.className).toContain('text-[15px]');
-      expect(link.className).not.toContain('truncate');
-    }
-  });
-});
-
-describe('mobile header reading order (M19 S4 review fix, P2)', () => {
-  // The compact nav must keep its NATURAL width. A `flex-1` nav is placed on
-  // the header's first line with a zero basis and then wraps its own links into
-  // a narrow column while the sign-in control keeps sharing that line — which
-  // renders `Exercises` BELOW `Sign in` even though the tab order reaches it
-  // first (Codex finding on PR #27, MobileHeader.tsx:39). These assertions pin
-  // the structural cause; the rendered geometry and the real Tab sequence are
-  // checked manually using docs/mobile-navigation-verification.md.
-  it('keeps the compact nav at its natural width so the header breaks the row', async () => {
-    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
-
-    const nav = container.querySelector('nav[aria-label="Primary"]');
-    expect(nav?.className).toContain('flex-wrap');
-    expect(nav?.className).not.toContain('flex-1');
-    expect(nav?.className).not.toContain('flex-auto');
-    expect(nav?.className).not.toMatch(/(^|\s)grow(\s|$)/);
-  });
-
-  it('renders wordmark → destinations → sign-in with no order overrides', async () => {
-    const container = await renderHeader(MobileHeader, { account: null, isAuthenticated: false });
-    const header = container.querySelector('header');
-
-    const rendered = [...(header?.querySelectorAll('a[href], button') ?? [])].map((element) =>
-      element.getAttribute('href'),
-    );
-    expect(rendered).toEqual(['/', '/programs', '/exercises', '/login']);
-
-    // No CSS `order` utility and no tabindex retargeting anywhere in the header:
-    // DOM order is the only order the keyboard can follow.
-    for (const element of header?.querySelectorAll('*') ?? []) {
-      expect(String(element.className)).not.toMatch(/(^|\s)-?order-/);
-      expect(element.getAttribute('tabindex')).toBeNull();
-    }
+    expect(controls.map((link) => ({
+      name: link.getAttribute('aria-label') ?? link.textContent,
+      href: link.getAttribute('href'),
+      tabIndex: link.tabIndex,
+    }))).toEqual([
+      { name: 'Fit40 home', href: '/', tabIndex: 0 },
+      { name: 'Programs', href: '/programs', tabIndex: 0 },
+      { name: 'Exercises', href: '/exercises', tabIndex: 0 },
+      { name: 'Sign in', href: '/login', tabIndex: 0 },
+    ]);
+    // Visual order and actual Tab/Shift+Tab traversal require a real browser;
+    // jsdom only establishes the semantic controls and their DOM order.
   });
 });

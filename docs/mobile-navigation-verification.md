@@ -2,8 +2,9 @@
 
 Use this for layout verification; `docs/testing.md` reserves automated E2E for
 critical journeys using Playwright. There is no layout-only E2E command.
-Retained unit tests guard header DOM order and the structural regression, but
-do not simulate real Tab navigation or calculate browser layout.
+Retained unit tests check link names, destinations, DOM order and active state.
+They do not simulate real Tab navigation or calculate browser layout; no CSS
+class or source-format assertion substitutes for the measurements below.
 
 1. Run `npm run build` and `npm start`. Open `/programs` signed out in a real
    browser. Record the commit, browser/version, OS and URL with the results.

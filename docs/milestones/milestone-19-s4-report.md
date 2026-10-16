@@ -1,10 +1,12 @@
 # Verification status after P1 review
 
-The current approach is documented in §14 and
+The current approach is documented in §15 and
 [the manual browser checklist](../mobile-navigation-verification.md). §§1–13
 are historical evidence from earlier commits; their CDP commands, harness
 design rationale and transport limitations are superseded. The custom runner
-and its support infrastructure have been removed.
+and its support infrastructure have been removed. The class/source-format
+guards described in earlier sections have also been removed; §15 records their
+behavioral replacements and the remaining architectural exceptions.
 
 # Milestone 19 — Slice 4 Implementation Report
 
@@ -812,4 +814,86 @@ The default Turbopack build failed first fetching Google Fonts, then on a
 restricted port bind after retrying with network access. The webpack production
 build passed without source changes. An initial standalone TypeScript run raced
 with build cleanup of `.next/types`; the rerun after the successful build passed.
+Integration tests were not run: no application, domain or persistence changes.
+
+
+## 15. Remaining P1 — test observable navigation contracts
+
+Reviewed `AGENTS.md`, including lines 395–401, and `docs/testing.md`. Audited
+all tests and helpers added or modified between S3 (`e0471e80`) and the expected
+S4 HEAD (`8dde6bc5c2d54669fdd017fc2b7e7142086e9734`). This section supersedes
+earlier claims that source/class guards prove geometry or visual reading order.
+Application UI, dependencies and testing configuration are unchanged.
+
+| Audited file | Resolution |
+|---|---|
+| `architecture/mobile-navigation-integrity.test.ts` | Removed all 17 source guards. Geometry, token values, utility ordering, JSX composition and formatting are not architectural contracts. Existing DOM/nav-model tests retain destinations, auth-aware wordmarks, History availability, session-route suppression and active state. |
+| `architecture/mobile-bottom-bars.test.ts` and `helpers/fixed-bottom-scan.ts` | Removed the CSS scanner, its five self-tests and five source-composition checks. Counting files containing particular utilities cannot establish visible bars on a route. Session action availability is tested by rendering; visible bar counts remain browser checks. |
+| `architecture/auth-aware-navigation.test.ts` | Replaced source regex/string assertions with three TypeScript syntax-tree guards, justified below. Removed early-return, filter-call, JSX prop threading, href spelling and clearance assertions. Auth/link outcomes are covered in rendered DOM. |
+| `components/shared/mobile-tab-bar.test.ts` | Removed utility, icon-size, wrapper/label structure and whole-markup equality checks. Retained named navigation, link labels/hrefs, decorative-icon accessibility, auth/session suppression and History-detail behavior. Server/client comparison now checks navigation semantics. Added a mounted-component route-change regression for nested Programs/Exercises and a similarly prefixed non-destination. |
+| `components/shared/app-shell-headers.test.ts` | Replaced six S4 class/structure tests with one semantic regression: full public control names, hrefs, DOM order and native tab eligibility. Existing account, wordmark, auth and active-state tests remain. |
+
+Also replaced the older responsive-class assertion in
+`features/dashboard/recent-training-card.test.ts` with the History link contract
+inside the named Recent training region. Its loaded, empty and unavailable
+History-entry cases remain. New
+`features/sessions/session-navigation.test.ts` renders the real active and
+completed screens and finish controls (unrelated exercise editors are stubbed):
+an active workout offers an enabled submit action; completion offers the workout
+details link and no further Finish workout button. These tests intentionally do
+not assert how many breakpoint-specific controls are visible in jsdom.
+
+The only retained source-check exceptions in the audited set are in
+`auth-aware-navigation.test.ts`, using the existing TypeScript dependency:
+
+1. Shared navigation must not import feature modules. This is a dependency
+   boundary; identical DOM could conceal an invalid dependency.
+2. The shared navigation model must remain server-usable, without a client/server
+   directive, Next router dependency or React state-hook calls. Client DOM cannot
+   establish whether a module is safe to import on the server.
+3. Authentication resolution belongs to the layout (one `getCurrentUser` call),
+   with no independent auth/fetch calls in shared navigation. The same links
+   could render after duplicate session reads, so behavioral assertions alone
+   cannot enforce this ownership rule.
+
+No CSS/source-geometry exception remains. The syntax-tree guards inspect imports,
+directives and calls rather than whitespace, quote style, utility order or JSX
+serialization. No test was moved to another directory merely to evade the audit.
+
+Verification uses Vitest and the existing jsdom/react-dom component pattern.
+No E2E suite, custom browser harness, new library or layout-only Playwright test
+was introduced. AGENTS.md reserves Playwright E2E for critical journeys; this
+revision changes tests and documentation only.
+
+### Verification and browser limitations
+
+The real-browser measurements and screenshots documented in §§5–13 are
+preserved as historical evidence. No new browser measurements were performed
+for this test-only revision. The manual checklist remains the required way to
+verify CSS layout: viewport/text-size matrix, clipping, 44px targets, safe-area
+clearance, visible focus, overflow, breakpoint-specific bar counts and actual
+Tab/Shift+Tab versus measured visual order. jsdom does not validate any of these.
+Known limitations remain, including real iOS/Android safe areas, Safari/Firefox,
+screen readers, pinch zoom, RTL and beyond-200% text. The previously recorded
+28px wordmark height and enlarged-text program-card overflow are not resolved by
+these tests. No merge or S5 work is included.
+
+Validated on Node 24.19.0:
+
+| Check | Result |
+|---|---|
+| Focused S4/navigation tests (7 files) | 55 passed |
+| Full unit suite (`npm test`) | 225 files / 3075 tests passed |
+| TypeScript (`npx tsc --noEmit`, after build) | exit 0 |
+| Lint (`npm run lint`) | exit 0 |
+| Production build (`npm run build -- --webpack`) | exit 0 |
+| Whitespace (`git diff --check`) | clean |
+
+Focused command: `npx vitest run tests/unit/architecture/auth-aware-navigation.test.ts tests/unit/architecture/training-progress.test.ts tests/unit/components/shared/mobile-tab-bar.test.ts tests/unit/components/shared/app-shell-headers.test.ts tests/unit/components/shared/nav-items.test.ts tests/unit/features/sessions/session-navigation.test.ts tests/unit/features/dashboard/recent-training-card.test.ts`.
+
+The default `npm run build` failed with Turbopack's restricted local-port bind
+(`Operation not permitted`); the approved retry outside the sandbox reported the
+same error. The webpack production build passed without application changes.
+The first new completed-panel test run exposed an omitted `programCompletion:
+null` fixture prop; that fixture was corrected before the passing runs above.
 Integration tests were not run: no application, domain or persistence changes.

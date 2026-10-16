@@ -1,124 +1,73 @@
 /**
- * M19 S3 architecture guards — authentication-aware navigation.
- *
- * Source-level invariants that the behavioral tests cannot express:
- * 1. the navigation model is server-safe and feature-free;
- * 2. the shell holds exactly ONE authentication state, resolved once by the
- *    route-group layout (no fetch/cookie/localStorage in the shell);
- * 3. destinations are declared once (no hardcoded private paths in the nav
- *    components), filtered by the auth flag;
- * 4. sign-in always targets /login and the shell never builds a `next=`
- *    parameter (the validated login flow stays the only producer);
- * 5. the S4-preserved contracts (session-route hide, tab-bar clearance) are
- *    untouched by this slice.
+ * Architectural exceptions to behavioral testing: dependency boundaries and
+ * ownership of authentication cannot be inferred from rendered DOM. Parse the
+ * TypeScript tree so these guards do not depend on JSX or source formatting.
  */
-
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-/** Vitest runs from the repository root (the `global-setup` convention). */
-const ROOT = process.cwd();
+const NAV_MODEL = 'src/components/shared/nav-items.ts';
+const SHELL_FILES = [
+  NAV_MODEL,
+  'src/components/shared/AppNavLinks.tsx',
+  'src/components/shared/MobileTabBar.tsx',
+  'src/components/shared/AppHeader.tsx',
+  'src/components/shared/MobileHeader.tsx',
+];
 
-const NAV_ITEMS = 'src/components/shared/nav-items.ts';
-const APP_NAV_LINKS = 'src/components/shared/AppNavLinks.tsx';
-const MOBILE_TAB_BAR = 'src/components/shared/MobileTabBar.tsx';
-const APP_HEADER = 'src/components/shared/AppHeader.tsx';
-const MOBILE_HEADER = 'src/components/shared/MobileHeader.tsx';
-const APP_LAYOUT = 'src/app/(app)/layout.tsx';
-
-const SHELL_FILES = [NAV_ITEMS, APP_NAV_LINKS, MOBILE_TAB_BAR, APP_HEADER, MOBILE_HEADER];
-
-function read(relativePath: string): string {
-  return readFileSync(path.join(ROOT, relativePath), 'utf8');
+function parse(file: string): ts.SourceFile {
+  return ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 }
 
-/** Source with comments stripped, so prose never satisfies (or fails) a guard. */
-function code(relativePath: string): string {
-  return read(relativePath)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
+function imports(source: ts.SourceFile): string[] {
+  return source.statements.flatMap((statement) =>
+    ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)
+      ? [statement.moduleSpecifier.text]
+      : [],
+  );
 }
 
-describe('M19 S3 — the navigation model is server-safe', () => {
-  it('nav-items.ts has no client directive, router import or feature import', () => {
-    const source = code(NAV_ITEMS);
+function calls(source: ts.SourceFile): string[] {
+  const names: string[] = [];
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      names.push(node.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return names;
+}
 
-    expect(source).not.toMatch(/^['"]use (client|server)['"]/m);
-    expect(source).not.toMatch(/from ['"]next\//);
-    expect(source).not.toMatch(/@\/features/);
-    expect(source).not.toMatch(/\buse(State|Effect|Reducer|SyncExternalStore)\b/);
-  });
-});
-
-describe('M19 S3 — the shell owns no second authentication state', () => {
-  it('no shell navigation file reads a cookie, storage or a client fetch', () => {
+describe('navigation dependency and authentication boundaries', () => {
+  it('keeps the shared shell independent of feature modules', () => {
     for (const file of SHELL_FILES) {
-      const source = code(file);
-      expect(source, file).not.toMatch(/document\.cookie/);
-      expect(source, file).not.toMatch(/localStorage|sessionStorage/);
-      expect(source, file).not.toMatch(/\bfetch\(/);
-      expect(source, file).not.toMatch(/getCurrentUser|requireUser/);
+      expect(imports(parse(file)).filter((name) => name.startsWith('@/features/')), file).toEqual([]);
     }
   });
 
-  it('the route-group layout resolves the session exactly once and threads one boolean', () => {
-    const source = code(APP_LAYOUT);
-
-    expect(source.match(/await getCurrentUser\(\)/g)).toHaveLength(1);
-    expect(source).toContain('const isAuthenticated = user !== null;');
-    expect(source.match(/isAuthenticated=\{isAuthenticated\}/g)).toHaveLength(3);
-  });
-
-  it('the shell navigation components import no feature module', () => {
-    for (const file of SHELL_FILES) {
-      expect(code(file), file).not.toMatch(/@\/features/);
-    }
-  });
-});
-
-describe('M19 S3 — destinations are declared once and filtered by auth', () => {
-  it('the nav components hardcode no destination path', () => {
-    for (const file of [APP_NAV_LINKS, MOBILE_TAB_BAR]) {
-      const source = code(file);
-      expect(source, file).not.toMatch(/['"]\/(dashboard|programs|exercises|history|progress)['"]/);
-    }
-  });
-
-  it('both consumers go through the declared filter', () => {
-    expect(code(APP_NAV_LINKS)).toContain('visibleNavItems(');
-    expect(code(MOBILE_TAB_BAR)).toContain('authenticatedMobileTabs(');
-  });
-
-  it('the signed-out tab bar is disabled before any destination renders', () => {
-    const source = code(MOBILE_TAB_BAR);
-
-    // The auth check precedes the render path: an early return for a
-    // signed-out visitor, so no private destination can be emitted.
-    expect(source).toMatch(/if \(!isAuthenticated\) \{\s*return null;\s*\}/);
-  });
-});
-
-describe('M19 S3 — sign-in flow and preserved contracts', () => {
-  it('the sign-in controls target /login and the shell builds no next= parameter', () => {
-    for (const file of [APP_HEADER, MOBILE_HEADER]) {
-      const source = code(file);
-      expect(source, file).toContain('href="/login"');
-      expect(source, file).not.toContain('next=');
-    }
-    for (const file of [NAV_ITEMS, APP_NAV_LINKS, MOBILE_TAB_BAR]) {
-      expect(code(file), file).not.toContain('next=');
-    }
-  });
-
-  it('preserves the session-route tab-bar hide and the shared slot clearance', () => {
-    expect(code(MOBILE_TAB_BAR)).toContain("endsWith('/session')");
-    // M19 S4 review: the clearance and the bar's own height are the SAME token
-    // (`--mobile-tab-bar-height`, 76px floor) plus the safe-area inset, so an
-    // enlarged-text bar can never cover content and the two can never drift.
-    expect(code(APP_LAYOUT)).toContain(
-      'pb-[calc(var(--mobile-tab-bar-height)+env(safe-area-inset-bottom))] md:pb-0',
+  it('keeps the navigation model usable on the server without router or React state', () => {
+    const model = parse(NAV_MODEL);
+    expect(imports(model).filter((name) => name.startsWith('next/')), NAV_MODEL).toEqual([]);
+    const directives = model.statements.flatMap((statement) =>
+      ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression)
+        ? [statement.expression.text]
+        : [],
     );
-    expect(code(MOBILE_TAB_BAR)).toContain('min-h-[var(--mobile-tab-bar-height)]');
+    expect(directives).not.toContain('use client');
+    expect(directives).not.toContain('use server');
+    expect(calls(model).filter((name) => /^use(State|Effect|Reducer|SyncExternalStore)$/.test(name)))
+      .toEqual([]);
+  });
+
+  it('resolves authentication once in the layout rather than fetching it in the shared shell', () => {
+    // A DOM test could pass even if every header fetched its own session.
+    for (const file of SHELL_FILES) {
+      expect(calls(parse(file)).filter((name) =>
+        ['getCurrentUser', 'requireUser', 'fetch'].includes(name)), file).toEqual([]);
+    }
+    const layout = parse('src/app/(app)/layout.tsx');
+    expect(calls(layout).filter((name) => name === 'getCurrentUser')).toHaveLength(1);
   });
 });

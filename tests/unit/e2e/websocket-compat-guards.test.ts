@@ -116,7 +116,7 @@ describe('transport source guards', () => {
       readFileSync(path.resolve(NEXT_MANIFEST), 'utf8'),
     );
     // The floor is what makes this whole file necessary: >= 20.9.0 predates the
-    // WebSocket global (behind a flag in 20.10.0, on by default in 22.4.0).
+    // WebSocket global (behind a flag in 20.10.0/21.0.0, on by default in 22.0.0).
     expect(manifest.engines?.node).toBe('>=20.9.0');
   });
 });

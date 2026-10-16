@@ -7,15 +7,15 @@
  * Node's *global* WebSocket — which is not part of the runtime this project
  * supports. `package.json` pins Next.js 16.3.1, whose `engines` field requires
  * `node >= 20.9.0`; the WHATWG WebSocket global only arrived behind
- * `--experimental-websocket` in Node 20.10.0 (nodejs/node#49830) and became
- * available by default in Node 22.4.0. On Node 20.9.0 — the project's minimum
- * supported runtime — `new WebSocket(...)` throws
+ * `--experimental-websocket` in Node 20.10.0/21.0.0 (nodejs/node#49830) and is
+ * on by default only from Node 22.0.0 (marked stable in 22.4.0). On Node 20.9.0
+ * — the project's minimum supported runtime — `new WebSocket(...)` throws
  * `ReferenceError: WebSocket is not defined`, so the whole E2E layer was dead on
  * a version the project officially supports.
  *
  * WHAT THIS DOES
  * `openWebSocket()` prefers the platform's global WebSocket when it exists
- * (Node >= 22.4, browsers, Deno, Bun) and otherwise uses the dependency-free
+ * (Node >= 22, browsers, Deno, Bun) and otherwise uses the dependency-free
  * RFC 6455 client in `./minimal-websocket.mjs`. `AGENTS.md` forbids adding a
  * dependency without approval, so the fallback is written here rather than
  * pulling in `ws`.
@@ -43,7 +43,7 @@ const FALLBACK_TRANSPORT = {
   create: (url) => new MinimalWebSocket(url),
 };
 
-/** True when the runtime exposes the WHATWG WebSocket global (Node >= 22.4). */
+/** True when the runtime exposes the WHATWG WebSocket global (Node >= 22). */
 export function hasNativeWebSocket() {
   return typeof globalThis.WebSocket === 'function';
 }

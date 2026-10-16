@@ -7,16 +7,17 @@
  * global does not exist on Node 20.9 — and Node 20.9 is the minimum the project
  * supports: `package.json` pins Next.js 16.3.1, whose own `engines` field
  * requires `node >= 20.9.0`. The WHATWG WebSocket global only arrived behind
- * `--experimental-websocket` in Node 20.10.0 (nodejs/node#49830) and became
- * available by default in Node 22.4.0, so on the supported floor the whole E2E
- * layer died with `ReferenceError: WebSocket is not defined`.
+ * `--experimental-websocket` in Node 20.10.0/21.0.0 (nodejs/node#49830) and is
+ * on by default only from Node 22.0.0 (marked stable in 22.4.0), so on the
+ * supported floor the whole E2E layer died with
+ * `ReferenceError: WebSocket is not defined`.
  *
  * WHAT THIS COVERS
  * 1. With `globalThis.WebSocket` removed — the exact Node 20.9 situation — the
  *    fallback transport completes a real RFC 6455 handshake and round trip
  *    against an independent echo server: masked client frames, a fragmented
  *    server message, ping/pong and close.
- * 2. When the runtime provides the global (Node >= 22.4) the native transport
+ * 2. When the runtime provides the global (Node >= 22) the native transport
  *    completes the very same round trip, so the two implementations cannot
  *    silently drift apart.
  * The byte-level codec and the source-level guards live in
@@ -109,7 +110,7 @@ async function expectFullRoundTrip(server: WebSocketEchoServer): Promise<void> {
 }
 
 describe('CDP WebSocket transport selection', () => {
-  it('uses the platform global when the runtime provides one (Node >= 22.4)', () => {
+  it('uses the platform global when the runtime provides one (Node >= 22)', () => {
     const hasGlobal = typeof globalThis.WebSocket === 'function';
     expect(hasNativeWebSocket()).toBe(hasGlobal);
     expect(assertWebsocketTransport().kind).toBe(hasGlobal ? 'native' : 'fallback');
@@ -141,7 +142,7 @@ describe('CDP WebSocket round trip with no global WebSocket (Node 20.9)', () => 
 
 describe('CDP WebSocket round trip through the platform global', () => {
   it.skipIf(!hasNativeWebSocket())(
-    'completes the same round trip on the native transport (Node >= 22.4)',
+    'completes the same round trip on the native transport (Node >= 22)',
     async () => {
       const server = await start();
       await expectFullRoundTrip(server);

@@ -584,3 +584,181 @@ the already-installed Chrome over the DevTools protocol using Node built-ins onl
    S3-locked surface; the nav links and `Sign in` are ≥44px.
 4. Beyond-200% text, real iOS/Android safe areas, Safari/Firefox, real screen
    readers, pinch-zoom and RTL remain unverified, as in §11.4 items 4–6.
+   (→ **§13**: the round-4 fix makes the E2E harness runnable on Node 20.9.0, so
+   these round-3 measurements can now be reproduced on the minimum runtime.)
+
+## 13. Round 4 — Codex review fix (P2, PR #27): the E2E harness on Node 20.9
+
+A further automated review of `39ed0b0` (GitHub Codex, PR #27) raised one more P2
+finding, this time against the *verification harness* rather than the page:
+
+> `tests/e2e/support/cdp.mjs:14` — The CDP E2E harness relies on the global
+> WebSocket API, which is unavailable by default on some Node.js 20 versions
+> supported by Next.js 16.
+
+### 13.1 The finding is real, and it killed the whole E2E layer on a supported runtime
+
+`package.json` pins `next@16.3.1`, whose own manifest declares
+`engines: { node: ">=20.9.0" }` — so **Node 20.9.0 is a supported runtime**. The
+WHATWG `WebSocket` global is not part of it (Node.js globals documentation,
+"Class: WebSocket"):
+
+| Node.js | `typeof globalThis.WebSocket` |
+|---|---|
+| 20.9.0 | `undefined` — even the `--experimental-websocket` flag only landed in 20.10.0 |
+| 20.10.0 – 21.x | `undefined` unless `--experimental-websocket` is passed |
+| 22.0.0+ | `function` (on by default; marked stable in 22.4.0) |
+
+`cdp.mjs` did `const socket = new WebSocket(webSocketUrl);`, so on Node 20.9.0
+every `npm run test:e2e` run died before it could connect. Reproduced on a real
+Node 20.9.0 binary with the pre-fix file restored:
+
+```
+$ git show 39ed0b0:tests/e2e/support/cdp.mjs > tests/e2e/support/cdp.mjs
+$ node --version; node -e "console.log(typeof WebSocket)"
+v20.9.0
+undefined
+$ npm run test:e2e
+ReferenceError: WebSocket is not defined
+    at connect (file:///workspace/tests/e2e/support/cdp.mjs:14:18)
+    at openPage (file:///workspace/tests/e2e/support/browser.mjs:148:24)
+exit=1
+```
+
+The stack frame is `cdp.mjs:14:18` — exactly the line the finding names. This was
+not a degradation: on the minimum supported version the S4 browser evidence
+(§12.2, §12.3) could not be produced at all.
+
+### 13.2 The fix: one compatibility boundary, no new dependency
+
+`AGENTS.md` forbids adding a library without explicit approval, and the
+repository has no WebSocket dependency (`ws`, `undici`, `isomorphic-ws` are all
+absent from `package.json` and the lockfile). The fix is therefore a small,
+explicit compatibility layer written on Node built-ins, plus a single boundary
+that every socket goes through.
+
+| File | Change | Why |
+|---|---|---|
+| `tests/e2e/support/websocket-frames.mjs` | **new** — RFC 6455 codec: masked client frames, unmasked server frames, fragmentation, ping/pong/close, incremental parsing | the byte layer, unit-testable on its own (`node:crypto` only) |
+| `tests/e2e/support/minimal-websocket.mjs` | **new** — WHATWG-shaped client over `node:http` + `node:crypto` | the fallback used when the runtime has no global |
+| `tests/e2e/support/websocket.mjs` | **new** — transport selection, `hasNativeWebSocket()`, `resolveWebsocketTransport()`, `assertWebsocketTransport()`, `openWebSocket()` | the one place that knows whether a global exists |
+| `tests/e2e/support/cdp.mjs` | `new WebSocket(url)` → `openWebSocket(url)` | the finding; line 14 no longer touches the global |
+| `tests/e2e/mobile-header-focus-order.mjs` | runs the explicit runtime check and prints `transport … · Node …` | makes a future regression visible in the run output |
+
+Behaviour-preserving choices, stated explicitly:
+
+- **The platform global still wins.** On Node ≥ 22 (and in browsers/Deno/Bun)
+  `openWebSocket()` returns `new globalThis.WebSocket(url)`, i.e. byte-for-byte
+  the previous behaviour; the fallback is only reached where the old code threw.
+- **No CDP semantics changed.** The client still drives `Runtime.evaluate`,
+  `Input.dispatchKeyEvent`, `Emulation.setDeviceMetricsOverride` and
+  `Page.navigate`; the harness's arguments, matrix, assertions and printed
+  format are untouched apart from one added informational line.
+- **The fallback dispatches events from microtasks**, like the WHATWG
+  implementation, so a `message` listener registered in the `open` handler still
+  sees frames that arrived in the same packet as the handshake response.
+- **The fallback is `ws://` only.** Chrome's DevTools endpoint is always
+  `ws://127.0.0.1:<port>/devtools/…`, so this is unreachable in practice;
+  `wss://` raises a labelled error rather than failing obscurely.
+
+### 13.3 Regression coverage so this cannot silently return
+
+Three layers, all added in this round:
+
+- `tests/unit/e2e/websocket-transport.test.ts` — **functional.** With
+  `globalThis.WebSocket` stubbed away (the exact Node 20.9 situation) the
+  fallback completes a real handshake and round trip against an independent
+  echo server: masked client frames, a fragmented server message, a ping the
+  client must answer with a pong, and the CDP-shaped request echoed back. The
+  same round trip is then repeated through the platform global, so the two
+  transports cannot drift apart. Plus the explicit-runtime-check behaviour,
+  including the labelled failure for a runtime that offers an unusable
+  WebSocket.
+- `tests/unit/helpers/websocket-echo-server.ts` — **new**, a hand-rolled RFC 6455
+  server written independently of the client (it writes unmasked frames and
+  decodes masked ones), so a client that stopped masking payloads, mishandled
+  fragmentation or ignored pings fails against it rather than passing against
+  its own bug.
+- `tests/unit/e2e/websocket-compat-guards.test.ts` — **source-level.** `cdp.mjs`
+  must not contain `new WebSocket(`, must not reference `globalThis.WebSocket`,
+  and must go through `openWebSocket`; `websocket.mjs` may only reach for the
+  global behind `typeof globalThis.WebSocket === 'function'`; the runner must
+  keep its runtime check and printed transport label; no `ws`/`websocket`/
+  `isomorphic-ws`/`undici` dependency may be added; and the Next.js `engines.node`
+  floor that makes all of this necessary is pinned at `>=20.9.0`. The file also
+  covers the byte codec directly (masking, fragment joining, a frame delivered
+  one byte at a time, an orphan continuation frame).
+
+The guard was **verified to fail on the pre-fix code**: restoring
+`const socket = new WebSocket(webSocketUrl);` in `cdp.mjs` makes
+`never constructs the global WebSocket in the CDP client` fail with
+`expected … not to match /\bnew\s+WebSocket\s*\(/` (1 failed, 13 skipped).
+
+### 13.4 Verification results (round-4 commit)
+
+The harness was verified on the project's minimum Node version, not only on the
+development one. Two Node lines were installed for this: Node 20.9.0 (the
+Next.js 16 `engines` floor) and the latest Node 20 LTS (20.20.2).
+
+| Check | Command | Result |
+|---|---|---|
+| Browser regression test, Node 24.15.0 | `npm run test:e2e` | **exit 0**, 9/9 · `transport global WebSocket` |
+| Browser regression test, Node 20.20.2 | `npm run test:e2e` | **exit 0**, 9/9 · `transport built-in fallback WebSocket` |
+| Browser regression test, Node 20.20.2 + `--experimental-websocket` | `NODE_OPTIONS=--experimental-websocket npm run test:e2e` | **exit 0**, 9/9 · `transport global WebSocket` |
+| **Browser regression test, Node 20.9.0 (project minimum)** | `npm run test:e2e` | **exit 0**, 9/9 · `transport built-in fallback WebSocket` |
+| Same test on the **pre-fix** `cdp.mjs`, Node 20.9.0 | `git show 39ed0b0:…/cdp.mjs` + `npm run test:e2e` | **exit 1** — `ReferenceError: WebSocket is not defined` at `cdp.mjs:14:18` |
+| Harness regression tests, Node 24.15.0 | `npx vitest run tests/unit/e2e/` | **14 passed** (2 files) |
+| Harness regression tests, Node 20.20.2 | `npx vitest run tests/unit/e2e/` | **13 passed, 1 skipped** — the native-transport test skips itself, as designed, when the global is absent |
+| Focused S4 tests (7 files, §11.5 set) | `npx vitest run` on the §11.5 file set | **87 passed** |
+| Full unit suite, Node 24.15.0 | `npx vitest run` | **228 files / 3128 tests passed**, exit 0 |
+| Typecheck | `npx tsc --noEmit` | exit 0 |
+| Lint | `npm run lint` | exit 0 |
+| Production build | `npx next build --webpack` | exit 0 |
+| Whitespace | `git diff --check` | clean |
+| Integration tests | — | not run: no Application, Domain or persistence change |
+
+The browser measurements are **identical across the native and fallback
+transports and across Node 20.9.0 / 20.20.2 / 24.15.0**, which is the evidence
+that the transport swap changed nothing observable: `64px` and one row at 100%
+text for all three widths, `180px`/3 rows at 320px 150%, `328px`/4 rows at
+320px 200%, `127px`/2 and `328px`/4 at 375px, `132px`/2 and `232px`/3 at 393px —
+the same figures as §12.3. DOM order, keyboard focus order and measured visual
+order were `/ → /programs → /exercises → /login` in every one of the 36
+combinations (9 per runtime), with labels, the 44px floor, the focus ring and
+the no-overflow assertions all green.
+
+### 13.5 Round-4 limitations
+
+1. **The fallback is `ws://` only.** Chrome's DevTools endpoint never uses
+   `wss://`, so this cannot be hit by `npm run test:e2e`; a `wss://` URL throws
+   `the dependency-free WebSocket fallback supports ws:// only` instead of
+   failing obscurely. No extension negotiation (permessage-deflate) is
+   implemented either — the CDP client does not ask for any.
+2. **The fallback is a compatibility shim, not a general WebSocket library.** It
+   implements exactly the API surface `cdp.mjs` drives (`addEventListener`,
+   `send`, `close`) and validates that surface at connect time
+   (`assertWebsocketTransport()`). It is not a candidate for production use and
+   is not exported outside `tests/`.
+3. **The unit-test *runner* has a higher floor than the application.** Vitest
+   4.1.11's bundler (`rolldown`) requires `^20.19.0 || >=22.12.0`, so
+   `npx vitest run` cannot even start on Node 20.9.0
+   (`SyntaxError: The requested module 'node:util' does not provide an export
+   named 'styleText'`). That is a dev-toolchain constraint, independent of this
+   finding: the E2E harness runs on plain `node` and was verified on 20.9.0.
+4. **On Node 20 the jsdom half of the unit suite does not run** — `undici@8`
+   (pulled in by `jsdom@30`, both dev dependencies) needs
+   `webidl.util.markAsUncloneable`, which a newer Node provides. On Node 20.20.2
+   the run reports 188 files / 2716 tests passed with 40 pre-existing
+   "Failed to start forks worker" errors for jsdom component files. None of them
+   involve this change, and none of them are the §13.3 test files (which use the
+   `node` environment).
+5. **Sandbox notes for reproducing §13.4.** The verification container has no
+   root, no system PostgreSQL and no Docker, and it blocks unprivileged user
+   namespaces. PostgreSQL 15 and Chrome 155 were therefore assembled from Debian
+   packages and the Chrome-for-Testing archive into a user prefix, and Chrome is
+   launched through the harness's documented `CHROME_PATH` override pointing at a
+   two-line wrapper that adds `--no-sandbox` plus the library path. **The
+   committed harness is unchanged by this**: no Chrome flag, argument list,
+   assertion or measurement was modified for the run.
+6. Beyond-200% text, real iOS/Android safe areas, Safari/Firefox, real screen
+   readers, pinch-zoom and RTL remain unverified, as in §11.4 items 4–6.

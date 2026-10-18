@@ -4,6 +4,8 @@ import { ChevronRight } from 'lucide-react';
 import { notFound } from 'next/navigation';
 
 import { PageContainer } from '@/components/shared/PageContainer';
+import { getCurrentUser } from '@/features/auth/current-user';
+import { buildExerciseHistoryPresenceView } from '@/features/exercises/exercise-history-presence-view';
 import { getExerciseBySlugUseCase } from '@/features/exercises/services';
 import { ExerciseDetail } from '@/features/exercises/components/ExerciseDetail';
 import { exerciseSlugSchema } from '@/features/exercises/schemas/exercise-filters-schema';
@@ -40,6 +42,11 @@ export default async function ExerciseDetailPage({ params }: ExerciseDetailPageP
     notFound();
   }
 
+  const user = await getCurrentUser();
+  const history = user === null
+    ? undefined
+    : await buildExerciseHistoryPresenceView(user.id, result.data.slug);
+
   return (
     <PageContainer className="pt-5 md:pt-8">
       <nav aria-label="Breadcrumb" className="mb-6">
@@ -61,7 +68,7 @@ export default async function ExerciseDetailPage({ params }: ExerciseDetailPageP
         </ol>
       </nav>
 
-      <ExerciseDetail exercise={result.data} />
+      <ExerciseDetail exercise={result.data} personalHistoryHref={history?.personalHistoryHref} />
     </PageContainer>
   );
 }

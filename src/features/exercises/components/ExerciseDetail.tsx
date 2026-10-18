@@ -1,4 +1,5 @@
 import { Check, CircleX, TriangleAlert, type LucideIcon } from 'lucide-react';
+import Link from 'next/link';
 
 import type { ExerciseDetailDto } from '@/application/dto/exercise';
 import type { SuitabilityLevel } from '@/domain/types/exercise';
@@ -16,6 +17,7 @@ import {
 
 interface ExerciseDetailProps {
   readonly exercise: ExerciseDetailDto;
+  readonly personalHistoryHref?: string;
 }
 
 type ExerciseConsideration = ExerciseDetailDto['considerations'][number];
@@ -47,7 +49,7 @@ function ConsiderationRow({
   );
 }
 
-export function ExerciseDetail({ exercise }: ExerciseDetailProps) {
+export function ExerciseDetail({ exercise, personalHistoryHref }: ExerciseDetailProps) {
   const hasSecondaryMuscles = exercise.secondaryMuscles.length > 0;
   const hasConsiderations = exercise.considerations.length > 0;
 
@@ -60,6 +62,14 @@ export function ExerciseDetail({ exercise }: ExerciseDetailProps) {
         <p className="max-w-2xl text-sm text-ink-2 md:text-base">
           {exercise.description}
         </p>
+        {personalHistoryHref && (
+          <Link
+            href={personalHistoryHref}
+            className="inline-flex min-h-11 items-center rounded-control text-sm font-medium text-primary underline underline-offset-4 hover:text-accent-strong focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            View your history for this exercise
+          </Link>
+        )}
       </header>
 
       <div className="grid gap-6 md:grid-cols-2">

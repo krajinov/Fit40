@@ -6,8 +6,13 @@
  */
 
 import { GetExerciseBySlugUseCase } from '@/application/use-cases/get-exercise-by-slug';
+import { GetExerciseHistoryPresenceUseCase } from '@/application/use-cases/get-exercise-history-presence';
 import { ListExercisesUseCase } from '@/application/use-cases/list-exercises';
-import { exerciseRepository } from '@/infrastructure/database/repositories';
+import { exerciseRepository, trainingHistoryRepository } from '@/infrastructure/database/repositories';
 
 export const listExercisesUseCase = new ListExercisesUseCase(exerciseRepository);
 export const getExerciseBySlugUseCase = new GetExerciseBySlugUseCase(exerciseRepository);
+export const getExerciseHistoryPresenceUseCase = new GetExerciseHistoryPresenceUseCase(
+  trainingHistoryRepository,
+  exerciseRepository,
+);

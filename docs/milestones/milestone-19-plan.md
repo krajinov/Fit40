@@ -5,7 +5,7 @@
 - ESLint: exit 0 (0 warnings/errors)
 - Unit tests: 233 files / 3,154 tests passed
 - Integration tests (PostgreSQL): 50 files / 500 tests passed
-- Production build (`next build --webpack`): exit 0 (18 routes compiled, 13 static pages generated)
+- Production build (`next build --webpack`): exit 0 (18 routes compiled; every route classified dynamic `ƒ` because the 404 reads the session cookie — the `13/13` generation-phase counter is a build work-unit count, not 13 statically served routes)
 - Architecture guards: all 21 M19 navigation integrity guards passing
 - Turbopack status (`next build`): exit 1 (upstream CSS worker process binding failure; webpack production build is the authorized release target)
 
@@ -437,7 +437,7 @@ No new training metrics or analytics · no bodyweight/duration progression trend
 ## 16. Final milestone acceptance checklist
 
 - [x] S1 committed (`17ef2e4a`, PR #24): root `global-error.tsx` + `(app)/error.tsx` + `(auth)/error.tsx` + `ErrorState`; redirect/404/unavailable proven distinct; Correction 3 verification recorded.
-- [x] S2 committed (`2a68c0d2`, PR #25): one `RoutePlaceholder` shared primitive; per-page `Suspense` streaming on the five heaviest routes (`/dashboard`, `/progress`, `/history`, `/programs/[programSlug]`, `.../session`); zero `loading.tsx` to preserve native 307/404 HTTP status heads; no fabricated values; no layout shift.
+- [x] S2 committed (`2a68c0d2`, PR #25): one `RoutePlaceholder` shared primitive; per-page `Suspense` streaming on the five heaviest routes (`/dashboard`, `/progress`, `/history`, `/programs/[programSlug]`, `.../session`); zero `loading.tsx` to preserve native 307/404 HTTP status heads; no fabricated values; no large layout shift (placeholder geometry approximates, but does not exactly match, the loaded layout, and no browser measurement was performed — see `docs/milestones/milestone-19-s2-report.md` §8).
 - [x] S3 committed (`e0471e80`, PR #26): `nav-items.ts` single source; private destinations hidden signed-out; mobile tab bar hidden signed-out; mobile header public nav added; no feature import in shared; locked 4-tab mobile set landed.
 - [x] S4 committed (`6e392551`, PR #27): authenticated tabs `Home/Programs/Exercises/Progress` in order; `--mobile-tab-bar-height` token (76px floor); safe-area clearance; session bottom-bar preserved without duplication; M18 guard updated.
 - [x] S5 committed (`68c65b42`, PR #28): tri-state presence (`present`/`absent`/`unavailable`); link only on `present`; public page unchanged signed-out; integration covers substitution/ownership/detached/unavailable/statement-count bound.
@@ -446,7 +446,7 @@ No new training metrics or analytics · no bodyweight/duration progression trend
 - [x] `npm run lint` exit 0 (clean).
 - [x] `npm test` green (233 test files / 3,154 unit tests passing).
 - [x] `npm run test:integration` green (50 test files / 500 PostgreSQL tests passing).
-- [x] `npm run build -- --webpack` succeeds (18 routes, 13 static pages, exit 0); Turbopack status reported honestly as an environment exception.
+- [x] `npm run build -- --webpack` succeeds (exit 0): 18 routes compiled, all classified dynamic `ƒ`; `13/13` is the generation-phase work-unit counter, not 13 static routes. Turbopack status reported honestly as an environment exception.
 - [x] All M19 guards green (`tests/unit/architecture/m19-navigation-integrity.test.ts` 21/21 passing).
 - [x] **No change to any M8–M18 semantic, copy or surface** (except the sanctioned M18 nav-guard array update).
 - [x] Signed-in and signed-out navigation verified across both desktop and mobile viewports.
@@ -534,7 +534,7 @@ All changes from `9cab96e1` are fully and faithfully included in `main`.
 - `npm run lint`: exit 0 (clean, no linter warnings or errors)
 - `npm test`: exit 0 (233 test files passed, 3,154 tests passed)
 - `npm run test:integration`: exit 0 (50 test files passed, 500 tests passed against real PostgreSQL)
-- `npm run build -- --webpack`: exit 0 (18 dynamic routes compiled, 13 static pages generated)
+- `npm run build -- --webpack`: exit 0 (18 routes compiled, all dynamic `ƒ` — including `/_not-found`, because the 404 reads the session cookie; `13/13` is the generation-phase work-unit counter, not 13 statically served routes)
 - `npm run build` (Turbopack): exit 1 (fails with `TurbopackInternalError: Failed to write app endpoint /page` on CSS worker process connection; this is a known, documented environment constraint, and `--webpack` is the authoritative production build)
 
 #### Previously retained evidence
@@ -548,6 +548,7 @@ All changes from `9cab96e1` are fully and faithfully included in `main`.
 2. **404 page session inspection:** `src/app/not-found.tsx` inspects session cookie presence rather than executing a database user lookup. The fallback component itself performs no database reads and never redirects, avoiding database failure modes in the fallback view itself (without implying that enclosing layouts or route-level lookups are database-independent; layouts and lookups may still access the database). A stale cookie shows "Go to your dashboard", which safely routes through `/dashboard`'s validated `requireUser()` redirect.
 3. **Turbopack CSS worker restriction:** Standard `next build` encounters an upstream Turbopack CSS worker process connection failure on macOS. `next build --webpack` compiles cleanly and is the accepted build target.
 4. **`/exercises` payload size:** The public exercise catalog generates ~111 KB for 17 exercises. Pagination was deliberately excluded as unnecessary complexity for the current catalog size.
+5. **Placeholder geometry approximation:** `RoutePlaceholder` heights approximate, but do not exactly match, the loaded layouts. Minor layout shift is possible on some content, and no visual/manual browser measurement of loading transitions was performed (see `docs/milestones/milestone-19-s2-report.md` §8).
 
 ### 18.5 Preserved Milestone Contracts
 

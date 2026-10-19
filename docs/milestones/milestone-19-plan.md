@@ -467,7 +467,7 @@ All planning decisions D1–D7 were resolved during slice delivery:
 | D4 | Is `/history` reachable on mobile after S3/S4? | **Reachable via dashboard `RecentTrainingCard`** "View all training history" link (styled as a 44px target). No extra bottom tab or navigation drawer added. |
 | D5 | Delete `LogoutButton.tsx` or only its landing usage? | **Deleted `LogoutButton.tsx` entirely**, as the landing page was its only consumer. Sign-out is owned exclusively by the header account menu. |
 | D6 | Does `(auth)` need its own `error.tsx`? | **Yes** — implemented `src/app/(auth)/error.tsx` to handle unexpected failures during login/registration without losing the auth shell. |
-| D7 | Exact loading copy per route | **Factual, non-numeric labels**: "Loading dashboard…", "Loading progress trends…", "Loading training history…", "Loading program…", "Loading workout session…", announced through single polite live regions (`role="status"`). |
+| D7 | Exact loading copy per route | **Factual, non-numeric labels, verbatim from the rendered `RoutePlaceholder` `label` props (no trailing ellipsis)**: "Loading your training" (`/dashboard`), "Loading progress" (`/progress`), "Loading training history" (`/history`), "Loading program details" (`/programs/[programSlug]`), "Loading workout session" (`.../session`); each route announces exactly one polite live region (`role="status"`). |
 
 ---
 
@@ -480,7 +480,7 @@ Fit40 Milestone 19 — Training Experience & Navigation Integrity is formally **
 - **Slice 1 (PR #24): Error Boundary Foundation**
   - Added recoverable error boundaries: `src/app/(app)/error.tsx`, `src/app/(auth)/error.tsx`, and root `src/app/global-error.tsx`.
   - Added presentational `src/components/shared/ErrorState.tsx` adhering strictly to privacy by construction (raw error messages, stacks, or digests are never displayed).
-  - Recovery action wires to framework `retry()` (verified to fetch a fresh Server Component response via `context.refresh() + reset()`).
+  - Recovery action wires to the framework `retry()` prop (stable in `next@16.3.1` since 16.3.0; `unstable_retry` was only the 16.2 spelling and is no longer passed by the installed runtime). Verified to fetch a fresh Server Component response via `context.refresh() + reset()`; `reset()` alone would replay the failed response.
   - Strict preservation of single `<main>` landmark: segment boundaries render a `<div>`; only root `global-error.tsx` owns `<main>`.
 - **Slice 2 (PR #25): Loading State Foundation**
   - Created single shared primitive `src/components/shared/RoutePlaceholder.tsx` (geometric decorative shapes with `aria-hidden="true"`, one polite live region, zero numbers, dates, or fabricated metrics).
@@ -538,7 +538,7 @@ All changes from `9cab96e1` are fully and faithfully included in `main`.
 - `npm run build` (Turbopack): exit 1 (fails with `TurbopackInternalError: Failed to write app endpoint /page` on CSS worker process connection; this is a known, documented environment constraint, and `--webpack` is the authoritative production build)
 
 #### Previously retained evidence
-- S1 runtime inspection: Next.js 16.3.1 framework `retry()` mechanism (`context.refresh()` followed by `reset()`).
+- S1 runtime inspection: Next.js 16.3.1 exposes the stabilized `retry` prop (`ErrorInfo = { error, reset, retry }`; `unstable_retry` was the pre-16.3.0 name) and implements it via `context.refresh()` followed by `reset()`.
 - S1/S2/S5/S6 production HTTP probes: verified boundary catching, 307 redirect status, 404 status retention, streaming privacy, and 404 dynamic status.
 - S3/S4/S6 manual CDP Chrome sweeps: verified responsive layout at 320px, 375px, 393px, and 1440px; verified 150% and 200% font zoom behavior; verified keyboard Tab navigation and visual focus rings.
 

@@ -405,10 +405,13 @@ export default async function WorkoutPage({ params }: { params: { id: string } }
 The root `src/app/not-found.tsx` is context-aware without adding an authorization
 path of its own. It reads only the session cookie's presence (no database read,
 no `getCurrentUser()`, no `requireUser()`) to choose between a dashboard and a
-sign-in secondary link, alongside the public exercise catalog. It never
-redirects, so `notFound()` keeps its native 404 status even when the database is
-unreachable; a stale cookie is resolved by the destination page's own
-`requireUser()` through the existing validated `next` mechanism.
+sign-in secondary link, alongside the public exercise catalog. The fallback
+component itself performs no database reads and never redirects, preserving the
+existing native 404 contract. This does not make every route that calls
+`notFound()` database-independent: enclosing layouts and route-specific lookups
+may still access the database and propagate unexpected failures. A stale cookie
+is resolved by the destination page's own `requireUser()` through the existing
+validated `next` mechanism.
 
 ### Unexpected Errors
 

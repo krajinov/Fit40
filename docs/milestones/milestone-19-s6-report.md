@@ -151,3 +151,42 @@ signed-in `/dashboard`, `/history`, `/profile`, `/exercises`, `/programs` →
    shell/feature surfaces; class-format responsive guards were not reintroduced
    (S4 had removed them in favor of behavioral tests).
 
+## Independent review fixes (after `cadf395`)
+
+The independent review found no P1/P2 defects and two P3 issues:
+
+1. **Authentication destination coverage.** The original tests checked the
+   workout CTA's encoding and schema separately, without following the actual
+   login-page/action redirect. New
+   `tests/unit/features/auth/sign-in-and-continue.test.ts` adds 25 behavioral
+   cases using the existing Vitest mocks. The real anonymous workout CTA feeds
+   the real login page and rendered `LoginForm`; its hidden destination is
+   submitted to the real successful `loginAction`, asserting the exact final
+   session redirect and session-cookie establishment. Unsafe absolute,
+   protocol-relative, backslash, encoded-slash/backslash, script and empty
+   destinations fall back to `/dashboard` both through the page and when
+   submitted directly to bypass page sanitization. Missing/repeated query
+   parameters and already-authenticated login-page redirects are also covered.
+   The architecture guard now includes `register/page.tsx` alongside the login
+   page and both auth actions. No production authentication defect was found.
+2. **404 documentation accuracy.** `docs/error-handling.md` now limits the
+   no-database-read guarantee to the fallback component itself. Enclosing
+   layouts and route-specific lookups may access the database and propagate
+   unexpected failures; native 404 and destination authentication contracts
+   remain unchanged.
+
+Fresh verification for this review-fix round:
+
+| Check | Result |
+|---|---|
+| Focused tests: sign-in-and-continue, auth-actions, auth-schemas, workout-start-panel, m19-navigation-integrity, not-found-page | **6 files / 90 tests passed** |
+| `npm test` | **233 files / 3,154 tests passed** |
+| `npx tsc --noEmit --incremental false` | exit 0 |
+| `npm run lint` | exit 0 |
+| `git diff --check` | exit 0 |
+
+Integration tests were not rerun: production authentication behavior and shared
+test infrastructure are unchanged. These are unit/jsdom redirect-call assertions
+with mocked identity/use cases/cookie APIs, not browser or database-backed login
+evidence. Build, HTTP and browser probes were not rerun; the earlier evidence
+and remaining limitations above retain their original scope.

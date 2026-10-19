@@ -199,6 +199,7 @@ describe('M19 safe redirects', () => {
   it('validates the next parameter at every auth boundary', () => {
     for (const file of [
       'src/app/(auth)/login/page.tsx',
+      'src/app/(auth)/register/page.tsx',
       'src/features/auth/actions/login.ts',
       'src/features/auth/actions/register.ts',
     ]) {

@@ -224,10 +224,9 @@ the sign-in links; the menu performs no authorization itself.
 ### Dashboard structure
 
 - Header: date eyebrow (UTC, deterministic), "Your training" title and the
-  Edit profile ghost button. The dashboard's local sign-out link is gone now
-  that the global account menu owns sign-out everywhere; the open landing
-  page (`src/app/page.tsx`) still renders `LogoutButton` for signed-in
-  visitors.
+  Edit profile ghost button. Sign-out lives only in the global account menu,
+  which owns it on both headers; the landing page (`src/app/page.tsx`) keeps a
+  single Dashboard CTA for signed-in visitors and no sign-out control.
 - Two-column desktop layout (main 736px / side 360px within the 1120px
   container); mobile stacks Header → Up next → This week → Current program,
   hiding Recent training and the profile card (locked mobile design).

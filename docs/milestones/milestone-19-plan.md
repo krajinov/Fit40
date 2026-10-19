@@ -1,5 +1,14 @@
 # Milestone 19 Plan — Training Experience & Navigation Integrity
 
+**Status:** Completed. All six slices (S1–S6) are implemented, verified, reviewed, and merged to `main` via PRs #24–#29. Full milestone verification passes:
+- TypeScript typecheck: exit 0 (0 errors)
+- ESLint: exit 0 (0 warnings/errors)
+- Unit tests: 233 files / 3,154 tests passed
+- Integration tests (PostgreSQL): 50 files / 500 tests passed
+- Production build (`next build --webpack`): exit 0 (18 routes compiled; every route classified dynamic `ƒ` because the 404 reads the session cookie — the `13/13` generation-phase counter is a build work-unit count, not 13 statically served routes)
+- Architecture guards: all 21 M19 navigation integrity guards passing
+- Turbopack status (`next build`): exit 1 (upstream CSS worker process binding failure; webpack production build is the authorized release target)
+
 Semantic authority: `AGENTS.md` + `docs/ui.md` + `docs/error-handling.md` plus the locked M8–M18 canonical docs. This plan never restates an existing contract; where it and a canonical doc disagree, the canonical doc wins. M19 introduces **no new product concept, metric, or persisted state**, and changes **no** M8–M18 semantic or owned copy.
 
 ---
@@ -427,37 +436,136 @@ No new training metrics or analytics · no bodyweight/duration progression trend
 
 ## 16. Final milestone acceptance checklist
 
-- [ ] S1 committed: root `global-error.tsx` + `(app)/error.tsx` + `(auth)/error.tsx` + `ErrorState`; redirect/404/unavailable proven distinct; Correction 3 verification recorded.
-- [ ] S2 committed: one `RoutePlaceholder`; `loading.tsx` on the six routes; no fabricated values; no layout shift.
-- [ ] S3 committed: `nav-items.ts` single source; private destinations hidden signed-out; mobile tab bar hidden signed-out; header public nav added; no feature import in shared.
-- [ ] S4 committed: authenticated tabs `Home/Programs/Exercises/Progress` in order; session bottom-bar preserved; M18 guard updated.
-- [ ] S5 committed: tri-state presence; link only on `present`; public page unchanged signed-out; integration covers substitution/ownership/detached/unavailable/statement-count.
-- [ ] S6 committed: landing logout removed; context-aware 404; sign-in-and-continue regression; docs + guards.
-- [ ] `pnpm typecheck` exit 0.
-- [ ] `pnpm lint` exit 0.
-- [ ] `pnpm test` green.
-- [ ] `pnpm test:integration` green.
-- [ ] `pnpm build -- --webpack` succeeds; Turbopack status reported honestly.
-- [ ] All M19 guards green.
-- [ ] **No change to any M8–M18 semantic, copy or surface** (except the sanctioned M18 nav-guard array update).
-- [ ] Signed-in and signed-out navigation verified.
-- [ ] Mobile 375px & 393px; desktop 1440px.
-- [ ] No new dependency, migration, table or persisted state.
+- [x] S1 committed (`17ef2e4a`, PR #24): root `global-error.tsx` + `(app)/error.tsx` + `(auth)/error.tsx` + `ErrorState`; redirect/404/unavailable proven distinct; Correction 3 verification recorded.
+- [x] S2 committed (`2a68c0d2`, PR #25): one `RoutePlaceholder` shared primitive; per-page `Suspense` streaming on the five heaviest routes (`/dashboard`, `/progress`, `/history`, `/programs/[programSlug]`, `.../session`); zero `loading.tsx` to preserve native 307/404 HTTP status heads; no fabricated values; no large layout shift (placeholder geometry approximates, but does not exactly match, the loaded layout, and no browser measurement was performed — see `docs/milestones/milestone-19-s2-report.md` §8).
+- [x] S3 committed (`e0471e80`, PR #26): `nav-items.ts` single source; private destinations hidden signed-out; mobile tab bar hidden signed-out; mobile header public nav added; no feature import in shared; locked 4-tab mobile set landed.
+- [x] S4 committed (`6e392551`, PR #27): authenticated tabs `Home/Programs/Exercises/Progress` in order; `--mobile-tab-bar-height` token (76px floor); safe-area clearance; session bottom-bar preserved without duplication; M18 guard updated.
+- [x] S5 committed (`68c65b42`, PR #28): tri-state presence (`present`/`absent`/`unavailable`); link only on `present`; public page unchanged signed-out; integration covers substitution/ownership/detached/unavailable/statement-count bound.
+- [x] S6 committed (`e4dbb185`, PR #29): landing logout removed; context-aware 404 via cookie presence; sign-in-and-continue regression tests; docs updated; 21 M19 architecture guards green.
+- [x] `npm run typecheck` exit 0 (0 errors).
+- [x] `npm run lint` exit 0 (clean).
+- [x] `npm test` green (233 test files / 3,154 unit tests passing).
+- [x] `npm run test:integration` green (50 test files / 500 PostgreSQL tests passing).
+- [x] `npm run build -- --webpack` succeeds (exit 0): 18 routes compiled, all classified dynamic `ƒ`; `13/13` is the generation-phase work-unit counter, not 13 static routes. Turbopack status reported honestly as an environment exception.
+- [x] All M19 guards green (`tests/unit/architecture/m19-navigation-integrity.test.ts` 21/21 passing).
+- [x] **No change to any M8–M18 semantic, copy or surface** (except the sanctioned M18 nav-guard array update).
+- [x] Signed-in and signed-out navigation verified across both desktop and mobile viewports.
+- [x] Mobile 375px & 393px; desktop 1440px.
+- [x] No new dependency, migration, table or persisted state.
 
 ---
 
-## 17. Unresolved technical decisions
+## 17. Technical decisions summary
 
-Each has a default so implementation never blocks.
+All planning decisions D1–D7 were resolved during slice delivery:
 
-| # | Question | Default |
+| # | Question | Decision & Implementation |
 |---|---|---|
-| D1 | Reuse `listCompletedExerciseOccurrences(…,1)` or add a dedicated presence port method? | **Reuse**; escalate only on measurable cost |
-| D2 | Which `lucide-react` icon for `Progress`? | First available of `TrendingUp`/`ChartLineIncreasing`/`Activity`; **verify by import** |
-| D3 | Signed-out mobile header: which layout keeps wordmark + public nav + `Sign in` within h64 at 375px? | Compact public nav; if crowding, rely on page-content catalog links. Flag for product sign-off |
-| D4 | Is `/history` reachable on mobile after S3/S4? | Verify; add one dashboard link if not, never a nav change |
-| D5 | Delete `LogoutButton.tsx` or only its landing usage? | Remove usage; delete file only if no other consumer |
-| D6 | Does `(auth)` need its own `error.tsx`? | Yes — login/register call `getCurrentUser()` |
-| D7 | Exact loading copy per route | Short factual labels, no digits, reviewed with S6 docs |
+| D1 | Reuse `listCompletedExerciseOccurrences(…,1)` or add a dedicated presence port method? | **Reused existing method with bounded limit 1** in `GetExerciseHistoryPresenceUseCase`. Preserves established repository authority and performed-exercise substitution attribution without adding new ports or migrations. |
+| D2 | Which `lucide-react` icon for `Progress`? | **`TrendingUp`** (22px icon size, consistent with the navigation icon set). |
+| D3 | Signed-out mobile header: layout within h64 at 375px? | **Compact wrapping nav row in `MobileHeader`** displaying public `Programs` and `Exercises` links alongside the wordmark and `Sign in`, maintaining ≥44px tap targets. |
+| D4 | Is `/history` reachable on mobile after S3/S4? | **Reachable via dashboard `RecentTrainingCard`** "View all training history" link (styled as a 44px target). No extra bottom tab or navigation drawer added. |
+| D5 | Delete `LogoutButton.tsx` or only its landing usage? | **Deleted `LogoutButton.tsx` entirely**, as the landing page was its only consumer. Sign-out is owned exclusively by the header account menu. |
+| D6 | Does `(auth)` need its own `error.tsx`? | **Yes** — implemented `src/app/(auth)/error.tsx` to handle unexpected failures during login/registration without losing the auth shell. |
+| D7 | Exact loading copy per route | **Factual, non-numeric labels, verbatim from the rendered `RoutePlaceholder` `label` props (no trailing ellipsis)**: "Loading your training" (`/dashboard`), "Loading progress" (`/progress`), "Loading training history" (`/history`), "Loading program details" (`/programs/[programSlug]`), "Loading workout session" (`.../session`); each route announces exactly one polite live region (`role="status"`). |
 
-**Stop conditions.** This plan authorizes no code change. Implementation begins only after explicit approval, slice by slice per §13. Any deviation — especially a conflict with an M8–M18 semantic — is **reported, never silently applied**.
+---
+
+## 18. Milestone 19 Closure Summary
+
+Fit40 Milestone 19 — Training Experience & Navigation Integrity is formally **Completed**.
+
+### 18.1 Delivered functionality across S1–S6
+
+- **Slice 1 (PR #24): Error Boundary Foundation**
+  - Added recoverable error boundaries: `src/app/(app)/error.tsx`, `src/app/(auth)/error.tsx`, and root `src/app/global-error.tsx`.
+  - Added presentational `src/components/shared/ErrorState.tsx` adhering strictly to privacy by construction (raw error messages, stacks, or digests are never displayed).
+  - Recovery action wires to the framework `retry()` prop (stable in `next@16.3.1` since 16.3.0; `unstable_retry` was only the 16.2 spelling and is no longer passed by the installed runtime). Verified to fetch a fresh Server Component response via `context.refresh() + reset()`; `reset()` alone would replay the failed response.
+  - Strict preservation of single `<main>` landmark: segment boundaries render a `<div>`; only root `global-error.tsx` owns `<main>`.
+- **Slice 2 (PR #25): Loading State Foundation**
+  - Created single shared primitive `src/components/shared/RoutePlaceholder.tsx` (geometric decorative shapes with `aria-hidden="true"`, one polite live region, zero numbers, dates, or fabricated metrics).
+  - Streaming architecture adapted post-review: segment `loading.tsx` files were removed to eliminate the early-flushed `200` status head. Each target route (`/dashboard`, `/progress`, `/history`, `/programs/[programSlug]`, `.../session`) owns an explicit `Suspense` boundary wrapping only slow success-path rendering.
+  - Status-critical checks (`requireUser()` auth redirects, `notFound()` param/slug validation) execute prior to returning any JSX, preserving native `307` and `404` HTTP status responses.
+- **Slice 3 (PR #26): Authentication-Aware Navigation**
+  - Introduced `src/components/shared/nav-items.ts` as the single server-safe declarative source of truth for destinations, labels, icons, and auth requirements.
+  - Shell reads `isAuthenticated` from existing deduplicated `getCurrentUser()` call in `(app)/layout.tsx` — zero client-side auth flicker or hydration mismatches.
+  - Signed-out visitors see only public destinations (`Programs`, `Exercises`, `Sign in`). Private destinations (`Dashboard`, `History`, `Progress`) are completely omitted from navigation.
+  - Signed-out mobile hides the bottom tab bar entirely; public catalog links render compactly in `MobileHeader`.
+- **Slice 4 (PR #27): Mobile Navigation Integrity**
+  - Authenticated mobile tab bar locked to four tabs: `Home → /dashboard`, `Programs → /programs`, `Exercises → /exercises`, `Progress → /progress` (`Profile` moved to account menu).
+  - Unified CSS custom property `--mobile-tab-bar-height` (`max(76px, calc(48px + 1.25rem))`) synchronizes tab bar height and `layout.tsx` clearance, preventing content overlap across 100%, 150%, and 200% font zoom.
+  - Touch targets ≥44px across all controls (`Sign in`, mobile header links, "View all training history" dashboard link).
+  - Active workout `/session` routes cleanly suppress `MobileTabBar` and render only `SessionFinishBar` without double bars or gaps.
+- **Slice 5 (PR #28): Exercise Catalog ↔ Personal History**
+  - Implemented `GetExerciseHistoryPresenceUseCase` returning a typed tri-state: `present`, `absent`, or `unavailable`.
+  - Contextual link ("View your history for this exercise") appears on `ExerciseDetail` only when `status === 'present'`.
+  - Reuses `listCompletedExerciseOccurrences(userId, exerciseId, 1)` with limit 1, attributing history strictly to the performed exercise (correctly handling substitutions).
+  - Tri-state handles database failures by logging server-side diagnostics and gracefully omitting the link (`unavailable`) without crashing the public catalog page.
+- **Slice 6 (PR #29): UX Polish & Regression Coverage**
+  - Removed leftover `LogoutButton` from landing page; deleted `LogoutButton.tsx` (sign-out is exclusively owned by the header account menu).
+  - Implemented context-aware `src/app/not-found.tsx` reading session cookie presence: signed-in users see Catalog + Dashboard; signed-out users see Catalog + Sign in. The fallback component itself performs no database reads and never redirects (avoiding database dependencies in the fallback view itself, while enclosing layouts and route-specific lookups may still access the database).
+  - Comprehensive behavioral regression tests for sign-in-and-continue via the validated `next` parameter (`nextPathSchema`).
+  - Added 21 automated architecture guards in `tests/unit/architecture/m19-navigation-integrity.test.ts`.
+
+### 18.2 Merged Pull Requests & Commit Verification
+
+| Slice | PR | Merge Commit on `main` | Original Branch Head | Description |
+|---|---|---|---|---|
+| S1 | PR #24 | `17ef2e4a` | `17ef2e4a` | feat(m19): S1 — Error Boundary Foundation |
+| S2 | PR #25 | `2a68c0d2` | `2a68c0d2` | feat(m19): S2 — Loading State Foundation |
+| S3 | PR #26 | `e0471e80` | `e0471e80` | feat(m19): S3 — Authentication-Aware Navigation |
+| S4 | PR #27 | `6e392551` | `6e392551` | feat(m19): S4 — Mobile Navigation Integrity |
+| S5 | PR #28 | `68c65b42` | `68c65b42` | feat(exercises): contextual tri-state link to personal exercise history |
+| S6 | PR #29 | `e4dbb185` | `9cab96e1` | feat(m19): S6 — UX polish and regression coverage |
+
+**Verification of final S6 commit `9cab96e1ca51e244c9cb9db0d06d02fab3693646`:**
+Branch `feat/m19-s6-ux-polish` concluded with commit `9cab96e1ca51e244c9cb9db0d06d02fab3693646` ("test: verify workout authentication continuation redirects"). PR #29 was squash-merged into `main` as `e4dbb185`. The Git tree object hashes are identical:
+```bash
+git rev-parse 9cab96e1^{tree}   # 29d10ebccccabc472a4a88d048475bc88420f0ba
+git rev-parse e4dbb185^{tree}   # 29d10ebccccabc472a4a88d048475bc88420f0ba
+git diff 9cab96e1 e4dbb185      # empty (0 files changed)
+```
+All changes from `9cab96e1` are fully and faithfully included in `main`.
+
+### 18.3 Verification Evidence
+
+#### Fresh verification (executed at milestone closure on `main` @ `e4dbb185`)
+- `npm run typecheck`: exit 0 (0 errors)
+- `npm run lint`: exit 0 (clean, no linter warnings or errors)
+- `npm test`: exit 0 (233 test files passed, 3,154 tests passed)
+- `npm run test:integration`: exit 0 (50 test files passed, 500 tests passed against real PostgreSQL)
+- `npm run build -- --webpack`: exit 0 (18 routes compiled, all dynamic `ƒ` — including `/_not-found`, because the 404 reads the session cookie; `13/13` is the generation-phase work-unit counter, not 13 statically served routes)
+- `npm run build` (Turbopack): exit 1 (fails with `TurbopackInternalError: Failed to write app endpoint /page` on CSS worker process connection; this is a known, documented environment constraint, and `--webpack` is the authoritative production build)
+
+#### Previously retained evidence
+- S1 runtime inspection: Next.js 16.3.1 exposes the stabilized `retry` prop (`ErrorInfo = { error, reset, retry }`; `unstable_retry` was the pre-16.3.0 name) and implements it via `context.refresh()` followed by `reset()`.
+- S1/S2/S5/S6 production HTTP probes: verified boundary catching, 307 redirect status, 404 status retention, streaming privacy, and 404 dynamic status.
+- S3/S4/S6 manual CDP Chrome sweeps: verified responsive layout at 320px, 375px, 393px, and 1440px; verified 150% and 200% font zoom behavior; verified keyboard Tab navigation and visual focus rings.
+
+### 18.4 Documented Nonblocking Limitations & Accepted Constraints
+
+1. **No committed Playwright E2E visual tests:** Cross-breakpoint CSS rendering and physical tap geometry were validated via manual CDP sweeps rather than committed automated E2E test scripts.
+2. **404 page session inspection:** `src/app/not-found.tsx` inspects session cookie presence rather than executing a database user lookup, which also makes the 404 dynamically rendered (cookie read) rather than prerendered. The fallback component itself performs no database reads and never redirects, avoiding database failure modes in the fallback view itself (without implying that enclosing layouts or route-level lookups are database-independent; layouts and lookups may still access the database). A stale cookie shows "Go to your dashboard", which safely routes through `/dashboard`'s validated `requireUser()` redirect.
+3. **Turbopack CSS worker restriction:** Standard `next build` encounters an upstream Turbopack CSS worker process connection failure on macOS. `next build --webpack` compiles cleanly and is the accepted build target.
+4. **`/exercises` payload size:** The public exercise catalog generates ~111 KB for 17 exercises. Pagination was deliberately excluded as unnecessary complexity for the current catalog size.
+5. **Placeholder geometry approximation:** `RoutePlaceholder` heights approximate, but do not exactly match, the loaded layouts. Minor layout shift is possible on some content, and no visual/manual browser measurement of loading transitions was performed (see `docs/milestones/milestone-19-s2-report.md` §8).
+6. **Mobile enlarged-text and session-route constraints (S4):** At 320px with ≥150% text the signed-out header ellipsizes `Programs`/`Exercises`, and `Programs`/`Progress` can both render as `Progr…` (icons and `aria` names still disambiguate; flagged for product sign-off). Page-content overflow at 320px/150% (3px) and 320–375px/200% (31–68px) is out of scope and is not navigation-attributable. The session route intentionally has no navigation landmark at mobile widths because the tab bar is hidden by contract. Real devices, iOS/Android safe areas, Safari/Firefox and screen readers were not tested (see `docs/milestones/milestone-19-s4-report.md` §8).
+
+### 18.5 Preserved Milestone Contracts
+
+Milestone 19 preserved all locked domain and application contracts:
+- M8: Progressive overload advisory calculations and progression states.
+- M11: Session composition, active workout tracking, and finish bar behaviors.
+- M12: Personal records detection, candidate evaluation, and PB badge legend.
+- M13: Training history aggregation, volume metrics, and occurrence detail.
+- M14: Program completion criteria and atomic restart semantics.
+- M15: Scheduling intent, workout calendar derivation, and training days management.
+- M16: Plan follow-through weekly bucket calculations.
+- M17: Run closure settlement facts and not-performed occurrence tracking.
+- M18: 13-week training progress metrics, timeline reads, and working-load comparisons.
+
+### 18.6 Proposed M20 Follow-ups
+
+1. **Exercise Progression Depth:** Enhanced progression views and metrics (deferred from M19 per §15).
+2. **Turbopack CSS Worker Environment Fix:** Investigate Node/Turbopack IPC connection issues during Turbopack builds on macOS.
+3. **Playwright E2E Test Suite:** Establish automated browser tests for mobile navigation, touch targets, and responsive layouts across viewports.

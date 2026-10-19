@@ -68,6 +68,12 @@ history.
   recorded — is **concluded**: it shows "Run closed — n completed, m recorded
   as not performed" and becomes restartable without ever claiming completion
   (see [`docs/run-closure.md`](docs/run-closure.md)).
+- **Navigation integrity & resilience** — recoverable error boundaries
+  protecting the application, auth, and root shell with fresh-response retry;
+  stable, non-fabricated loading placeholders; authentication-aware shell navigation
+  omitting private destinations when signed out; a context-aware 404; and
+  contextual links connecting catalog exercises to personal performance history
+  (see [`docs/milestones/milestone-19-plan.md`](docs/milestones/milestone-19-plan.md)).
 
 ## Progressive Overload
 
@@ -267,8 +273,11 @@ read-only report of how the current run's calendar held up over the last 8
 UTC weeks. Settlement of unperformed workouts ("Didn't train this" / "Undo")
 and honest run closure ("Run closed", restartable concluded runs) are
 implemented as well. M18 training progress, historical personal-best timelines,
-record markers and period working-load comparisons are implemented. Program
-generation via AI, OAuth,
+record markers and period working-load comparisons are implemented. M19
+training experience and navigation integrity (recoverable error boundaries, stable
+loading placeholders, authentication-aware shell navigation, contextual exercise history
+links, mobile navigation integrity, and context-aware 404) are implemented and
+verified across PRs #24–#29. Program generation via AI, OAuth,
 and email verification are listed as planned work in the docs. No deployment or
 Docker setup is included yet.
 

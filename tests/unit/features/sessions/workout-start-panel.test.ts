@@ -17,6 +17,7 @@ vi.mock('@/features/schedule/actions/undo-not-performed', () => ({
 }));
 
 import type { WorkoutCtaState } from '@/features/sessions/workout-detail-view';
+import { nextPathSchema } from '@/features/auth/schemas/auth-schemas';
 import { WorkoutStartPanel } from '@/features/sessions/components/WorkoutStartPanel';
 
 declare global {
@@ -87,5 +88,34 @@ describe('WorkoutStartPanel', () => {
 
     const completed = await renderPanel('completed');
     expect(completed.querySelector('a[href$="/session"]')?.textContent).toBe('View session');
+  });
+
+  it('M19 S6 — anonymous: signs in and continues to the exact session route', async () => {
+    const container = await renderPanel('anonymous');
+
+    const cta = container.querySelector<HTMLAnchorElement>('a[href^="/login?next="]');
+    expect(cta?.textContent).toBe('Sign in to start');
+
+    const href = cta?.getAttribute('href') ?? '';
+    // The destination is carried by the EXISTING, validated `next` mechanism —
+    // no second redirect scheme is introduced.
+    const next = new URL(href, 'https://fit40.local').searchParams.get('next');
+    const sessionPath = '/programs/fit40-beginner-strength/weeks/2/workouts/3/session';
+    expect(next).toBe(sessionPath);
+    expect(nextPathSchema.safeParse(next)).toEqual({ success: true, data: sessionPath });
+
+    // No direct session link: the sign-in hop cannot be skipped.
+    expect(container.querySelector('a[href$="/session"]')).toBeNull();
+  });
+
+  it('M19 S6 — not-enrolled: joins via the session route, never the login flow', async () => {
+    const container = await renderPanel('not-enrolled');
+
+    const cta = container.querySelector<HTMLAnchorElement>('a[href$="/session"]');
+    expect(cta?.textContent).toBe('Join program to start');
+    expect(cta?.getAttribute('href')).toBe(
+      '/programs/fit40-beginner-strength/weeks/2/workouts/3/session',
+    );
+    expect(container.querySelector('a[href^="/login"]')).toBeNull();
   });
 });

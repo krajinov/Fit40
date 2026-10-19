@@ -11,8 +11,8 @@
  * action, with nothing wrapped around it (a client handler would render
  * differently and fail the assertion). The real export is a `'use server'`
  * action, which React/Next render as a `method="POST"` form carrying its
- * action fields — the framework's contract, and the same one the pre-existing
- * `LogoutButton` form relied on.
+ * action fields — the framework's contract that every native sign-out form in
+ * the shell relies on.
  */
 
 import { describe, expect, it, vi } from 'vitest';
